@@ -279,7 +279,8 @@ let parse_abbrevs dwbits =
   build [] dwbits
 
 (* Parse multiple abbreviation tables from multiple compilation units (in a
-   single section).  *)
+   single section).  (This is useless! Once we parse compilation unit header
+   in .debug_info, we get an offset to the proper data.)  *)
 
 let parse_all_abbrevs dwbits =
   let rec build culist dwbits =
