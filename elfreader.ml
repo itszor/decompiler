@@ -272,3 +272,8 @@ let get_section_by_name elfbits ehdr shdr_arr name =
   match found_sec with
     None -> raise Not_found
   | Some shdr -> extract_section elfbits shdr
+
+(* Return bits from SECTION offset by OFFSET bytes.  *)
+
+let offset_section secbits offset =
+  Bitstring.dropbits (8 * (Int32.to_int offset)) secbits

@@ -51,66 +51,127 @@ let parse_sleb128_int dwbits =
     failwith "uleb128 value too big";
   Big_int.int_of_big_int x, dwbits
 
+type dwarf_tag =
+    DW_TAG_array_type
+  | DW_TAG_class_type
+  | DW_TAG_entry_point
+  | DW_TAG_enumeration_type
+  | DW_TAG_formal_parameter
+  | DW_TAG_imported_declaration
+  | DW_TAG_label
+  | DW_TAG_lexical_block
+  | DW_TAG_member
+  | DW_TAG_pointer_type
+  | DW_TAG_reference_type
+  | DW_TAG_compile_unit
+  | DW_TAG_string_type
+  | DW_TAG_structure_type
+  | DW_TAG_subroutine_type
+  | DW_TAG_typedef
+  | DW_TAG_union_type
+  | DW_TAG_unspecified_parameters
+  | DW_TAG_variant
+  | DW_TAG_common_block
+  | DW_TAG_common_inclusion
+  | DW_TAG_inheritance
+  | DW_TAG_inlined_subroutine
+  | DW_TAG_module
+  | DW_TAG_ptr_to_member_type
+  | DW_TAG_set_type
+  | DW_TAG_subrange_type
+  | DW_TAG_with_stmt
+  | DW_TAG_access_declaration
+  | DW_TAG_base_type
+  | DW_TAG_catch_block
+  | DW_TAG_const_type
+  | DW_TAG_constant
+  | DW_TAG_enumerator
+  | DW_TAG_file_type
+  | DW_TAG_friend
+  | DW_TAG_namelist
+  | DW_TAG_namelist_item
+  | DW_TAG_packed_type
+  | DW_TAG_subprogram
+  | DW_TAG_template_type_parameter
+  | DW_TAG_template_value_parameter
+  | DW_TAG_thrown_type
+  | DW_TAG_try_block
+  | DW_TAG_variant_part
+  | DW_TAG_variable
+  | DW_TAG_volatile_type
+  | DW_TAG_dwarf_procedure
+  | DW_TAG_restrict_type
+  | DW_TAG_interface_type
+  | DW_TAG_namespace
+  | DW_TAG_imported_module
+  | DW_TAG_unspecified_type
+  | DW_TAG_partial_unit
+  | DW_TAG_imported_unit
+  | DW_TAG_condition
+  | DW_TAG_shared_type
+  | DW_TAG_lo_user
+  | DW_TAG_hi_user
+
 let parse_tag = function
-    0x01 -> `DW_TAG_array_type
-  | 0x02 -> `DW_TAG_class_type
-  | 0x03 -> `DW_TAG_entry_point
-  | 0x04 -> `DW_TAG_enumeration_type
-  | 0x05 -> `DW_TAG_formal_parameter
-  | 0x08 -> `DW_TAG_imported_declaration
-  | 0x0a -> `DW_TAG_label
-  | 0x0b -> `DW_TAG_lexical_block
-  | 0x0d -> `DW_TAG_member
-  | 0x0f -> `DW_TAG_pointer_type
-  | 0x10 -> `DW_TAG_reference_type
-  | 0x11 -> `DW_TAG_compile_unit
-  | 0x12 -> `DW_TAG_string_type
-  | 0x13 -> `DW_TAG_structure_type
-  | 0x15 -> `DW_TAG_subroutine_type
-  | 0x16 -> `DW_TAG_typedef
-  | 0x17 -> `DW_TAG_union_type
-  | 0x18 -> `DW_TAG_unspecified_parameters
-  | 0x19 -> `DW_TAG_variant
-  | 0x1a -> `DW_TAG_common_block
-  | 0x1b -> `DW_TAG_common_inclusion
-  | 0x1c -> `DW_TAG_inheritance
-  | 0x1d -> `DW_TAG_inlined_subroutine
-  | 0x1e -> `DW_TAG_module
-  | 0x1f -> `DW_TAG_ptr_to_member_type
-  | 0x20 -> `DW_TAG_set_type
-  | 0x21 -> `DW_TAG_subrange_type
-  | 0x22 -> `DW_TAG_with_stmt
-  | 0x23 -> `DW_TAG_access_declaration
-  | 0x24 -> `DW_TAG_base_type
-  | 0x25 -> `DW_TAG_catch_block
-  | 0x26 -> `DW_TAG_const_type
-  | 0x27 -> `DW_TAG_constant
-  | 0x28 -> `DW_TAG_enumerator
-  | 0x29 -> `DW_TAG_file_type
-  | 0x2a -> `DW_TAG_friend
-  | 0x2b -> `DW_TAG_namelist
-  | 0x2c -> `DW_TAG_namelist_item
-  | 0x2d -> `DW_TAG_packed_type
-  | 0x2e -> `DW_TAG_subprogram
-  | 0x2f -> `DW_TAG_template_type_parameter
-  | 0x30 -> `DW_TAG_template_value_parameter
-  | 0x31 -> `DW_TAG_thrown_type
-  | 0x32 -> `DW_TAG_try_block
-  | 0x33 -> `DW_TAG_variant_part
-  | 0x34 -> `DW_TAG_variable
-  | 0x35 -> `DW_TAG_volatile_type
-  | 0x36 -> `DW_TAG_dwarf_procedure
-  | 0x37 -> `DW_TAG_restrict_type
-  | 0x38 -> `DW_TAG_interface_type
-  | 0x39 -> `DW_TAG_namespace
-  | 0x3a -> `DW_TAG_imported_module
-  | 0x3b -> `DW_TAG_unspecified_type
-  | 0x3c -> `DW_TAG_partial_unit
-  | 0x3d -> `DW_TAG_imported_unit
-  | 0x3f -> `DW_TAG_condition
-  | 0x40 -> `DW_TAG_shared_type
-  | 0x4080 -> `DW_TAG_lo_user
-  | 0xffff -> `DW_TAG_hi_user
+    0x01 -> DW_TAG_array_type
+  | 0x02 -> DW_TAG_class_type
+  | 0x03 -> DW_TAG_entry_point
+  | 0x04 -> DW_TAG_enumeration_type
+  | 0x05 -> DW_TAG_formal_parameter
+  | 0x08 -> DW_TAG_imported_declaration
+  | 0x0a -> DW_TAG_label
+  | 0x0b -> DW_TAG_lexical_block
+  | 0x0d -> DW_TAG_member
+  | 0x0f -> DW_TAG_pointer_type
+  | 0x10 -> DW_TAG_reference_type
+  | 0x11 -> DW_TAG_compile_unit
+  | 0x12 -> DW_TAG_string_type
+  | 0x13 -> DW_TAG_structure_type
+  | 0x15 -> DW_TAG_subroutine_type
+  | 0x16 -> DW_TAG_typedef
+  | 0x17 -> DW_TAG_union_type
+  | 0x18 -> DW_TAG_unspecified_parameters
+  | 0x19 -> DW_TAG_variant
+  | 0x1a -> DW_TAG_common_block
+  | 0x1b -> DW_TAG_common_inclusion
+  | 0x1c -> DW_TAG_inheritance
+  | 0x1d -> DW_TAG_inlined_subroutine
+  | 0x1e -> DW_TAG_module
+  | 0x1f -> DW_TAG_ptr_to_member_type
+  | 0x20 -> DW_TAG_set_type
+  | 0x21 -> DW_TAG_subrange_type
+  | 0x22 -> DW_TAG_with_stmt
+  | 0x23 -> DW_TAG_access_declaration
+  | 0x24 -> DW_TAG_base_type
+  | 0x25 -> DW_TAG_catch_block
+  | 0x26 -> DW_TAG_const_type
+  | 0x27 -> DW_TAG_constant
+  | 0x28 -> DW_TAG_enumerator
+  | 0x29 -> DW_TAG_file_type
+  | 0x2a -> DW_TAG_friend
+  | 0x2b -> DW_TAG_namelist
+  | 0x2c -> DW_TAG_namelist_item
+  | 0x2d -> DW_TAG_packed_type
+  | 0x2e -> DW_TAG_subprogram
+  | 0x2f -> DW_TAG_template_type_parameter
+  | 0x30 -> DW_TAG_template_value_parameter
+  | 0x31 -> DW_TAG_thrown_type
+  | 0x32 -> DW_TAG_try_block
+  | 0x33 -> DW_TAG_variant_part
+  | 0x34 -> DW_TAG_variable
+  | 0x35 -> DW_TAG_volatile_type
+  | 0x36 -> DW_TAG_dwarf_procedure
+  | 0x37 -> DW_TAG_restrict_type
+  | 0x38 -> DW_TAG_interface_type
+  | 0x39 -> DW_TAG_namespace
+  | 0x3a -> DW_TAG_imported_module
+  | 0x3b -> DW_TAG_unspecified_type
+  | 0x3c -> DW_TAG_partial_unit
+  | 0x3d -> DW_TAG_imported_unit
+  | 0x3f -> DW_TAG_condition
+  | 0x40 -> DW_TAG_shared_type
+  | 0x4080 -> DW_TAG_lo_user
+  | 0xffff -> DW_TAG_hi_user
   | _ -> raise (Dwarf_parse_error "parse_tag")
 
 let parse_child_determination dwbits =
@@ -119,126 +180,239 @@ let parse_child_determination dwbits =
   | { 0x01 : 8 : littleendian; rest : -1 : bitstring } -> true, rest
   | { _ } -> raise (Dwarf_parse_error "parse_child_determination")
 
+type dwarf_attribute =
+    DW_AT_sibling
+  | DW_AT_location
+  | DW_AT_name
+  | DW_AT_ordering
+  | DW_AT_byte_size
+  | DW_AT_bit_offset
+  | DW_AT_bit_size
+  | DW_AT_stmt_list
+  | DW_AT_low_pc
+  | DW_AT_high_pc
+  | DW_AT_language
+  | DW_AT_discr
+  | DW_AT_discr_value
+  | DW_AT_visibility
+  | DW_AT_import
+  | DW_AT_string_length
+  | DW_AT_common_reference
+  | DW_AT_comp_dir
+  | DW_AT_const_value
+  | DW_AT_containing_type
+  | DW_AT_default_value
+  | DW_AT_inline
+  | DW_AT_is_optional
+  | DW_AT_lower_bound
+  | DW_AT_producer
+  | DW_AT_prototyped
+  | DW_AT_return_addr
+  | DW_AT_start_scope
+  | DW_AT_bit_stride
+  | DW_AT_upper_bound
+  | DW_AT_abstract_origin
+  | DW_AT_accessibility
+  | DW_AT_address_class
+  | DW_AT_artificial
+  | DW_AT_base_types
+  | DW_AT_calling_convention
+  | DW_AT_count
+  | DW_AT_data_member_location
+  | DW_AT_decl_column
+  | DW_AT_decl_file
+  | DW_AT_decl_line
+  | DW_AT_declaration
+  | DW_AT_discr_list
+  | DW_AT_encoding
+  | DW_AT_external
+  | DW_AT_frame_base
+  | DW_AT_friend
+  | DW_AT_identifier_case
+  | DW_AT_macro_info
+  | DW_AT_namelist_item
+  | DW_AT_priority
+  | DW_AT_segment
+  | DW_AT_specification
+  | DW_AT_static_link
+  | DW_AT_type
+  | DW_AT_use_location
+  | DW_AT_variable_parameter
+  | DW_AT_virtuality
+  | DW_AT_vtable_elem_location
+  | DW_AT_allocated
+  | DW_AT_associated
+  | DW_AT_data_location
+  | DW_AT_byte_stride
+  | DW_AT_entry_pc
+  | DW_AT_use_UTF8
+  | DW_AT_extension
+  | DW_AT_ranges
+  | DW_AT_trampoline
+  | DW_AT_call_column
+  | DW_AT_call_file
+  | DW_AT_call_line
+  | DW_AT_description
+  | DW_AT_binary_scale
+  | DW_AT_decimal_scale
+  | DW_AT_small
+  | DW_AT_decimal_sign
+  | DW_AT_digit_count
+  | DW_AT_picture_string
+  | DW_AT_mutable
+  | DW_AT_threads_scaled
+  | DW_AT_explicit
+  | DW_AT_object_pointer
+  | DW_AT_endianity
+  | DW_AT_elemental
+  | DW_AT_pure
+  | DW_AT_recursive
+  | DW_AT_lo_user
+  | DW_AT_hi_user
+
 let parse_attribute = function
-    0x01 -> `DW_AT_sibling
-  | 0x02 -> `DW_AT_location
-  | 0x03 -> `DW_AT_name
-  | 0x09 -> `DW_AT_ordering
-  | 0x0b -> `DW_AT_byte_size
-  | 0x0c -> `DW_AT_bit_offset
-  | 0x0d -> `DW_AT_bit_size
-  | 0x10 -> `DW_AT_stmt_list
-  | 0x11 -> `DW_AT_low_pc
-  | 0x12 -> `DW_AT_high_pc
-  | 0x13 -> `DW_AT_language
-  | 0x15 -> `DW_AT_discr
-  | 0x16 -> `DW_AT_discr_value
-  | 0x17 -> `DW_AT_visibility
-  | 0x18 -> `DW_AT_import
-  | 0x19 -> `DW_AT_string_length
-  | 0x1a -> `DW_AT_common_reference
-  | 0x1b -> `DW_AT_comp_dir
-  | 0x1c -> `DW_AT_const_value
-  | 0x1d -> `DW_AT_containing_type
-  | 0x1e -> `DW_AT_default_value
-  | 0x20 -> `DW_AT_inline
-  | 0x21 -> `DW_AT_is_optional
-  | 0x22 -> `DW_AT_lower_bound
-  | 0x25 -> `DW_AT_producer
-  | 0x27 -> `DW_AT_prototyped
-  | 0x2a -> `DW_AT_return_addr
-  | 0x2c -> `DW_AT_start_scope
-  | 0x2e -> `DW_AT_bit_stride
-  | 0x2f -> `DW_AT_upper_bound
-  | 0x31 -> `DW_AT_abstract_origin
-  | 0x32 -> `DW_AT_accessibility
-  | 0x33 -> `DW_AT_address_class
-  | 0x34 -> `DW_AT_artificial
-  | 0x35 -> `DW_AT_base_types
-  | 0x36 -> `DW_AT_calling_convention
-  | 0x37 -> `DW_AT_count
-  | 0x38 -> `DW_AT_data_member_location
-  | 0x39 -> `DW_AT_decl_column
-  | 0x3a -> `DW_AT_decl_file
-  | 0x3b -> `DW_AT_decl_line
-  | 0x3c -> `DW_AT_declaration
-  | 0x3d -> `DW_AT_discr_list
-  | 0x3e -> `DW_AT_encoding
-  | 0x3f -> `DW_AT_external
-  | 0x40 -> `DW_AT_frame_base
-  | 0x41 -> `DW_AT_friend
-  | 0x42 -> `DW_AT_identifier_case
-  | 0x43 -> `DW_AT_macro_info
-  | 0x44 -> `DW_AT_namelist_item
-  | 0x45 -> `DW_AT_priority
-  | 0x46 -> `DW_AT_segment
-  | 0x47 -> `DW_AT_specification
-  | 0x48 -> `DW_AT_static_link
-  | 0x49 -> `DW_AT_type
-  | 0x4a -> `DW_AT_use_location
-  | 0x4b -> `DW_AT_variable_parameter
-  | 0x4c -> `DW_AT_virtuality
-  | 0x4d -> `DW_AT_vtable_elem_location
-  | 0x4e -> `DW_AT_allocated
-  | 0x4f -> `DW_AT_associated
-  | 0x50 -> `DW_AT_data_location
-  | 0x51 -> `DW_AT_byte_stride
-  | 0x52 -> `DW_AT_entry_pc
-  | 0x53 -> `DW_AT_use_UTF8
-  | 0x54 -> `DW_AT_extension
-  | 0x55 -> `DW_AT_ranges
-  | 0x56 -> `DW_AT_trampoline
-  | 0x57 -> `DW_AT_call_column
-  | 0x58 -> `DW_AT_call_file
-  | 0x59 -> `DW_AT_call_line
-  | 0x5a -> `DW_AT_description
-  | 0x5b -> `DW_AT_binary_scale
-  | 0x5c -> `DW_AT_decimal_scale
-  | 0x5d -> `DW_AT_small
-  | 0x5e -> `DW_AT_decimal_sign
-  | 0x5f -> `DW_AT_digit_count
-  | 0x60 -> `DW_AT_picture_string
-  | 0x61 -> `DW_AT_mutable
-  | 0x62 -> `DW_AT_threads_scaled
-  | 0x63 -> `DW_AT_explicit
-  | 0x64 -> `DW_AT_object_pointer
-  | 0x65 -> `DW_AT_endianity
-  | 0x66 -> `DW_AT_elemental
-  | 0x67 -> `DW_AT_pure
-  | 0x68 -> `DW_AT_recursive
-  | 0x2000 -> `DW_AT_lo_user
-  | 0x3fff -> `DW_AT_hi_user
+    0x01 -> DW_AT_sibling
+  | 0x02 -> DW_AT_location
+  | 0x03 -> DW_AT_name
+  | 0x09 -> DW_AT_ordering
+  | 0x0b -> DW_AT_byte_size
+  | 0x0c -> DW_AT_bit_offset
+  | 0x0d -> DW_AT_bit_size
+  | 0x10 -> DW_AT_stmt_list
+  | 0x11 -> DW_AT_low_pc
+  | 0x12 -> DW_AT_high_pc
+  | 0x13 -> DW_AT_language
+  | 0x15 -> DW_AT_discr
+  | 0x16 -> DW_AT_discr_value
+  | 0x17 -> DW_AT_visibility
+  | 0x18 -> DW_AT_import
+  | 0x19 -> DW_AT_string_length
+  | 0x1a -> DW_AT_common_reference
+  | 0x1b -> DW_AT_comp_dir
+  | 0x1c -> DW_AT_const_value
+  | 0x1d -> DW_AT_containing_type
+  | 0x1e -> DW_AT_default_value
+  | 0x20 -> DW_AT_inline
+  | 0x21 -> DW_AT_is_optional
+  | 0x22 -> DW_AT_lower_bound
+  | 0x25 -> DW_AT_producer
+  | 0x27 -> DW_AT_prototyped
+  | 0x2a -> DW_AT_return_addr
+  | 0x2c -> DW_AT_start_scope
+  | 0x2e -> DW_AT_bit_stride
+  | 0x2f -> DW_AT_upper_bound
+  | 0x31 -> DW_AT_abstract_origin
+  | 0x32 -> DW_AT_accessibility
+  | 0x33 -> DW_AT_address_class
+  | 0x34 -> DW_AT_artificial
+  | 0x35 -> DW_AT_base_types
+  | 0x36 -> DW_AT_calling_convention
+  | 0x37 -> DW_AT_count
+  | 0x38 -> DW_AT_data_member_location
+  | 0x39 -> DW_AT_decl_column
+  | 0x3a -> DW_AT_decl_file
+  | 0x3b -> DW_AT_decl_line
+  | 0x3c -> DW_AT_declaration
+  | 0x3d -> DW_AT_discr_list
+  | 0x3e -> DW_AT_encoding
+  | 0x3f -> DW_AT_external
+  | 0x40 -> DW_AT_frame_base
+  | 0x41 -> DW_AT_friend
+  | 0x42 -> DW_AT_identifier_case
+  | 0x43 -> DW_AT_macro_info
+  | 0x44 -> DW_AT_namelist_item
+  | 0x45 -> DW_AT_priority
+  | 0x46 -> DW_AT_segment
+  | 0x47 -> DW_AT_specification
+  | 0x48 -> DW_AT_static_link
+  | 0x49 -> DW_AT_type
+  | 0x4a -> DW_AT_use_location
+  | 0x4b -> DW_AT_variable_parameter
+  | 0x4c -> DW_AT_virtuality
+  | 0x4d -> DW_AT_vtable_elem_location
+  | 0x4e -> DW_AT_allocated
+  | 0x4f -> DW_AT_associated
+  | 0x50 -> DW_AT_data_location
+  | 0x51 -> DW_AT_byte_stride
+  | 0x52 -> DW_AT_entry_pc
+  | 0x53 -> DW_AT_use_UTF8
+  | 0x54 -> DW_AT_extension
+  | 0x55 -> DW_AT_ranges
+  | 0x56 -> DW_AT_trampoline
+  | 0x57 -> DW_AT_call_column
+  | 0x58 -> DW_AT_call_file
+  | 0x59 -> DW_AT_call_line
+  | 0x5a -> DW_AT_description
+  | 0x5b -> DW_AT_binary_scale
+  | 0x5c -> DW_AT_decimal_scale
+  | 0x5d -> DW_AT_small
+  | 0x5e -> DW_AT_decimal_sign
+  | 0x5f -> DW_AT_digit_count
+  | 0x60 -> DW_AT_picture_string
+  | 0x61 -> DW_AT_mutable
+  | 0x62 -> DW_AT_threads_scaled
+  | 0x63 -> DW_AT_explicit
+  | 0x64 -> DW_AT_object_pointer
+  | 0x65 -> DW_AT_endianity
+  | 0x66 -> DW_AT_elemental
+  | 0x67 -> DW_AT_pure
+  | 0x68 -> DW_AT_recursive
+  | 0x2000 -> DW_AT_lo_user
+  | 0x3fff -> DW_AT_hi_user
   | _ -> raise (Dwarf_parse_error "parse_attribute")
 
+type dwarf_form =
+    DW_FORM_addr
+  | DW_FORM_block
+  | DW_FORM_block1
+  | DW_FORM_block2
+  | DW_FORM_block4
+  | DW_FORM_data1
+  | DW_FORM_data2
+  | DW_FORM_data4
+  | DW_FORM_data8
+  | DW_FORM_sdata
+  | DW_FORM_udata
+  | DW_FORM_string
+  | DW_FORM_strp
+  | DW_FORM_flag
+  | DW_FORM_ref_addr
+  | DW_FORM_ref1
+  | DW_FORM_ref2
+  | DW_FORM_ref4
+  | DW_FORM_ref8
+  | DW_FORM_ref_udata
+  | DW_FORM_indirect
+
 let parse_attribute_form = function
-    0x01 -> `DW_FORM_addr
-  | 0x03 -> `DW_FORM_block2
-  | 0x04 -> `DW_FORM_block4
-  | 0x05 -> `DW_FORM_data2
-  | 0x06 -> `DW_FORM_data4
-  | 0x07 -> `DW_FORM_data8
-  | 0x08 -> `DW_FORM_string
-  | 0x09 -> `DW_FORM_block
-  | 0x0a -> `DW_FORM_block1
-  | 0x0b -> `DW_FORM_data1
-  | 0x0c -> `DW_FORM_flag
-  | 0x0d -> `DW_FORM_sdata
-  | 0x0e -> `DW_FORM_strp
-  | 0x0f -> `DW_FORM_udata
-  | 0x10 -> `DW_FORM_ref_addr
-  | 0x11 -> `DW_FORM_ref1
-  | 0x12 -> `DW_FORM_ref2
-  | 0x13 -> `DW_FORM_ref4
-  | 0x14 -> `DW_FORM_ref8
-  | 0x15 -> `DW_FORM_ref_udata
-  | 0x16 -> `DW_FORM_indirect
+    0x01 -> DW_FORM_addr
+  | 0x03 -> DW_FORM_block2
+  | 0x04 -> DW_FORM_block4
+  | 0x05 -> DW_FORM_data2
+  | 0x06 -> DW_FORM_data4
+  | 0x07 -> DW_FORM_data8
+  | 0x08 -> DW_FORM_string
+  | 0x09 -> DW_FORM_block
+  | 0x0a -> DW_FORM_block1
+  | 0x0b -> DW_FORM_data1
+  | 0x0c -> DW_FORM_flag
+  | 0x0d -> DW_FORM_sdata
+  | 0x0e -> DW_FORM_strp
+  | 0x0f -> DW_FORM_udata
+  | 0x10 -> DW_FORM_ref_addr
+  | 0x11 -> DW_FORM_ref1
+  | 0x12 -> DW_FORM_ref2
+  | 0x13 -> DW_FORM_ref4
+  | 0x14 -> DW_FORM_ref8
+  | 0x15 -> DW_FORM_ref_udata
+  | 0x16 -> DW_FORM_indirect
   | _ -> raise (Dwarf_parse_error "parse_attribute_form")
 
-type ('a, 'b) dwarf_abbrev =
+type dwarf_abbrev =
   {
     abv_num : int;
-    abv_tag : 'a;
-    abv_attribs : 'b list;
+    abv_tag : dwarf_tag;
+    abv_attribs : (dwarf_attribute * dwarf_form) list;
     abv_has_children : bool
   }
 
@@ -272,7 +446,7 @@ let parse_abbrevs dwbits =
   let rec build abbrevs dwbits =
     let abbrev, dwbits = parse_one_abbrev dwbits in
     match abbrev with
-      None -> List.rev abbrevs, dwbits
+      None -> Array.of_list (List.rev abbrevs)
     | Some (num, tag, attribs, has_children) ->
         build ({ abv_num = num; abv_tag = tag; abv_attribs = attribs;
 		 abv_has_children = has_children } :: abbrevs) dwbits in
@@ -282,7 +456,7 @@ let parse_abbrevs dwbits =
    single section).  (This is useless! Once we parse compilation unit header
    in .debug_info, we get an offset to the proper data.)  *)
 
-let parse_all_abbrevs dwbits =
+(*let parse_all_abbrevs dwbits =
   let rec build culist dwbits =
     if Bitstring.bitstring_length dwbits = 0 then
       culist
@@ -290,7 +464,7 @@ let parse_all_abbrevs dwbits =
       let abbrevs, dwbits = parse_abbrevs dwbits in
       build (abbrevs :: culist) dwbits
     end in
-  List.rev (build [] dwbits)
+  List.rev (build [] dwbits)*)
 
 let sign_extend x bit =
   let signbit = 1 lsl bit in
@@ -431,9 +605,163 @@ let parse_operation dwbits ~addr_size =
   | { 0xe0 : 8 : littleendian } -> `DW_OP_lo_user, next_byte
   | { 0xff : 8 : littleendian } -> `DW_OP_hi_user, next_byte
 
+type comp_unit_header =
+  {
+    unit_length : int32;
+    version : int;
+    debug_abbrev_offset : int32;
+    address_size : int
+  }
+
+let parse_comp_unit_header dwbits =
+  bitmatch dwbits with
+    { unit_length : 32 : littleendian;
+      version : 16 : littleendian;
+      debug_abbrev_offset : 32 : littleendian;
+      address_size : 8 : littleendian;
+      rest : -1 : bitstring } ->
+      { unit_length = unit_length;
+        version = version;
+	debug_abbrev_offset = debug_abbrev_offset;
+	address_size = address_size }, rest
+  | { _ } -> raise (Dwarf_parse_error "parse_comp_unit_header")
+
+let rec parse_form dwbits form ~addr_size ~string_sec =
+  match form with
+    DW_FORM_addr ->
+      (bitmatch dwbits with
+        { addr : 32 : littleendian;
+	  rest : -1 : bitstring } -> `addr addr, rest
+      | { _ } -> raise (Dwarf_parse_error "parse_form addr"))
+  | DW_FORM_block1 ->
+      (bitmatch dwbits with
+        { length : 8 : littleendian;
+	  rest : -1 : bitstring } ->
+	  let bitlength = length * 8 in
+	  `block (Bitstring.takebits bitlength rest),
+	    Bitstring.dropbits bitlength rest
+      | { _ } -> raise (Dwarf_parse_error "parse_form block1"))
+  | DW_FORM_block2 ->
+      (bitmatch dwbits with
+        { length : 16 : littleendian;
+	  rest : -1 : bitstring } ->
+	  let bitlength = length * 8 in
+	  `block (Bitstring.takebits bitlength rest),
+	    Bitstring.dropbits bitlength rest
+      | { _ } -> raise (Dwarf_parse_error "parse_form block2"))
+  | DW_FORM_block4 ->
+      (bitmatch dwbits with
+        { length : 32 : littleendian;
+	  rest : -1 : bitstring } ->
+	  let bitlength = (Int32.to_int length) * 8 in
+	  `block (Bitstring.takebits bitlength rest),
+	    Bitstring.dropbits bitlength rest
+      | { _ } -> raise (Dwarf_parse_error "parse_form block4"))
+  | DW_FORM_block ->
+      let length, rest = parse_uleb128_int dwbits in
+      let bitlength = length * 8 in
+      `block (Bitstring.takebits bitlength rest),
+	Bitstring.dropbits bitlength rest
+  | DW_FORM_data1 ->
+      (bitmatch dwbits with
+        { data : 8 : littleendian;
+	  rest : -1 : bitstring } -> `data1 data, rest
+      | { _ } -> raise (Dwarf_parse_error "parse_form data1"))
+  | DW_FORM_data2 ->
+      (bitmatch dwbits with
+        { data : 16 : littleendian;
+	  rest : -1 : bitstring } -> `data2 data, rest
+      | { _ } -> raise (Dwarf_parse_error "parse_form data1"))
+  | DW_FORM_data4 ->
+      (bitmatch dwbits with
+        { data : 32 : littleendian;
+	  rest : -1 : bitstring } -> `data4 data, rest
+      | { _ } -> raise (Dwarf_parse_error "parse_form data1"))
+  | DW_FORM_data8 ->
+      (bitmatch dwbits with
+        { data : 64 : littleendian;
+	  rest : -1 : bitstring } -> `data8 data, rest
+      | { _ } -> raise (Dwarf_parse_error "parse_form data1"))
+  | DW_FORM_sdata ->
+      let data, rest = parse_sleb128 dwbits in
+      `sdata data, rest
+  | DW_FORM_udata ->
+      let data, rest = parse_uleb128 dwbits in
+      `udata data, rest
+  | DW_FORM_string ->
+      let b = Buffer.create 10 in
+      let rec gather bits =
+        bitmatch bits with
+          { "\000" : 8 : string; rest : -1 : bitstring } ->
+	    Buffer.contents b, rest
+	| { c : 8 : string; rest : -1 : bitstring } ->
+	    Buffer.add_string b c;
+	    gather rest in
+      let str, rest = gather dwbits in
+      `string str, rest
+  | DW_FORM_strp ->
+      (bitmatch dwbits with
+        { offset : 32 : littleendian;
+	  rest : -1 : bitstring } ->
+	  `string (Elfreader.get_string string_sec (Int32.to_int offset)), rest
+      | { _ } -> raise (Dwarf_parse_error "parse_form strp"))
+  | DW_FORM_flag ->
+      (bitmatch dwbits with
+        { flag : 8 : littleendian;
+	  rest : -1 : bitstring } ->
+	  `flag (flag != 0), rest
+      | { _ } -> raise (Dwarf_parse_error "parse_form flag"))
+  | DW_FORM_ref_addr ->
+      raise (Dwarf_parse_error "parse_form ref_addr")
+  | DW_FORM_ref1 ->
+      (bitmatch dwbits with
+        { reference : 8 : littleendian;
+	  rest : -1 : bitstring } ->
+	  `ref1 reference, rest
+      | { _ } -> raise (Dwarf_parse_error "parse_form ref1"))
+  | DW_FORM_ref2 ->
+      (bitmatch dwbits with
+        { reference : 16 : littleendian;
+	  rest : -1 : bitstring } ->
+	  `ref2 reference, rest
+      | { _ } -> raise (Dwarf_parse_error "parse_form ref2"))
+  | DW_FORM_ref4 ->
+      (bitmatch dwbits with
+        { reference : 32 : littleendian;
+	  rest : -1 : bitstring } ->
+	  `ref4 reference, rest
+      | { _ } -> raise (Dwarf_parse_error "parse_form ref4"))
+  | DW_FORM_ref8 ->
+      (bitmatch dwbits with
+        { reference : 64 : littleendian;
+	  rest : -1 : bitstring } ->
+	  `ref8 reference, rest
+      | { _ } -> raise (Dwarf_parse_error "parse_form ref8"))
+  | DW_FORM_ref_udata ->
+      let data, rest = parse_uleb128 dwbits in
+      `uref data, rest
+  | DW_FORM_indirect ->
+      let form_code, rest = parse_uleb128_int dwbits in
+      let form = parse_attribute_form form_code in
+      parse_form rest form ~addr_size ~string_sec
+
+let parse_die dwbits abbrevs =
+  let abbrev_code, dwbits = parse_uleb128_int dwbits in
+  let abbrev = abbrevs.(abbrev_code - 1) in
+  if abbrev.abv_num != abbrev_code then
+    failwith "Hmm, I expected contiguous numbering in .dwarf_abbrev";
+  List.fold_right
+    (fun (attr, form) (parsed, dwbits) ->
+      parsed, dwbits)
+    abbrev.abv_attribs
+    ([], dwbits)
+
 open Elfreader
 
 let elfbits, ehdr = read_file "libGLESv2.so"
 let shdr_arr = get_section_headers elfbits ehdr
+let debug_info = get_section_by_name elfbits ehdr shdr_arr ".debug_info"
+let cu_header, remaining_debug_info = parse_comp_unit_header debug_info
 let debug_abbrev = get_section_by_name elfbits ehdr shdr_arr ".debug_abbrev"
-let abbrevs = parse_all_abbrevs debug_abbrev
+let cu_debug_abbrev = offset_section debug_abbrev cu_header.debug_abbrev_offset
+let abbrevs = parse_abbrevs cu_debug_abbrev
