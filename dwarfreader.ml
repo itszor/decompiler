@@ -26,12 +26,12 @@ let signed_value x =
 let parse_sleb128 dwbits =
   let rec build bits =
     bitmatch bits with
-      { chunk : 7 : littleendian;
-        false : 1 : littleendian;
+      { false : 1 : littleendian;
+        chunk : 7 : littleendian;
 	rest : -1 : bitstring } ->
 	  Big_int.big_int_of_int (signed_value chunk), rest
-    | { chunk : 7 : littleendian;
-        true : 1 : littleendian;
+    | { true : 1 : littleendian;
+	chunk : 7 : littleendian;
 	rest : -1 : bitstring } ->
 	  let higher_bits, rest' = build rest in
 	  Big_int.add_int_big_int (signed_value chunk)
@@ -111,6 +111,7 @@ type dwarf_tag =
   | DW_TAG_shared_type
   | DW_TAG_lo_user
   | DW_TAG_hi_user
+  | DW_TAG_null
 
 let parse_tag = function
     0x01 -> DW_TAG_array_type
@@ -745,16 +746,86 @@ let rec parse_form dwbits form ~addr_size ~string_sec =
       let form = parse_attribute_form form_code in
       parse_form rest form ~addr_size ~string_sec
 
-let parse_die dwbits abbrevs =
+type 'a die =
+    Die_node of 'a * 'a die
+  | Die_tree of 'a * 'a die
+  | Die_empty
+
+let parse_one_die dwbits ~abbrevs ~addr_size ~string_sec =
   let abbrev_code, dwbits = parse_uleb128_int dwbits in
-  let abbrev = abbrevs.(abbrev_code - 1) in
-  if abbrev.abv_num != abbrev_code then
-    failwith "Hmm, I expected contiguous numbering in .dwarf_abbrev";
-  List.fold_right
-    (fun (attr, form) (parsed, dwbits) ->
-      parsed, dwbits)
-    abbrev.abv_attribs
-    ([], dwbits)
+  if abbrev_code = 0 then
+    None, dwbits
+  else begin
+    let abbrev = abbrevs.(abbrev_code - 1) in
+    if abbrev.abv_num != abbrev_code then
+      failwith "Hmm, I expected contiguous numbering in .dwarf_abbrev";
+    let attr_vals, dwbits = List.fold_left
+      (fun (parsed, dwbits) (attr, form) ->
+	let data, dwbits = parse_form dwbits form ~addr_size ~string_sec in
+	(attr, data) :: parsed, dwbits)
+      ([], dwbits)
+      abbrev.abv_attribs in
+    Some (abbrev.abv_tag, attr_vals, abbrev.abv_has_children), dwbits
+  end
+
+(* Parse a tree of DIE information.  Siblings are represented as a Die_node,
+   children as a Die_tree.  *)
+
+let parse_die dwbits ~abbrevs ~addr_size ~string_sec =
+  let rec build dwbits =
+    let things, dwbits = parse_one_die dwbits ~abbrevs ~addr_size ~string_sec in
+    match things with
+      Some (tag, attr_vals, has_children) ->
+        let data = tag, attr_vals in
+	let rest, dwbits' = build dwbits in
+        if has_children then
+	  Die_tree (data, rest), dwbits'
+	else
+	  Die_node (data, rest), dwbits'
+    | None -> Die_empty, dwbits in
+  build dwbits
+
+exception Type_mismatch of string
+
+let get_attr_string attrs typ =
+  match List.assoc typ attrs with
+    `string foo -> foo
+  | _ -> raise (Type_mismatch "string")
+
+let get_attr_int32 attrs typ =
+  match List.assoc typ attrs with
+    `data1 v | `data2 v -> Int32.of_int v
+  | `data4 v -> v
+  | `sdata v -> Big_int.int32_of_big_int v
+  | _ -> raise (Type_mismatch "int32")
+
+let rec print_enum enum_attrs enum_inf =
+  begin match enum_inf with
+    Die_node ((DW_TAG_enumerator, attrs), rest) ->
+      let tag_name = get_attr_string attrs DW_AT_name
+      and enumerator_value = get_attr_int32 attrs DW_AT_const_value in
+      Printf.printf "%s 0x%lx,\n" tag_name enumerator_value;
+      print_enum enum_attrs rest
+  | _ -> ()
+  end
+
+let print_typedef typedef_attrs type_inf =
+  let td_name = get_attr_string typedef_attrs DW_AT_name in
+  Printf.printf "typedef ";
+  begin match type_inf with
+    Die_tree ((DW_TAG_enumeration_type, enum_attrs), enum_inf) ->
+      let enum_name = get_attr_string enum_attrs DW_AT_name in
+      Printf.printf "enum %s {\n" enum_name;
+      print_enum enum_attrs enum_inf;
+      Printf.printf "}"
+  | _ -> ()
+  end;
+  Printf.printf " %s\n" td_name
+
+let print_die = function
+    Die_tree ((DW_TAG_compile_unit, _), x) -> ()
+  | Die_node ((DW_TAG_typedef, attrs), x) -> print_typedef attrs x
+  | _ -> ()
 
 open Elfreader
 
@@ -763,5 +834,21 @@ let shdr_arr = get_section_headers elfbits ehdr
 let debug_info = get_section_by_name elfbits ehdr shdr_arr ".debug_info"
 let cu_header, remaining_debug_info = parse_comp_unit_header debug_info
 let debug_abbrev = get_section_by_name elfbits ehdr shdr_arr ".debug_abbrev"
+let debug_str_sec = get_section_by_name elfbits ehdr shdr_arr ".debug_str"
 let cu_debug_abbrev = offset_section debug_abbrev cu_header.debug_abbrev_offset
 let abbrevs = parse_abbrevs cu_debug_abbrev
+
+let debug_info_ptr = ref remaining_debug_info
+let fetch_die () =
+  let die_tree, next_die = parse_die !debug_info_ptr ~abbrevs
+				     ~addr_size:cu_header.address_size
+				     ~string_sec:debug_str_sec in
+  debug_info_ptr := next_die;
+  die_tree
+
+(*
+let _ =
+  while true; do
+    fetch_die ()
+  done
+*)
