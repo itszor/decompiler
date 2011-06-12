@@ -111,7 +111,6 @@ type dwarf_tag =
   | DW_TAG_shared_type
   | DW_TAG_lo_user
   | DW_TAG_hi_user
-  | DW_TAG_null
 
 let parse_tag = function
     0x01 -> DW_TAG_array_type
@@ -748,7 +747,7 @@ let rec parse_form dwbits form ~addr_size ~string_sec =
 
 type 'a die =
     Die_node of 'a * 'a die
-  | Die_tree of 'a * 'a die
+  | Die_tree of 'a * 'a die * 'a die
   | Die_empty
 
 let parse_one_die dwbits ~abbrevs ~addr_size ~string_sec =
@@ -772,18 +771,28 @@ let parse_one_die dwbits ~abbrevs ~addr_size ~string_sec =
    children as a Die_tree.  *)
 
 let parse_die dwbits ~abbrevs ~addr_size ~string_sec =
-  let rec build dwbits =
+  let rec build dwbits depth =
     let things, dwbits = parse_one_die dwbits ~abbrevs ~addr_size ~string_sec in
     match things with
       Some (tag, attr_vals, has_children) ->
         let data = tag, attr_vals in
-	let rest, dwbits' = build dwbits in
-        if has_children then
-	  Die_tree (data, rest), dwbits'
-	else
-	  Die_node (data, rest), dwbits'
+	let cdepth = if has_children then succ depth else depth in
+	let child_or_sibling, dwbits' = build dwbits cdepth in
+        if has_children then begin
+	  (* This is kind of ugly: the top-level die must be
+	     DW_TAG_compile_unit, and does *not* form a sibling list, so is not
+	     terminated with a null entry.  This is kind of a special case, but
+	     saves a single byte per CU in the binary.  Woohoo!  *)
+	  if depth = 0 then
+	    Die_node (data, child_or_sibling), dwbits'
+	  else begin
+	    let sibling, dwbits'' = build dwbits' depth in
+	    Die_tree (data, child_or_sibling, sibling), dwbits''
+	  end
+	end else
+	  Die_node (data, child_or_sibling), dwbits'
     | None -> Die_empty, dwbits in
-  build dwbits
+  build dwbits 0
 
 exception Type_mismatch of string
 
@@ -804,7 +813,7 @@ let rec print_enum enum_attrs enum_inf =
     Die_node ((DW_TAG_enumerator, attrs), rest) ->
       let tag_name = get_attr_string attrs DW_AT_name
       and enumerator_value = get_attr_int32 attrs DW_AT_const_value in
-      Printf.printf "%s 0x%lx,\n" tag_name enumerator_value;
+      Printf.printf "  %s = 0x%lx,\n" tag_name enumerator_value;
       print_enum enum_attrs rest
   | _ -> ()
   end
@@ -813,7 +822,7 @@ let print_typedef typedef_attrs type_inf =
   let td_name = get_attr_string typedef_attrs DW_AT_name in
   Printf.printf "typedef ";
   begin match type_inf with
-    Die_tree ((DW_TAG_enumeration_type, enum_attrs), enum_inf) ->
+    Die_tree ((DW_TAG_enumeration_type, enum_attrs), enum_inf, sibl) ->
       let enum_name = get_attr_string enum_attrs DW_AT_name in
       Printf.printf "enum %s {\n" enum_name;
       print_enum enum_attrs enum_inf;
@@ -823,7 +832,7 @@ let print_typedef typedef_attrs type_inf =
   Printf.printf " %s\n" td_name
 
 let print_die = function
-    Die_tree ((DW_TAG_compile_unit, _), x) -> ()
+    Die_tree ((DW_TAG_compile_unit, _), x, sibl) -> ()
   | Die_node ((DW_TAG_typedef, attrs), x) -> print_typedef attrs x
   | _ -> ()
 
@@ -845,6 +854,8 @@ let fetch_die () =
 				     ~string_sec:debug_str_sec in
   debug_info_ptr := next_die;
   die_tree
+
+let _ = fetch_die ()
 
 (*
 let _ =
