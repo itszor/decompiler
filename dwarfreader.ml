@@ -1,5 +1,11 @@
 exception Dwarf_parse_error of string
 
+(* Ocaml 3.11.x doesn't have shift_left_big_int!  *)
+
+let lshift_7 big_int =
+  (* Big_int.shift_left_big_int big_int 7 *)
+  Big_int.mult_int_big_int 128 big_int
+
 (* Parse ULEB128 value in DWBITS to a Big_int.  *)
 
 let parse_uleb128 dwbits =
@@ -13,8 +19,7 @@ let parse_uleb128 dwbits =
         chunk : 7 : littleendian;
 	rest : -1 : bitstring } ->
 	  let higher_bits, rest' = build rest in
-	  Big_int.add_int_big_int chunk
-	    (Big_int.shift_left_big_int higher_bits 7), rest'
+	  Big_int.add_int_big_int chunk (lshift_7 higher_bits), rest'
     | { _ } -> raise (Dwarf_parse_error "uleb128") in
   build dwbits
 
@@ -35,7 +40,7 @@ let parse_sleb128 dwbits =
 	rest : -1 : bitstring } ->
 	  let higher_bits, rest' = build rest in
 	  Big_int.add_int_big_int (signed_value chunk)
-	    (Big_int.shift_left_big_int higher_bits 7), rest'
+	    (lshift_7 higher_bits), rest'
     | { _ } -> raise (Dwarf_parse_error "sleb128") in
   build dwbits
 
