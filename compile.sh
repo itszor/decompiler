@@ -9,5 +9,5 @@ ocamlc -g -I +bitstring \
      unix.cma bitstring.cma -c dwarfreader.ml
 ocamlc -g -I +bitstring -c dwarfprint.ml
 ocamlc -g -I +bitstring -c decompiler.ml
-ocamlc -g nums.cma unix.cma -I +bitstring bitstring.cma elfreader.cmo dwarfreader.cmo -o decompiler
+ocamlc -g nums.cma unix.cma -I +bitstring bitstring.cma elfreader.cmo dwarfreader.cmo dwarfprint.cmo decompiler.cmo -o decompiler
 
