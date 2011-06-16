@@ -408,6 +408,43 @@ let parse_attribute_form = function
   | 0x16 -> DW_FORM_indirect
   | _ -> raise (Dwarf_parse_error "parse_attribute_form")
 
+type dwarf_base_type_encoding =
+    DW_ATE_address
+  | DW_ATE_boolean
+  | DW_ATE_complex_float
+  | DW_ATE_float
+  | DW_ATE_signed
+  | DW_ATE_signed_char
+  | DW_ATE_unsigned
+  | DW_ATE_unsigned_char
+  | DW_ATE_imaginary_float
+  | DW_ATE_packed_decimal
+  | DW_ATE_numeric_string
+  | DW_ATE_edited
+  | DW_ATE_signed_fixed
+  | DW_ATE_unsigned_fixed
+  | DW_ATE_decimal_float
+  | DW_ATE_user of int
+
+let parse_encoding = function
+    0x01 -> DW_ATE_address
+  | 0x02 -> DW_ATE_boolean
+  | 0x03 -> DW_ATE_complex_float
+  | 0x04 -> DW_ATE_float
+  | 0x05 -> DW_ATE_signed
+  | 0x06 -> DW_ATE_signed_char
+  | 0x07 -> DW_ATE_unsigned
+  | 0x08 -> DW_ATE_unsigned_char
+  | 0x09 -> DW_ATE_imaginary_float
+  | 0x0a -> DW_ATE_packed_decimal
+  | 0x0b -> DW_ATE_numeric_string
+  | 0x0c -> DW_ATE_edited
+  | 0x0d -> DW_ATE_signed_fixed
+  | 0x0e -> DW_ATE_unsigned_fixed
+  | 0x0f -> DW_ATE_decimal_float
+  | x when x >= 0x80 && x <= 0xff -> DW_ATE_user (x - 0x80)
+  | _ -> raise (Dwarf_parse_error "parse_encoding")
+
 type dwarf_abbrev =
   {
     abv_num : int;
@@ -801,6 +838,10 @@ let get_attr_string attrs typ =
     `string foo -> foo
   | _ -> raise (Type_mismatch "string")
 
+let get_attr_string_opt attrs typ =
+  try get_attr_string attrs typ
+  with Not_found -> "(none)"
+
 let get_attr_int32 attrs typ =
   match List.assoc typ attrs with
     `data1 v | `data2 v -> Int32.of_int v
@@ -808,58 +849,19 @@ let get_attr_int32 attrs typ =
   | `sdata v -> Big_int.int32_of_big_int v
   | _ -> raise (Type_mismatch "int32")
 
-let rec print_enum enum_attrs enum_inf =
-  begin match enum_inf with
-    Die_node ((DW_TAG_enumerator, attrs), rest) ->
-      let tag_name = get_attr_string attrs DW_AT_name
-      and enumerator_value = get_attr_int32 attrs DW_AT_const_value in
-      Printf.printf "  %s = 0x%lx,\n" tag_name enumerator_value;
-      print_enum enum_attrs rest
-  | _ -> ()
-  end
+let get_attr_int attrs typ =
+  Int32.to_int (get_attr_int32 attrs typ)
 
-let print_typedef typedef_attrs type_inf =
-  let td_name = get_attr_string typedef_attrs DW_AT_name in
-  Printf.printf "typedef ";
-  begin match type_inf with
-    Die_tree ((DW_TAG_enumeration_type, enum_attrs), enum_inf, sibl) ->
-      let enum_name = get_attr_string enum_attrs DW_AT_name in
-      Printf.printf "enum %s {\n" enum_name;
-      print_enum enum_attrs enum_inf;
-      Printf.printf "}"
-  | _ -> ()
-  end;
-  Printf.printf " %s\n" td_name
+let get_attr_address attrs typ =
+  match List.assoc typ attrs with
+    `addr a -> a
+  | _ -> raise (Type_mismatch "address")
 
-let print_die = function
-    Die_tree ((DW_TAG_compile_unit, _), x, sibl) -> ()
-  | Die_node ((DW_TAG_typedef, attrs), x) -> print_typedef attrs x
-  | _ -> ()
+let get_attr_ref attrs typ =
+  match List.assoc typ attrs with
+    `ref1 r | `ref2 r -> Int32.of_int r
+  | `ref4 r -> r
+  | _ -> raise (Type_mismatch "ref")
 
-open Elfreader
-
-let elfbits, ehdr = read_file "libGLESv2.so"
-let shdr_arr = get_section_headers elfbits ehdr
-let debug_info = get_section_by_name elfbits ehdr shdr_arr ".debug_info"
-let cu_header, remaining_debug_info = parse_comp_unit_header debug_info
-let debug_abbrev = get_section_by_name elfbits ehdr shdr_arr ".debug_abbrev"
-let debug_str_sec = get_section_by_name elfbits ehdr shdr_arr ".debug_str"
-let cu_debug_abbrev = offset_section debug_abbrev cu_header.debug_abbrev_offset
-let abbrevs = parse_abbrevs cu_debug_abbrev
-
-let debug_info_ptr = ref remaining_debug_info
-let fetch_die () =
-  let die_tree, next_die = parse_die !debug_info_ptr ~abbrevs
-				     ~addr_size:cu_header.address_size
-				     ~string_sec:debug_str_sec in
-  debug_info_ptr := next_die;
-  die_tree
-
-let _ = fetch_die ()
-
-(*
-let _ =
-  while true; do
-    fetch_die ()
-  done
-*)
+let attr_present attrs typ =
+  List.mem_assoc typ attrs
