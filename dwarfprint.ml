@@ -117,6 +117,14 @@ and print_enum enum_attrs enum_inf =
   | _ -> ()
   end
 
+and print_pointer_type ptr_attrs =
+  let byte_size = get_attr_int32 ptr_attrs DW_AT_byte_size in
+  try
+    let to_type = get_attr_ref ptr_attrs DW_AT_type in
+    Printf.printf "<%ld> * (size = %ld)\n" to_type byte_size
+  with Not_found ->
+    Printf.printf "void * (size = %ld)\n" byte_size
+
 and print_die = function
     Die_node ((DW_TAG_compile_unit, cu_attrs), children) ->
       print_cu cu_attrs children
@@ -126,6 +134,9 @@ and print_die = function
   | Die_node ((DW_TAG_base_type, attrs), children) ->
       print_base_type attrs;
       print_die children
+  | Die_node ((DW_TAG_pointer_type, attrs), sibl) ->
+      print_pointer_type attrs;
+      print_die sibl
   | Die_tree ((node, _), child, sibl) ->
       Printf.printf "*** skipping unknown tree (%s)\n" (string_of_tag node);
       print_die child; print_die sibl
