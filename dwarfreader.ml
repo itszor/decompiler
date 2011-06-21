@@ -810,31 +810,40 @@ let parse_one_die dwbits ~abbrevs ~addr_size ~string_sec =
   end
 
 (* Parse a tree of DIE information.  Siblings are represented as a Die_node,
-   children as a Die_tree.  *)
+   children as a Die_tree.
+   LENGTH should be the full length of the DIE section, including CU header.  *)
 
-let parse_die dwbits ~abbrevs ~addr_size ~string_sec =
+let parse_die dwbits ~length ~abbrevs ~addr_size ~string_sec =
+  let die_hash = Hashtbl.create 10 in
   let rec build dwbits depth =
+    let offset_bits = length - (Bitstring.bitstring_length dwbits) in
+    let offset = offset_bits / 8 in
+    Printf.printf "parsing die, offset %d\n" offset;
     let things, dwbits = parse_one_die dwbits ~abbrevs ~addr_size ~string_sec in
     match things with
       Some (tag, attr_vals, has_children) ->
         let data = tag, attr_vals in
 	let cdepth = if has_children then succ depth else depth in
 	let child_or_sibling, dwbits' = build dwbits cdepth in
-        if has_children then begin
-	  (* This is kind of ugly: the top-level die must be
-	     DW_TAG_compile_unit, and does *not* form a sibling list, so is not
-	     terminated with a null entry.  This is kind of a special case, but
-	     saves a single byte per CU in the binary.  Woohoo!  *)
-	  if depth = 0 then
-	    Die_node (data, child_or_sibling), dwbits'
-	  else begin
-	    let sibling, dwbits'' = build dwbits' depth in
-	    Die_tree (data, child_or_sibling, sibling), dwbits''
-	  end
-	end else
-	  Die_node (data, child_or_sibling), dwbits'
+        let this_node, dwbits' =
+	  if has_children then begin
+	    (* This is kind of ugly: the top-level die must be
+	       DW_TAG_compile_unit, and does *not* form a sibling list, so is
+	       not terminated with a null entry.  This is kind of a special
+	       case, but saves a single byte per CU in the binary.  Woohoo!  *)
+	    if depth = 0 then
+	      Die_node (data, child_or_sibling), dwbits'
+	    else begin
+	      let sibling, dwbits'' = build dwbits' depth in
+	      Die_tree (data, child_or_sibling, sibling), dwbits''
+	    end
+	  end else
+	    Die_node (data, child_or_sibling), dwbits' in
+	Hashtbl.add die_hash offset this_node;
+	this_node, dwbits'
     | None -> Die_empty, dwbits in
-  build dwbits 0
+  let dies, dwbits' = build dwbits 0 in
+  dies, die_hash, dwbits'
 
 exception Type_mismatch of string
 

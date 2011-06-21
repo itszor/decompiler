@@ -79,12 +79,12 @@ let string_of_tag = function
   | DW_TAG_lo_user -> "lo_user"
   | DW_TAG_hi_user -> "hi_user"
 
-let rec print_cu attrs children =
+let rec print_cu attrs children hash =
   Printf.printf "Compilation unit: %s\n" (get_attr_string attrs DW_AT_name);
   Printf.printf "Build dir: %s\n" (get_attr_string attrs DW_AT_comp_dir);
   Printf.printf "Low PC: %lx\n" (get_attr_address attrs DW_AT_low_pc);
   Printf.printf "High PC: %lx\n" (get_attr_address attrs DW_AT_high_pc);
-  print_die children
+  print_die children hash
 
 and print_base_type attrs =
   Printf.printf "Base type name: %s\n" (get_attr_string_opt attrs DW_AT_name);
@@ -137,49 +137,60 @@ and print_enum_vals = function
   | Die_tree _ -> raise (Dwarf_parse_error "unexpected tree node")
 
 and print_enum_type enum_attrs enum_children =
-  let name = get_attr_string enum_attrs DW_AT_name in
-  Printf.printf "enum %s {\n" name;
-  print_enum_vals enum_children;
-  Printf.printf "}\n"
+  try
+    let name = get_attr_string enum_attrs DW_AT_name in
+    Printf.printf "enum %s {\n" name;
+    print_enum_vals enum_children;
+    Printf.printf "}\n"
+  with Not_found ->
+    Printf.printf "enum {\n";
+    print_enum_vals enum_children;
+    Printf.printf "}\n"
 
 and print_struct_members = function
     Die_empty -> ()
   | Die_node ((DW_TAG_member, mem_attrs), next) ->
       let mem_name = get_attr_string mem_attrs DW_AT_name
       and mem_type = get_attr_ref mem_attrs DW_AT_type in
-      Printf.printf "  <%lx> %s;\n" mem_type mem_name;
+      Printf.printf "  <%ld> %s;\n" mem_type mem_name;
       print_struct_members next
   | Die_node _ -> raise (Dwarf_parse_error "non-enumerator in enum")
   | Die_tree _ -> raise (Dwarf_parse_error "unexpected tree node")
 
 and print_struct_type struct_attrs struct_children =
-  let name = get_attr_string struct_attrs DW_AT_name in
-  Printf.printf "struct %s {\n" name;
-  print_struct_members struct_children;
-  Printf.printf "}\n"
+  try
+    let name = get_attr_string struct_attrs DW_AT_name in
+    Printf.printf "struct %s {\n" name;
+    print_struct_members struct_children;
+    Printf.printf "}\n"
+  with Not_found ->
+    Printf.printf "struct {\n";
+    print_struct_members struct_children;
+    Printf.printf "}\n"
 
-and print_die = function
+and print_die die hash =
+  match die with
     Die_node ((DW_TAG_compile_unit, cu_attrs), children) ->
-      print_cu cu_attrs children
+      print_cu cu_attrs children hash
   | Die_node ((DW_TAG_typedef, attrs), children) ->
       print_typedef attrs;
-      print_die children
+      print_die children hash
   | Die_node ((DW_TAG_base_type, attrs), children) ->
       print_base_type attrs;
-      print_die children
+      print_die children hash
   | Die_node ((DW_TAG_pointer_type, attrs), sibl) ->
       print_pointer_type attrs;
-      print_die sibl
+      print_die sibl hash
   | Die_tree ((DW_TAG_enumeration_type, attrs), child, sibl) ->
       print_enum_type attrs child;
-      print_die sibl
+      print_die sibl hash
   | Die_tree ((DW_TAG_structure_type, attrs), child, sibl) ->
       print_struct_type attrs child;
-      print_die sibl
+      print_die sibl hash
   | Die_tree ((node, _), child, sibl) ->
       Printf.printf "*** skipping unknown tree (%s)\n" (string_of_tag node);
-      print_die child; print_die sibl
+      print_die child hash; print_die sibl hash
   | Die_node ((node, _), x) ->
       Printf.printf "*** skipping unknown node (%s)\n" (string_of_tag node);
-      print_die x
+      print_die x hash
   | _ -> ()
