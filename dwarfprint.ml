@@ -79,8 +79,11 @@ let string_of_tag = function
   | DW_TAG_lo_user -> "lo_user"
   | DW_TAG_hi_user -> "hi_user"
 
-let lookup_die tref hash =
-  Hashtbl.find hash (Int32.to_int tref)
+let is_inlined_aggregate = function
+    Die_tree ((DW_TAG_structure_type, attrs), _, _)
+  | Die_tree ((DW_TAG_union_type, attrs), _, _) ->
+      not (attr_present attrs DW_AT_name)
+  | _ -> false
 
 let rec print_cu attrs children hash =
   Printf.printf "Compilation unit: %s\n" (get_attr_string attrs DW_AT_name);
@@ -101,30 +104,74 @@ and print_base_type attrs =
     Printf.printf "Bit size or bit offset specified\n";
   Printf.printf "--\n"
 
-and string_of_type_name = function
+and get_array_size = function
+    Die_node ((DW_TAG_subrange_type, attrs), _) ->
+      (get_attr_int attrs DW_AT_upper_bound) + 1
+  | _ -> failwith "No array size?"
+
+and string_of_decl typ varname hash =
+  match typ with
     Die_tree ((DW_TAG_enumeration_type, attrs), _, _) ->
       let tag_name = get_attr_string attrs DW_AT_name in
-      Printf.sprintf "enum %s" tag_name
+      Printf.sprintf "enum %s" tag_name, varname
   | Die_tree ((DW_TAG_structure_type, attrs), _, _) ->
-      let tag_name = get_attr_string attrs DW_AT_name in
-      Printf.sprintf "struct %s" tag_name
-  | Die_node ((DW_TAG_base_type, attrs), _) ->
-      get_attr_string attrs DW_AT_name
-  | Die_node ((DW_TAG_typedef, attrs), _) ->
-      get_attr_string attrs DW_AT_name
-  | Die_node ((_, attrs), _) | Die_tree ((_, attrs), _, _) ->
       begin
-        try get_attr_string attrs DW_AT_name
-        with Not_found -> "???"
+        try let tag_name = get_attr_string attrs DW_AT_name in
+        Printf.sprintf "struct %s" tag_name, varname
+      with Not_found ->
+        "(anonymous struct?)", varname
       end
-  | _ -> "???"
+  | Die_node ((DW_TAG_base_type, attrs), _) ->
+      get_attr_string attrs DW_AT_name, varname
+  | Die_node ((DW_TAG_typedef, attrs), _) ->
+      get_attr_string attrs DW_AT_name, varname
+  | Die_node ((DW_TAG_pointer_type, attrs), _) ->
+      let to_type = get_attr_deref attrs DW_AT_type hash in
+      let typname, varname' = string_of_decl to_type varname hash in
+      Printf.sprintf "%s *" typname, varname'
+  | Die_node ((DW_TAG_volatile_type, attrs), _) ->
+      let of_type = get_attr_deref attrs DW_AT_type hash in
+      let typname, varname' = string_of_decl of_type varname hash in
+      Printf.sprintf "volatile %s" typname, varname'
+  | Die_node ((DW_TAG_const_type, attrs), _) ->
+      let of_type = get_attr_deref attrs DW_AT_type hash in
+      let typname, varname' = string_of_decl of_type varname hash in
+      Printf.sprintf "const %s" typname, varname'
+  | Die_tree ((DW_TAG_array_type, attrs), child, _) ->
+      let of_type = get_attr_deref attrs DW_AT_type hash in
+      let array_size = get_array_size child in
+      let typname, varname' = string_of_decl of_type varname hash in
+      typname, Printf.sprintf "%s[%d]" varname' array_size
+  | Die_node ((tag, attrs), _) | Die_tree ((tag, attrs), _, _) ->
+      begin
+        try
+	  let typname = get_attr_string attrs DW_AT_name in
+	  typname, varname
+        with Not_found ->
+	  Printf.sprintf "(??? - %s)" (string_of_tag tag), varname
+      end
+  | _ -> "???", varname
+
+and print_aggregate_type die hash =
+  match die with
+    Die_tree ((DW_TAG_structure_type, attrs), child, _) ->
+      print_struct_type attrs child hash
+  | Die_tree ((DW_TAG_union_type, attrs), child, _) ->
+      print_union_type attrs child hash
+  | _ -> failwith "Unexpected non-aggregate type"
 
 and print_typedef typedef_attrs hash =
   let td_name = get_attr_string typedef_attrs DW_AT_name in
   try
-    let td_type = get_attr_ref typedef_attrs DW_AT_type in
-    let die = lookup_die td_type hash in
-    Printf.printf "typedef %s %s\n" (string_of_type_name die) td_name
+    let td_type = get_attr_deref typedef_attrs DW_AT_type hash in
+    if is_inlined_aggregate td_type then begin
+      Printf.printf "typedef ";
+      print_aggregate_type td_type hash;
+      Printf.printf " %s;\n" td_name
+    end else begin
+      let typname, varname = string_of_decl td_type td_name hash in
+      Printf.printf "typedef %s %s\n" typname varname
+    end
   with Not_found ->
     (* Missing DW_AT_type seems to mean "void".  *)
     Printf.printf "typedef void %s\n" td_name
@@ -143,9 +190,9 @@ and print_pointer_type ptr_attrs hash =
   Printf.printf "Pointer type: ";
   let byte_size = get_attr_int32 ptr_attrs DW_AT_byte_size in
   try
-    let to_type = get_attr_ref ptr_attrs DW_AT_type in
-    let die = lookup_die to_type hash in
-    Printf.printf "%s * (size = %ld)\n" (string_of_type_name die) byte_size
+    let to_type = get_attr_deref ptr_attrs DW_AT_type hash in
+    let typname, varname = string_of_decl to_type "" hash in
+    Printf.printf "%s *%s (size = %ld)\n" typname varname byte_size
   with Not_found ->
     Printf.printf "void * (size = %ld)\n" byte_size
 
@@ -170,15 +217,15 @@ and print_enum_type enum_attrs enum_children =
     print_enum_vals enum_children;
     Printf.printf "}\n"
 
-and print_struct_members mem hash =
+and print_aggregate_members mem hash =
   match mem with
     Die_empty -> ()
   | Die_node ((DW_TAG_member, mem_attrs), next) ->
       let mem_name = get_attr_string mem_attrs DW_AT_name
-      and mem_type = get_attr_ref mem_attrs DW_AT_type in
-      let die = lookup_die mem_type hash in
-      Printf.printf "  %s %s;\n" (string_of_type_name die) mem_name;
-      print_struct_members next hash
+      and mem_type = get_attr_deref mem_attrs DW_AT_type hash in
+      let typname, varname = string_of_decl mem_type mem_name hash in
+      Printf.printf "  %s %s;\n" typname varname;
+      print_aggregate_members next hash
   | Die_node _ -> raise (Dwarf_parse_error "non-enumerator in enum")
   | Die_tree _ -> raise (Dwarf_parse_error "unexpected tree node")
 
@@ -186,11 +233,22 @@ and print_struct_type struct_attrs struct_children hash =
   try
     let name = get_attr_string struct_attrs DW_AT_name in
     Printf.printf "struct %s {\n" name;
-    print_struct_members struct_children hash;
+    print_aggregate_members struct_children hash;
     Printf.printf "}\n"
   with Not_found ->
     Printf.printf "struct {\n";
-    print_struct_members struct_children hash;
+    print_aggregate_members struct_children hash;
+    Printf.printf "}\n"
+
+and print_union_type union_attrs union_children hash =
+  try
+    let name = get_attr_string union_attrs DW_AT_name in
+    Printf.printf "union %s {\n" name;
+    print_aggregate_members union_children hash;
+    Printf.printf "}\n"
+  with Not_found ->
+    Printf.printf "union {\n";
+    print_aggregate_members union_children hash;
     Printf.printf "}\n"
 
 and print_die die hash =
@@ -211,6 +269,9 @@ and print_die die hash =
       print_die sibl hash
   | Die_tree ((DW_TAG_structure_type, attrs), child, sibl) ->
       print_struct_type attrs child hash;
+      print_die sibl hash
+  | Die_tree ((DW_TAG_union_type, attrs), child, sibl) ->
+      print_union_type attrs child hash;
       print_die sibl hash
   | Die_tree ((node, _), child, sibl) ->
       Printf.printf "*** skipping unknown tree (%s)\n" (string_of_tag node);

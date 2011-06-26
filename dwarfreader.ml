@@ -818,7 +818,7 @@ let parse_die dwbits ~length ~abbrevs ~addr_size ~string_sec =
   let rec build dwbits depth =
     let offset_bits = length - (Bitstring.bitstring_length dwbits) in
     let offset = offset_bits / 8 in
-    Printf.printf "parsing die, offset %d\n" offset;
+    (* Printf.printf "parsing die, offset %d\n" offset; *)
     let things, dwbits = parse_one_die dwbits ~abbrevs ~addr_size ~string_sec in
     match things with
       Some (tag, attr_vals, has_children) ->
@@ -876,6 +876,13 @@ let get_attr_ref attrs typ =
     `ref1 r | `ref2 r -> Int32.of_int r
   | `ref4 r -> r
   | _ -> raise (Type_mismatch "ref")
+
+let lookup_die tref hash =
+  Hashtbl.find hash (Int32.to_int tref)
+
+let get_attr_deref attrs typ hash =
+  let die_ref = get_attr_ref attrs typ in
+  lookup_die die_ref hash
 
 let attr_present attrs typ =
   List.mem_assoc typ attrs

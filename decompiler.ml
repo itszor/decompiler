@@ -21,6 +21,6 @@ let fetch_die () =
   debug_info_ptr := next_die;
   die_tree, die_hash
 
-let go () =
+let _ =
   let x, h = fetch_die () in
   print_die x h
