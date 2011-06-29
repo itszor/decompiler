@@ -85,24 +85,33 @@ let is_inlined_aggregate = function
       not (attr_present attrs DW_AT_name)
   | _ -> false
 
+let open_scope () =
+  Format.printf "@[<v 2]{"
+
+let close_scope () =
+  Format.printf "@]@,}@,"
+
 let rec print_cu attrs children hash =
-  Printf.printf "Compilation unit: %s\n" (get_attr_string attrs DW_AT_name);
-  Printf.printf "Build dir: %s\n" (get_attr_string attrs DW_AT_comp_dir);
-  Printf.printf "Low PC: %lx\n" (get_attr_address attrs DW_AT_low_pc);
-  Printf.printf "High PC: %lx\n" (get_attr_address attrs DW_AT_high_pc);
+  Format.printf "@[<v>";
+  Format.printf "Compilation unit: %s@," (get_attr_string attrs DW_AT_name);
+  Format.printf "Build dir: %s@," (get_attr_string attrs DW_AT_comp_dir);
+  Format.printf "Low PC: %lx@," (get_attr_address attrs DW_AT_low_pc);
+  Format.printf "High PC: %lx@," (get_attr_address attrs DW_AT_high_pc);
+  Format.printf "@]";
   print_die children hash
 
 and print_base_type attrs =
-  Printf.printf "Base type name: %s\n" (get_attr_string_opt attrs DW_AT_name);
+  Format.printf "@[<v>";
+  Format.printf "Base type name: %s@," (get_attr_string_opt attrs DW_AT_name);
   let enc = parse_encoding (get_attr_int attrs DW_AT_encoding) in
-  Printf.printf "Encoding: %s\n" (string_of_encoding enc);
-  Printf.printf "Byte size: %ld\n" (get_attr_int32 attrs DW_AT_byte_size);
+  Format.printf "Encoding: %s@," (string_of_encoding enc);
+  Format.printf "Byte size: %ld@," (get_attr_int32 attrs DW_AT_byte_size);
   if attr_present attrs DW_AT_endianity then
-    Printf.printf "Endianity specified\n";
+    Format.printf "Endianity specified@,";
   if attr_present attrs DW_AT_bit_size
      || attr_present attrs DW_AT_bit_offset then
-    Printf.printf "Bit size or bit offset specified\n";
-  Printf.printf "--\n"
+    Format.printf "Bit size or bit offset specified@,";
+  Format.printf "@]"
 
 and get_array_size = function
     Die_node ((DW_TAG_subrange_type, attrs), _) ->
@@ -111,24 +120,14 @@ and get_array_size = function
 
 and string_of_decl typ varname hash =
   match typ with
-    Die_tree ((DW_TAG_enumeration_type, attrs), _, _) ->
-      let tag_name = get_attr_string attrs DW_AT_name in
-      Printf.sprintf "enum %s" tag_name, varname
-  | Die_tree ((DW_TAG_structure_type, attrs), _, _) ->
-      begin
-        try let tag_name = get_attr_string attrs DW_AT_name in
-        Printf.sprintf "struct %s" tag_name, varname
-      with Not_found ->
-        "(anonymous struct?)", varname
-      end
-  | Die_node ((DW_TAG_base_type, attrs), _) ->
+    Die_node ((DW_TAG_base_type, attrs), _) ->
       get_attr_string attrs DW_AT_name, varname
   | Die_node ((DW_TAG_typedef, attrs), _) ->
       get_attr_string attrs DW_AT_name, varname
   | Die_node ((DW_TAG_pointer_type, attrs), _) ->
       let to_type = get_attr_deref attrs DW_AT_type hash in
       let typname, varname' = string_of_decl to_type varname hash in
-      Printf.sprintf "%s *" typname, varname'
+      typname, "*" ^ varname'
   | Die_node ((DW_TAG_volatile_type, attrs), _) ->
       let of_type = get_attr_deref attrs DW_AT_type hash in
       let typname, varname' = string_of_decl of_type varname hash in
@@ -152,6 +151,42 @@ and string_of_decl typ varname hash =
       end
   | _ -> "???", varname
 
+and print_decl typ varname hash =
+  match typ with
+    Die_tree ((DW_TAG_enumeration_type, attrs), children, _) ->
+      begin
+        try
+	  let tag_name = get_attr_string attrs DW_AT_name in
+	  Format.printf "enum %s %s" tag_name varname
+	with Not_found ->
+	  Format.printf "enum {@,";
+	  print_enum_vals children;
+	  Format.printf "} %s" varname
+      end
+  | Die_tree ((DW_TAG_structure_type, attrs), children, _) ->
+      begin
+        try
+	  let tag_name = get_attr_string attrs DW_AT_name in
+          Format.printf "struct %s %s" tag_name varname
+	with Not_found ->
+	  Format.printf "struct {";
+	  print_aggregate_members children hash;
+	  Format.printf "} %s" varname
+      end
+  | Die_tree ((DW_TAG_union_type, attrs), children, _) ->
+      begin
+        try
+	  let tag_name = get_attr_string attrs DW_AT_name in
+          Format.printf "union %s %s" tag_name varname
+	with Not_found ->
+	  Format.printf "union {";
+	  print_aggregate_members children hash;
+	  Format.printf "} %s" varname
+      end
+  | x ->
+      let tname, vname = string_of_decl typ varname hash in
+      Format.printf "%s %s" tname vname
+
 and print_aggregate_type die hash =
   match die with
     Die_tree ((DW_TAG_structure_type, attrs), child, _) ->
@@ -162,60 +197,61 @@ and print_aggregate_type die hash =
 
 and print_typedef typedef_attrs hash =
   let td_name = get_attr_string typedef_attrs DW_AT_name in
-  try
-    let td_type = get_attr_deref typedef_attrs DW_AT_type hash in
-    if is_inlined_aggregate td_type then begin
-      Printf.printf "typedef ";
-      print_aggregate_type td_type hash;
-      Printf.printf " %s;\n" td_name
-    end else begin
-      let typname, varname = string_of_decl td_type td_name hash in
-      Printf.printf "typedef %s %s\n" typname varname
-    end
-  with Not_found ->
-    (* Missing DW_AT_type seems to mean "void".  *)
-    Printf.printf "typedef void %s\n" td_name
-
-and print_enum enum_attrs enum_inf =
-  begin match enum_inf with
-    Die_node ((DW_TAG_enumerator, attrs), rest) ->
-      let tag_name = get_attr_string attrs DW_AT_name
-      and enumerator_value = get_attr_int32 attrs DW_AT_const_value in
-      Printf.printf "  %s = 0x%lx,\n" tag_name enumerator_value;
-      print_enum enum_attrs rest
-  | _ -> ()
-  end
+  Format.printf "@[<v>";
+  begin
+    try
+      let td_type = get_attr_deref typedef_attrs DW_AT_type hash in
+      if is_inlined_aggregate td_type then begin
+	Format.printf "typedef ";
+	print_aggregate_type td_type hash;
+	Format.printf " %s;@," td_name
+      end else begin
+	Format.printf "typedef ";
+	print_decl td_type td_name hash;
+	Format.printf ";@,"
+      end
+    with Not_found ->
+      (* Missing DW_AT_type seems to mean "void".  *)
+      Format.printf "typedef void %s@," td_name
+  end;
+  Format.printf "@]"
 
 and print_pointer_type ptr_attrs hash =
-  Printf.printf "Pointer type: ";
+  Format.printf "@[<v>";
+  Format.printf "Pointer type: ";
   let byte_size = get_attr_int32 ptr_attrs DW_AT_byte_size in
-  try
-    let to_type = get_attr_deref ptr_attrs DW_AT_type hash in
-    let typname, varname = string_of_decl to_type "" hash in
-    Printf.printf "%s *%s (size = %ld)\n" typname varname byte_size
-  with Not_found ->
-    Printf.printf "void * (size = %ld)\n" byte_size
+  begin
+    try
+      let to_type = get_attr_deref ptr_attrs DW_AT_type hash in
+      let typname, varname = string_of_decl to_type "" hash in
+      Format.printf "%s *%s (size = %ld)@," typname varname byte_size
+    with Not_found ->
+      Format.printf "void * (size = %ld)@," byte_size
+  end;
+  Format.printf "@]"
 
 and print_enum_vals = function
     Die_empty -> ()
   | Die_node ((DW_TAG_enumerator, en_attrs), next) ->
       let e_name = get_attr_string en_attrs DW_AT_name
       and e_val = get_attr_int32 en_attrs DW_AT_const_value in
-      Printf.printf "  %s = 0x%lx,\n" e_name e_val;
+      Format.printf "@,%s = 0x%lx," e_name e_val;
       print_enum_vals next
   | Die_node _ -> raise (Dwarf_parse_error "non-enumerator in enum")
   | Die_tree _ -> raise (Dwarf_parse_error "unexpected tree node")
 
 and print_enum_type enum_attrs enum_children =
-  try
-    let name = get_attr_string enum_attrs DW_AT_name in
-    Printf.printf "enum %s {\n" name;
-    print_enum_vals enum_children;
-    Printf.printf "}\n"
-  with Not_found ->
-    Printf.printf "enum {\n";
-    print_enum_vals enum_children;
-    Printf.printf "}\n"
+  Format.printf "@[<v 2>";
+  begin
+    try
+      let name = get_attr_string enum_attrs DW_AT_name in
+      Format.printf "enum %s {" name;
+      print_enum_vals enum_children;
+    with Not_found ->
+      Format.printf "enum {";
+      print_enum_vals enum_children;
+  end;
+  Format.printf "@]@,};@,"
 
 and print_aggregate_members mem hash =
   match mem with
@@ -223,33 +259,40 @@ and print_aggregate_members mem hash =
   | Die_node ((DW_TAG_member, mem_attrs), next) ->
       let mem_name = get_attr_string mem_attrs DW_AT_name
       and mem_type = get_attr_deref mem_attrs DW_AT_type hash in
-      let typname, varname = string_of_decl mem_type mem_name hash in
-      Printf.printf "  %s %s;\n" typname varname;
+      Format.printf "@,";
+      print_decl mem_type mem_name hash;
+      Format.printf ";";
       print_aggregate_members next hash
   | Die_node _ -> raise (Dwarf_parse_error "non-enumerator in enum")
   | Die_tree _ -> raise (Dwarf_parse_error "unexpected tree node")
 
 and print_struct_type struct_attrs struct_children hash =
-  try
-    let name = get_attr_string struct_attrs DW_AT_name in
-    Printf.printf "struct %s {\n" name;
-    print_aggregate_members struct_children hash;
-    Printf.printf "}\n"
-  with Not_found ->
-    Printf.printf "struct {\n";
-    print_aggregate_members struct_children hash;
-    Printf.printf "}\n"
+  Format.printf "@[<v 2>";
+  begin
+    try
+      let name = get_attr_string struct_attrs DW_AT_name in
+      Format.printf "struct %s {" name;
+      print_aggregate_members struct_children hash;
+      Format.printf "@]@,};@,"
+    with Not_found ->
+      Format.printf "struct {";
+      print_aggregate_members struct_children hash;
+      Format.printf "@]@,};@,"
+  end
 
 and print_union_type union_attrs union_children hash =
-  try
-    let name = get_attr_string union_attrs DW_AT_name in
-    Printf.printf "union %s {\n" name;
-    print_aggregate_members union_children hash;
-    Printf.printf "}\n"
-  with Not_found ->
-    Printf.printf "union {\n";
-    print_aggregate_members union_children hash;
-    Printf.printf "}\n"
+  Format.printf "@[<v 2>";
+  begin
+    try
+      let name = get_attr_string union_attrs DW_AT_name in
+      Format.printf "union %s {" name;
+      print_aggregate_members union_children hash;
+      Format.printf "@]@,};@,"
+    with Not_found ->
+      Format.printf "union {";
+      print_aggregate_members union_children hash;
+      Format.printf "@]@,};@,"
+  end
 
 and print_die die hash =
   match die with
@@ -274,9 +317,28 @@ and print_die die hash =
       print_union_type attrs child hash;
       print_die sibl hash
   | Die_tree ((node, _), child, sibl) ->
-      Printf.printf "*** skipping unknown tree (%s)\n" (string_of_tag node);
+      Format.printf "@[<v>";
+      Format.printf "*** skipping unknown tree (%s)@," (string_of_tag node);
+      Format.printf "@]";
       print_die child hash; print_die sibl hash
   | Die_node ((node, _), x) ->
-      Printf.printf "*** skipping unknown node (%s)\n" (string_of_tag node);
+      Format.printf "@[<v>";
+      Format.printf "*** skipping unknown node (%s)@," (string_of_tag node);
+      Format.printf "@]";
       print_die x hash
   | _ -> ()
+
+let print_all_dies die hash =
+  let rec iter = function
+      Die_tree (_, _, sibl) ->
+	Format.printf "@[<v 2>";
+	print_die die hash;
+	Format.printf "@]";
+	iter sibl
+    | Die_node _ ->
+	Format.printf "@[<v 2>";
+	print_die die hash;
+	Format.printf "@]";
+    | Die_empty -> () in
+  iter die;
+  Format.print_newline ()
