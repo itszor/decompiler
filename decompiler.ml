@@ -23,4 +23,4 @@ let fetch_die () =
 
 let _ =
   let x, h = fetch_die () in
-  print_die x h
+  print_all_dies x h

@@ -91,14 +91,13 @@ let open_scope () =
 let close_scope () =
   Format.printf "@]@,}@,"
 
-let rec print_cu attrs children hash =
+let rec print_cu_attrs attrs =
   Format.printf "@[<v>";
   Format.printf "Compilation unit: %s@," (get_attr_string attrs DW_AT_name);
   Format.printf "Build dir: %s@," (get_attr_string attrs DW_AT_comp_dir);
   Format.printf "Low PC: %lx@," (get_attr_address attrs DW_AT_low_pc);
   Format.printf "High PC: %lx@," (get_attr_address attrs DW_AT_high_pc);
-  Format.printf "@]";
-  print_die children hash
+  Format.printf "@]"
 
 and print_base_type attrs =
   Format.printf "@[<v>";
@@ -241,14 +240,13 @@ and print_enum_vals = function
   | Die_tree _ -> raise (Dwarf_parse_error "unexpected tree node")
 
 and print_enum_type enum_attrs enum_children =
-  Format.printf "@[<v 2>";
   begin
     try
       let name = get_attr_string enum_attrs DW_AT_name in
-      Format.printf "enum %s {" name;
+      Format.printf "enum %s@,@[<v 2>{" name;
       print_enum_vals enum_children;
     with Not_found ->
-      Format.printf "enum {";
+      Format.printf "enum {@[<v 2>";
       print_enum_vals enum_children;
   end;
   Format.printf "@]@,};@,"
@@ -296,49 +294,43 @@ and print_union_type union_attrs union_children hash =
 
 and print_die die hash =
   match die with
-    Die_node ((DW_TAG_compile_unit, cu_attrs), children) ->
-      print_cu cu_attrs children hash
-  | Die_node ((DW_TAG_typedef, attrs), children) ->
-      print_typedef attrs hash;
-      print_die children hash
-  | Die_node ((DW_TAG_base_type, attrs), children) ->
-      print_base_type attrs;
-      print_die children hash
-  | Die_node ((DW_TAG_pointer_type, attrs), sibl) ->
-      print_pointer_type attrs hash;
-      print_die sibl hash
-  | Die_tree ((DW_TAG_enumeration_type, attrs), child, sibl) ->
+    Die_node ((DW_TAG_typedef, attrs), _) ->
+      print_typedef attrs hash
+  | Die_node ((DW_TAG_base_type, attrs), _) ->
+      print_base_type attrs
+  | Die_node ((DW_TAG_pointer_type, attrs), _) ->
+      print_pointer_type attrs hash
+  | Die_tree ((DW_TAG_enumeration_type, attrs), child, _) ->
       print_enum_type attrs child;
-      print_die sibl hash
-  | Die_tree ((DW_TAG_structure_type, attrs), child, sibl) ->
+  | Die_tree ((DW_TAG_structure_type, attrs), child, _) ->
       print_struct_type attrs child hash;
-      print_die sibl hash
-  | Die_tree ((DW_TAG_union_type, attrs), child, sibl) ->
+  | Die_tree ((DW_TAG_union_type, attrs), child, _) ->
       print_union_type attrs child hash;
-      print_die sibl hash
-  | Die_tree ((node, _), child, sibl) ->
+  | Die_tree ((node, _), child, _) ->
       Format.printf "@[<v>";
       Format.printf "*** skipping unknown tree (%s)@," (string_of_tag node);
       Format.printf "@]";
-      print_die child hash; print_die sibl hash
-  | Die_node ((node, _), x) ->
+      print_die child hash
+  | Die_node ((node, _), _) ->
       Format.printf "@[<v>";
       Format.printf "*** skipping unknown node (%s)@," (string_of_tag node);
-      Format.printf "@]";
-      print_die x hash
+      Format.printf "@]"
   | _ -> ()
 
 let print_all_dies die hash =
   let rec iter = function
-      Die_tree (_, _, sibl) ->
-	Format.printf "@[<v 2>";
-	print_die die hash;
-	Format.printf "@]";
-	iter sibl
-    | Die_node _ ->
-	Format.printf "@[<v 2>";
-	print_die die hash;
-	Format.printf "@]";
-    | Die_empty -> () in
+    Die_tree (_, _, sibl) ->
+      Format.printf "@[<v 0>";
+      print_die die hash;
+      Format.printf "@]@.";
+      iter sibl
+  | Die_node ((DW_TAG_compile_unit, cu_attrs), children) ->
+      print_cu_attrs cu_attrs;
+      iter children
+  | Die_node _ ->
+      Format.printf "@[<v 0>";
+      print_die die hash;
+      Format.printf "@]@.";
+  | Die_empty -> () in
   iter die;
   Format.print_newline ()
