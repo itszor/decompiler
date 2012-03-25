@@ -668,6 +668,17 @@ let parse_comp_unit_header dwbits =
 	address_size = address_size }, rest
   | { _ } -> raise (Dwarf_parse_error "parse_comp_unit_header")
 
+let get_string dwbits =
+  let b = Buffer.create 10 in
+  let rec gather bits =
+    bitmatch bits with
+      { "\000" : 8 : string; rest : -1 : bitstring } ->
+	Buffer.contents b, rest
+    | { c : 8 : string; rest : -1 : bitstring } ->
+	Buffer.add_string b c;
+	gather rest in
+  gather dwbits
+
 let rec parse_form dwbits form ~addr_size ~string_sec =
   match form with
     DW_FORM_addr ->
@@ -731,15 +742,7 @@ let rec parse_form dwbits form ~addr_size ~string_sec =
       let data, rest = parse_uleb128 dwbits in
       `udata data, rest
   | DW_FORM_string ->
-      let b = Buffer.create 10 in
-      let rec gather bits =
-        bitmatch bits with
-          { "\000" : 8 : string; rest : -1 : bitstring } ->
-	    Buffer.contents b, rest
-	| { c : 8 : string; rest : -1 : bitstring } ->
-	    Buffer.add_string b c;
-	    gather rest in
-      let str, rest = gather dwbits in
+      let str, rest = get_string dwbits in
       `string str, rest
   | DW_FORM_strp ->
       (bitmatch dwbits with
