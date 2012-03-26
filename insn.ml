@@ -46,6 +46,8 @@ type insn =
     write_operands : operand array;
     read_operands : operand array;
     write_flags : cc_bits list;
+    (* READ_FLAGS does *not* count flags required by insn
+       conditionalisation!  *)
     read_flags : cc_bits list;
     clobber_flags : cc_bits list
   }

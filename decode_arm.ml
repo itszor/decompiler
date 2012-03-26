@@ -289,6 +289,24 @@ let decode_dp_misc cond ibits =
 	    false : 1; _ : 2; true : 1 } ->
 	    decode_dp_reg_shifted_reg cond op1 bits19_8 op2 bits3_0)
 
+let decode_str ?(unprivileged=false) ~reg cond bits25_0 =
+  bad_insn
+
+(* Decode 32 bits of ibits.  *)
+let decode_ldr_str_ldrb_strb cond ibits =
+  let bits25_0 = Bitstring.subbitstring ibits 6 26 in
+  bitmatch ibits with
+    { _ : 4; 0b010 : 3; (0b00010 | 0b01010) : 5 } ->
+    decode_str ~unprivileged:true ~reg:false cond bits25_0
+  | { _ : 4; 0b011 : 3; (0b00010 | 0b01010) : 5; _ : 15; false : 1 } ->
+    decode_str ~unprivileged:true ~reg:true cond bits25_0
+  | { _ : 4; 0b010 : 3; _ : 2; false : 1; _ : 1; false : 1 } ->
+    decode_str ~reg:false cond bits25_0
+  | { _ : 4; 0b011 : 3; _ : 2; false : 1; _ : 1; false : 1; _ : 15;
+      false : 1 } ->
+    decode_str ~reg:true cond bits25_0
+  | { _ } -> bad_insn
+
 let decode_insn ibits =
   bitmatch ibits with
     { 0b1111 : 4 : littleendian; rest : 28 : bitstring } ->
@@ -297,6 +315,12 @@ let decode_insn ibits =
       (0b000 | 0b001) : 3 : littleendian;
       _ : 25 : bitstring } ->
       decode_dp_misc (cond_of_code cond) ibits
+  | { cond : 4 : littleendian;
+      0b010 : 3 } ->
+      decode_ldr_str_ldrb_strb (cond_of_code cond) ibits
+  | { cond : 4 : littleendian;
+      0b011 : 3; _ : 20; false : 1 } ->
+      decode_ldr_str_ldrb_strb (cond_of_code cond) ibits
   | { _ } ->
       bad_insn
   
