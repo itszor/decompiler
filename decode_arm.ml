@@ -295,6 +295,12 @@ let decode_str ?(unprivileged=false) ~reg cond bits25_0 =
 let decode_ldr ?(unprivileged=false) ?(literal=false) ~reg cond bits25_0 =
   bad_insn
 
+let decode_strb ?(unprivileged=false) ~reg cond bits25_0 =
+  bad_insn
+
+let decode_ldrb ?(unprivileged=false) ?(literal=false) ~reg cond bits25_0 =
+  bad_insn
+
 (* Decode 32 bits of ibits.  *)
 let decode_ldr_str_ldrb_strb cond ibits =
   let bits25_0 = Bitstring.subbitstring ibits 6 26 in
@@ -305,8 +311,7 @@ let decode_ldr_str_ldrb_strb cond ibits =
     decode_str ~unprivileged:true ~reg:true cond bits25_0
   | { 0b010 : 3; _ : 2; false : 1; _ : 1; false : 1 } ->
     decode_str ~reg:false cond bits25_0
-  | { 0b011 : 3; _ : 2; false : 1; _ : 1; false : 1; _ : 15;
-      false : 1 } ->
+  | { 0b011 : 3; _ : 2; false : 1; _ : 1; false : 1; _ : 15; false : 1 } ->
     decode_str ~reg:true cond bits25_0
   | { 0b010 : 3; (0b00011 | 0b01011) : 5 } ->
     decode_ldr ~unprivileged:true ~reg:false cond bits25_0
@@ -318,6 +323,24 @@ let decode_ldr_str_ldrb_strb cond ibits =
     decode_ldr ~reg:false cond bits25_0
   | { 0b011 : 3; _ : 2; false : 1; _ : 1; true : 1; _ : 15; false : 1 } ->
     decode_ldr ~reg:true cond bits25_0
+  | { 0b010 : 3; (0b00110 | 0b01110) : 5 } ->
+    decode_strb ~unprivileged:true ~reg:false cond bits25_0
+  | { 0b011 : 3; (0b00110 | 0b01110) : 5; _ : 15; false : 1 } ->
+    decode_strb ~unprivileged:true ~reg:true cond bits25_0
+  | { 0b010 : 3; _ : 2; true : 1; _ : 1; false : 1 } ->
+    decode_strb ~reg:false cond bits25_0
+  | { 0b011 : 3; _ : 2; true : 1; _ : 1; false : 1; _ : 15; false : 1 } ->
+    decode_strb ~reg:true cond bits25_0
+  | { 0b010 : 3; (0b00111 | 0b01111) : 5 } ->
+    decode_ldrb ~unprivileged:true ~reg:false cond bits25_0
+  | { 0b011 : 3; (0b00111 | 0b01111) : 5; _ : 15; false : 1 } ->
+    decode_ldrb ~unprivileged:true ~reg:true cond bits25_0
+  | { 0b010 : 3; _ : 2; true : 1; _ : 1; true : 1; 0b1111 : 4 } ->
+    decode_ldrb ~literal:true ~reg:false cond bits25_0
+  | { 0b010 : 3; _ : 2; true : 1; _ : 1; true : 1 } ->
+    decode_ldrb ~reg:false cond bits25_0
+  | { 0b011 : 3; _ : 2; true : 1; _ : 1; true : 1; _ : 15; false : 1 } ->
+    decode_ldrb ~reg:true cond bits25_0
   | { _ } -> bad_insn
 
 let decode_insn ibits =
