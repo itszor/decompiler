@@ -305,18 +305,24 @@ let sign_extend imm32 bitpos =
   let ones = Int32.lognot (Int32.pred bit) in
   if Int32.logand imm32 bit = 0l then imm32 else (Int32.logor imm32 ones)
 
-let decode_str ?(unprivileged=false) ?(byte=false) ~reg cond bits25_0 =
+let decode_mem ?(unprivileged=false) ?(byte=false) ~load ~reg cond bits25_0 =
   if unprivileged then
     bad_insn
   else
     if reg then
       bitmatch bits25_0 with
-	{ _ : 1; p : 1; u : 1; false : 1; w : 1; false : 1; rn : 4; rt : 4;
+	{ _ : 1; p : 1; u : 1; _ : 1; w : 1; _ : 1; rn : 4; rt : 4;
 	  shift_bits : 7 : bitstring; false : 1; rm : 4 } ->
 	  let writeback = (not p) || w in
 	  let wr_operands =
-	    if writeback then [| hard_reg rn |] else [| |] in
-	  let rd_operands = [| hard_reg rt; hard_reg rn; hard_reg rm |] in
+	    match load, writeback with
+	      false, true -> [| hard_reg rn |]
+	    | false, false -> [| |]
+	    | true, true -> [| hard_reg rt; hard_reg rn |]
+	    | true, false -> [| hard_reg rt |] in
+	  let rd_operands =
+	    if load then [| hard_reg rn; hard_reg rm |]
+	    else [| hard_reg rt; hard_reg rn; hard_reg rm |] in
 	  let shift_opt, shift_operands = decode_imm_shift_for_mem shift_bits in
 	  let am = match shift_opt, u with
 	    None, true -> Base_plus_reg
@@ -324,7 +330,12 @@ let decode_str ?(unprivileged=false) ?(byte=false) ~reg cond bits25_0 =
 	  | Some shift, true -> Base_plus_shifted_reg shift
 	  | Some shift, false -> Base_minus_shifted_reg shift in
 	  let ai = { addr_mode = am; writeback = writeback; pre_modify = p } in
-	  let opc = if byte then (Strb ai) else (Str ai) in
+	  let opc =
+	    match load, byte with
+	      false, true -> Strb ai
+	    | false, false -> Str ai
+	    | true, true -> Ldrb ai
+	    | true, false -> Ldr ai in
 	  {
 	    opcode = conditionalise cond opc;
 	    write_operands = wr_operands;
@@ -334,19 +345,30 @@ let decode_str ?(unprivileged=false) ?(byte=false) ~reg cond bits25_0 =
       | { _ } -> bad_insn
     else  (* base+offset addressing *)
       bitmatch bits25_0 with
-        { false : 1; p : 1; u : 1; false : 1; w : 1; false : 1;
-	  rn : 4; rt : 4; imm : 12 } ->
+        { false : 1; p : 1; u : 1; _ : 1; w : 1; _ : 1; rn : 4; rt : 4;
+	  imm : 12 } ->
 	  let writeback = (not p) || w in
 	  let wr_operands =
-	    if writeback then [| hard_reg rn |] else [| |] in
+	    match load, writeback with
+	      false, true -> [| hard_reg rn |]
+	    | false, false -> [| |]
+	    | true, true -> [| hard_reg rt; hard_reg rn |]
+	    | true, false -> [| hard_reg rt |] in
 	  let simm = sign_extend (Int32.of_int imm) 11 in
 	  let immval =
 	    if u then Immediate simm
 	    else Immediate (Int32.neg simm) in
-	  let rd_operands = [| hard_reg rt; hard_reg rn; immval |] in
+	  let rd_operands =
+	    if load then [| hard_reg rn; immval |]
+	    else [| hard_reg rt; hard_reg rn; immval |] in
 	  let ai = { addr_mode = Base_plus_imm; writeback = writeback;
 		     pre_modify = p } in
-	  let opc = if byte then (Strb ai) else (Str ai) in
+	  let opc =
+	    match load, byte with 
+	      false, true -> Strb ai
+	    | false, false -> Str ai
+	    | true, true -> Ldrb ai
+	    | true, false -> Ldr ai in
 	  {
 	    opcode = conditionalise cond opc;
 	    write_operands = wr_operands;
@@ -355,14 +377,18 @@ let decode_str ?(unprivileged=false) ?(byte=false) ~reg cond bits25_0 =
 	  }
       | { _ } -> bad_insn
 
-let decode_ldr ?(unprivileged=false) ?(literal=false) ~reg cond bits25_0 =
-  bad_insn
+let decode_str ?(unprivileged=false) ~reg cond bits25_0 =
+  decode_mem ~unprivileged ~byte:false ~load:false ~reg cond bits25_0
+
+let decode_ldr ?(unprivileged=false) ?(literal=false) ~reg cond
+	       bits25_0 =
+  decode_mem ~unprivileged ~byte:false ~load:true ~reg cond bits25_0
 
 let decode_strb ?(unprivileged=false) ~reg cond bits25_0 =
-  decode_str ~unprivileged ~byte:true ~reg cond bits25_0
+  decode_mem ~unprivileged ~byte:true ~load:false ~reg cond bits25_0
 
 let decode_ldrb ?(unprivileged=false) ?(literal=false) ~reg cond bits25_0 =
-  bad_insn
+  decode_mem ~unprivileged ~byte:true ~load:true ~reg cond bits25_0
 
 (* Decode 32 bits of ibits.  *)
 let decode_ldr_str_ldrb_strb cond ibits =
