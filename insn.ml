@@ -11,8 +11,10 @@ and condition = Eq | Ne | Cs | Cc | Mi | Pl | Vs | Vc
 	      | Hi | Ls | Ge | Lt | Gt | Le
 
 type opcode =
-    Ldr
-  | Str
+    Ldr of access_info
+  | Str of access_info
+  | Ldrb of access_info
+  | Strb of access_info
   | And
   | Eor
   | Sub
@@ -39,6 +41,20 @@ and shift_opcode =
   | Asr
   | Ror
   | Rrx
+
+and addr_mode =
+    Base_plus_imm
+  | Base_plus_reg
+  | Base_minus_reg
+  | Base_plus_shifted_reg of shift_opcode
+  | Base_minus_shifted_reg of shift_opcode
+
+and access_info =
+  {
+    addr_mode : addr_mode;
+    writeback : bool;
+    pre_modify : bool
+  }
 
 type insn =
   {

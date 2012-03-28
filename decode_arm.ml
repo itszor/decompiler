@@ -79,19 +79,19 @@ let add_flag_if_sbit flags new_flag s_bit =
    written by the shifter.  *)
 let decode_imm_shift opcode s_bit shiftbits rd_operands ~rd_flags ~wr_flags =
   bitmatch shiftbits with
-    { imm : 5 : littleendian; 0b00 : 2 } ->
+    { imm : 5; 0b00 : 2 } ->
       if imm = 0 then
         opcode, rd_operands, rd_flags, wr_flags
       else
         Shifted (opcode, Lsl),
 	Array.append rd_operands [| Immediate (Int32.of_int imm) |],
 	rd_flags, add_flag_if_sbit wr_flags C_from_shift s_bit
-  | { imm : 5 : littleendian; 0b01 : 2 } ->
+  | { imm : 5; 0b01 : 2 } ->
       let imm' = if imm = 0 then 32 else imm in
       Shifted (opcode, Lsr),
       Array.append rd_operands [| Immediate (Int32.of_int imm') |],
       rd_flags, add_flag_if_sbit wr_flags C_from_shift s_bit
-  | { imm : 5 : littleendian; 0b10 : 2 } ->
+  | { imm : 5; 0b10 : 2 } ->
       let imm' = if imm = 0 then 32 else imm in
       Shifted (opcode, Asr),
       Array.append rd_operands [| Immediate (Int32.of_int imm') |],
@@ -104,6 +104,24 @@ let decode_imm_shift opcode s_bit shiftbits rd_operands ~rd_flags ~wr_flags =
       Shifted (opcode, Ror),
       Array.append rd_operands [| Immediate (Int32.of_int imm) |],
       rd_flags, add_flag_if_sbit wr_flags C_from_shift s_bit
+
+let decode_imm_shift_for_mem shiftbits =
+  bitmatch shiftbits with
+    { imm : 5; 0b00 : 2 } ->
+      if imm = 0 then
+        None, [| |]
+      else
+	Some Lsl, [| Immediate (Int32.of_int imm) |]
+  | { imm : 5; 0b01 : 2 } ->
+    let imm' = if imm = 0 then 32 else imm in
+    Some Lsr, [| Immediate (Int32.of_int imm') |]
+  | { imm : 5; 0b10 : 2 } ->
+    let imm' = if imm = 0 then 32 else imm in
+    Some Asr, [| Immediate (Int32.of_int imm') |]
+  | { 0 : 5; 0b11 : 2 } ->
+    Some Rrx, [| |]
+  | { imm : 5; 0b11 : 2 } ->
+    Some Ror, [| Immediate (Int32.of_int imm) |]
 
 let imm32_rotate i amt =
   let amt' = amt land 31 in
@@ -123,8 +141,7 @@ let immed_carry_effect s_bit rotation modified_imm wr_flags =
 
 let decode_imm_const s_bit coded_imm rd_operands ~wr_flags =
   bitmatch coded_imm with
-    { rotation : 4 : littleendian, bind (rotation * 2);
-      immed : 8 : littleendian } ->
+    { rotation : 4 : bind (rotation * 2); immed : 8 } ->
     let int_val = imm32_rotate (Int32.of_int immed) rotation in
     let wr_flags' = immed_carry_effect s_bit rotation int_val wr_flags in
     Array.append rd_operands [| Immediate int_val |], wr_flags'
@@ -161,11 +178,7 @@ let read_flags_for_op opcode =
 let decode_dp cond opcode ~s_bit ~reg bits19_0 =
   if reg then
     bitmatch bits19_0 with
-      { rn : 4 : littleendian;
-        rd : 4 : littleendian;
-	imm_shift : 7 : bitstring;
-	false : 1;
-	rm : 4 : littleendian } ->
+      { rn : 4; rd : 4; imm_shift : 7 : bitstring; false : 1; rm : 4 } ->
 	let rd_operands =
 	  match opcode with
 	    Mov | Mvn -> [| hard_reg rm |]
@@ -186,9 +199,7 @@ let decode_dp cond opcode ~s_bit ~reg bits19_0 =
     | { _ } -> bad_insn
   else
     bitmatch bits19_0 with
-      { rn : 4 : littleendian;
-        rd : 4 : littleendian;
-	coded_imm : 12 : bitstring } ->
+      { rn : 4; rd : 4; coded_imm : 12 : bitstring } ->
       let rd_operands =
         match opcode with
 	  Mov | Mvn -> [| |]
@@ -252,9 +263,9 @@ let decode_dp_misc cond ibits =
       op1 : 5 : bitstring;
       rest : 20 : bitstring } ->
         (bitmatch op1 with
-	  { 0b10000 : 5 : littleendian } -> decode_movw cond rest
-	| { 0b10100 : 5 : littleendian } -> decode_movt cond rest
-	| { (0b10010 | 0b10110) : 5 : littleendian } ->
+	  { 0b10000 : 5 } -> decode_movw cond rest
+	| { 0b10100 : 5 } -> decode_movt cond rest
+	| { (0b10010 | 0b10110) : 5 } ->
 	  decode_msr_and_hints cond op1 rest
 	| { _ } ->
 	  let bits24_0 = Bitstring.subbitstring ibits 7 25 in
@@ -289,14 +300,66 @@ let decode_dp_misc cond ibits =
 	    false : 1; _ : 2; true : 1 } ->
 	    decode_dp_reg_shifted_reg cond op1 bits19_8 op2 bits3_0)
 
-let decode_str ?(unprivileged=false) ~reg cond bits25_0 =
-  bad_insn
+let sign_extend imm32 bitpos =
+  let bit = Int32.shift_left 1l bitpos in
+  let ones = Int32.lognot (Int32.pred bit) in
+  if Int32.logand imm32 bit = 0l then imm32 else (Int32.logor imm32 ones)
+
+let decode_str ?(unprivileged=false) ?(byte=false) ~reg cond bits25_0 =
+  if unprivileged then
+    bad_insn
+  else
+    if reg then
+      bitmatch bits25_0 with
+	{ _ : 1; p : 1; u : 1; false : 1; w : 1; false : 1; rn : 4; rt : 4;
+	  shift_bits : 7 : bitstring; false : 1; rm : 4 } ->
+	  let writeback = (not p) || w in
+	  let wr_operands =
+	    if writeback then [| hard_reg rn |] else [| |] in
+	  let rd_operands = [| hard_reg rt; hard_reg rn; hard_reg rm |] in
+	  let shift_opt, shift_operands = decode_imm_shift_for_mem shift_bits in
+	  let am = match shift_opt, u with
+	    None, true -> Base_plus_reg
+	  | None, false -> Base_minus_reg
+	  | Some shift, true -> Base_plus_shifted_reg shift
+	  | Some shift, false -> Base_minus_shifted_reg shift in
+	  let ai = { addr_mode = am; writeback = writeback; pre_modify = p } in
+	  let opc = if byte then (Strb ai) else (Str ai) in
+	  {
+	    opcode = conditionalise cond opc;
+	    write_operands = wr_operands;
+	    read_operands = Array.append rd_operands shift_operands;
+	    write_flags = []; read_flags = []; clobber_flags = []
+	  }
+      | { _ } -> bad_insn
+    else  (* base+offset addressing *)
+      bitmatch bits25_0 with
+        { false : 1; p : 1; u : 1; false : 1; w : 1; false : 1;
+	  rn : 4; rt : 4; imm : 12 } ->
+	  let writeback = (not p) || w in
+	  let wr_operands =
+	    if writeback then [| hard_reg rn |] else [| |] in
+	  let simm = sign_extend (Int32.of_int imm) 11 in
+	  let immval =
+	    if u then Immediate simm
+	    else Immediate (Int32.neg simm) in
+	  let rd_operands = [| hard_reg rt; hard_reg rn; immval |] in
+	  let ai = { addr_mode = Base_plus_imm; writeback = writeback;
+		     pre_modify = p } in
+	  let opc = if byte then (Strb ai) else (Str ai) in
+	  {
+	    opcode = conditionalise cond opc;
+	    write_operands = wr_operands;
+	    read_operands = rd_operands;
+	    write_flags = []; read_flags = []; clobber_flags = []
+	  }
+      | { _ } -> bad_insn
 
 let decode_ldr ?(unprivileged=false) ?(literal=false) ~reg cond bits25_0 =
   bad_insn
 
 let decode_strb ?(unprivileged=false) ~reg cond bits25_0 =
-  bad_insn
+  decode_str ~unprivileged ~byte:true ~reg cond bits25_0
 
 let decode_ldrb ?(unprivileged=false) ?(literal=false) ~reg cond bits25_0 =
   bad_insn
@@ -345,17 +408,13 @@ let decode_ldr_str_ldrb_strb cond ibits =
 
 let decode_insn ibits =
   bitmatch ibits with
-    { 0b1111 : 4 : littleendian; rest : 28 : bitstring } ->
+    { 0b1111 : 4; rest : 28 : bitstring } ->
       decode_nv_space rest
-  | { cond : 4 : littleendian;
-      (0b000 | 0b001) : 3 : littleendian;
-      _ : 25 : bitstring } ->
+  | { cond : 4; (0b000 | 0b001) : 3; _ : 25 : bitstring } ->
       decode_dp_misc (cond_of_code cond) ibits
-  | { cond : 4 : littleendian;
-      0b010 : 3 } ->
+  | { cond : 4; 0b010 : 3 } ->
       decode_ldr_str_ldrb_strb (cond_of_code cond) ibits
-  | { cond : 4 : littleendian;
-      0b011 : 3; _ : 20; false : 1 } ->
+  | { cond : 4; 0b011 : 3; _ : 20; false : 1 } ->
       decode_ldr_str_ldrb_strb (cond_of_code cond) ibits
   | { _ } ->
       bad_insn
