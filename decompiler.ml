@@ -14,7 +14,19 @@ let abbrevs = parse_abbrevs cu_debug_abbrev
 let debug_line = get_section_by_name elfbits ehdr shdr_arr ".debug_line"
 let lines, remaining_debug_line = Line.parse_lines debug_line
 let text = get_section_by_name elfbits ehdr shdr_arr ".text"
-let code, remaining_code = Decode_arm.decode_insns text 40
+(*let code, remaining_code = Decode_arm.decode_insns text 40*)
+let strtab = get_section_by_name elfbits ehdr shdr_arr ".strtab"
+let symtab = get_section_by_name elfbits ehdr shdr_arr ".symtab"
+let symbols = Symbols.read_symbols symtab
+
+let code_for_sym symname =
+  let sym = Symbols.find_named_symbol symbols strtab symname in
+  let start_offset = Int32.sub sym.st_value
+			       shdr_arr.(sym.st_shndx).sh_addr in
+  let insns, _ = Decode_arm.decode_insns
+		   (Bitstring.dropbits (8 * (Int32.to_int start_offset)) text)
+		   ((Int32.to_int sym.st_size) / 4) in
+  insns
 
 let debug_info_ptr = ref remaining_debug_info
 let fetch_die () =

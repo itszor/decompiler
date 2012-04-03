@@ -16,7 +16,7 @@ BITSTRING_PP := -pp "camlp4of bitstring/bitstring.cma \
 
 # Source plus generated files.
 OCAMLSRC := decompiler.ml dwarfreader.ml elfreader.ml dwarfprint.ml line.ml \
-	    decode_arm.ml insn.ml
+	    decode_arm.ml insn.ml symbols.ml
 
 OCAMLOBJ := $(shell < .depend $(OCAMLDSORT) -byte $(OCAMLSRC))
 

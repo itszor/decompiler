@@ -185,13 +185,17 @@ let decode_dp cond opcode ~s_bit ~reg bits19_0 =
 	  | _ -> [| hard_reg rn; hard_reg rm |]
 	and rd_flags = read_flags_for_op opcode
 	and wr_flags = conditional_set_flags_for_op opcode s_bit in
+	let wr_operands =
+	  match opcode with
+	    Cmp | Cmn | Teq | Tst -> [| |]
+	  | _ -> [| hard_reg rd |] in
 	let opcode', rd_operands', rd_flags', wr_flags'
 	  = decode_imm_shift opcode s_bit imm_shift rd_operands ~rd_flags
 			     ~wr_flags in
 	{
 	  opcode = conditionalise cond opcode';
 	  read_operands = rd_operands';
-	  write_operands = [| hard_reg rd |];
+	  write_operands = wr_operands;
 	  read_flags = rd_flags';
 	  write_flags = wr_flags';
 	  clobber_flags = []
@@ -206,12 +210,16 @@ let decode_dp cond opcode ~s_bit ~reg bits19_0 =
 	| _ -> [| hard_reg rn |]
       and rd_flags = read_flags_for_op opcode
       and wr_flags = conditional_set_flags_for_op opcode s_bit in
+      let wr_operands =
+        match opcode with
+          Cmp | Cmn | Teq | Tst -> [| |]
+	| _ -> [| hard_reg rd |] in
       let rd_operands', wr_flags'
         = decode_imm_const s_bit coded_imm rd_operands ~wr_flags in
       {
         opcode = conditionalise cond opcode;
 	read_operands = rd_operands';
-	write_operands = [| hard_reg rd |];
+	write_operands = wr_operands;
 	read_flags = rd_flags;
 	write_flags = wr_flags';
 	clobber_flags = []
@@ -432,6 +440,78 @@ let decode_ldr_str_ldrb_strb cond ibits =
     decode_ldrb ~reg:true cond bits25_0
   | { _ } -> bad_insn
 
+let decode_media cond ibits =
+  bad_insn
+
+let decode_branch cond ~link bits23_0 =
+  bitmatch bits23_0 with
+    { bits : 24 } ->
+      let offset = sign_extend (Int32.of_int bits) 23 in
+      let opcode = if link then Bl else B in
+        {
+	  opcode = conditionalise cond opcode;
+	  write_operands = [| |];
+	  read_operands = [| PC_relative offset |];
+	  write_flags = []; read_flags = []; clobber_flags = []
+	}
+  | { _ } -> bad_insn
+
+let hard_reg_list bits =
+  let rlist = ref [] in
+  for i = 15 downto 0 do
+    if bits land (1 lsl i) <> 0 then
+      rlist := (hard_reg i) :: !rlist
+  done;
+  Array.of_list !rlist
+
+let decode_stm cond bits24_0 =
+  bitmatch bits24_0 with
+    { before : 1; increment : 1; false : 1; writeback : 1; false : 1;
+      basereg : 4; reglist : 16 } ->
+      let info = { before = before; increment = increment } in
+      let wr_operands = if writeback then [| hard_reg basereg |] else [| |] in
+      let regs = hard_reg_list reglist in
+      {
+        opcode = conditionalise cond (Stm info);
+	read_operands = Array.append [| hard_reg basereg |] regs;
+	write_operands = wr_operands;
+	write_flags = []; read_flags = []; clobber_flags = []
+      }
+  | { _ } -> bad_insn
+
+let decode_ldm cond ~exception_return bits24_0 =
+  bitmatch bits24_0 with
+    { before : 1; increment : 1; false : 1; writeback : 1; true : 1;
+      basereg : 4; reglist : 16 } ->
+      let info = { before = before; increment = increment } in
+      let wr_operands = if writeback then [| hard_reg basereg |] else [| |] in
+      let regs = hard_reg_list reglist in
+      {
+        opcode = conditionalise cond (Stm info);
+	read_operands = [| hard_reg basereg |];
+	write_operands = Array.append wr_operands regs;
+	write_flags = []; read_flags = []; clobber_flags = []
+      }
+  | { _ } -> bad_insn
+
+(* Decode 32 bits of ibits.  *)
+let decode_branch_block_xfer cond ibits =
+  bitmatch ibits with
+    { _ : 4; 0b1011 : 4; bits23_0 : 24 : bitstring } ->
+      decode_branch cond ~link:true bits23_0
+  | { _ : 4; 0b1010 : 4; bits23_0 : 24 : bitstring } ->
+      decode_branch cond ~link:false bits23_0
+  | { _ : 4; 0b100 : 3; _ : 4; false : 1 } ->
+      let bits24_0 = Bitstring.subbitstring ibits 7 25 in
+      decode_stm cond bits24_0
+  | { _ : 4; 0b100 : 3; _ : 4; true : 1 } ->
+      let bits24_0 = Bitstring.subbitstring ibits 7 25
+      and exception_return = Bitstring.is_set ibits 16 in
+      decode_ldm cond ~exception_return bits24_0
+
+let decode_svc_copro cond ibits =
+  bad_insn
+
 let decode_insn ibits =
   bitmatch ibits with
     { 0b1111 : 4; rest : 28 : bitstring } ->
@@ -442,6 +522,12 @@ let decode_insn ibits =
       decode_ldr_str_ldrb_strb (cond_of_code cond) ibits
   | { cond : 4; 0b011 : 3; _ : 20; false : 1 } ->
       decode_ldr_str_ldrb_strb (cond_of_code cond) ibits
+  | { cond : 4; 0b011 : 3; _ : 20; true : 1 } ->
+      decode_media (cond_of_code cond) ibits
+  | { cond : 4; (0b100 | 0b101) : 3 } ->
+      decode_branch_block_xfer (cond_of_code cond) ibits
+  | { cond : 4; (0b110 | 0b111) : 3 } ->
+      decode_svc_copro (cond_of_code cond) ibits
   | { _ } ->
       bad_insn
   

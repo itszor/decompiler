@@ -109,13 +109,14 @@ let parse_sym elfbits =
       st_size : 32 : littleendian;	(* Symbol size.  *)
       st_info : 8 : littleendian;	(* Symbol type and binding.  *)
       st_other : 8 : littleendian;	(* Symbol visibility.  *)
-      st_shndx : 16 : littleendian } ->	(* Section index.  *)
+      st_shndx : 16 : littleendian;	(* Section index.  *)
+      rest : -1 : bitstring } ->
       { st_name = st_name;
         st_value = st_value;
 	st_size = st_size;
 	st_info = st_info;
 	st_other = st_other;
-	st_shndx = st_shndx }
+	st_shndx = st_shndx }, rest
   | { _ } ->
       raise (Elf_read_error "Can't parse symbol")
 
@@ -250,6 +251,10 @@ let get_program_headers elfbits ehdr =
 	(8 * ehdr.e_phentsize) in
       parse_phdr phdr_bits)
 
+let get_section_name elfbits ehdr shdr_arr num =
+  let sec_string_tab = extract_section elfbits shdr_arr.(ehdr.e_shstrndx) in
+  get_string sec_string_tab (Int32.to_int shdr_arr.(num).sh_name)
+
 let print_section_names elfbits ehdr shdr_arr =
   let sec_string_tab = extract_section elfbits shdr_arr.(ehdr.e_shstrndx) in
   for i = 0 to (Array.length shdr_arr - 1) do
@@ -272,6 +277,19 @@ let get_section_by_name elfbits ehdr shdr_arr name =
   match found_sec with
     None -> raise Not_found
   | Some shdr -> extract_section elfbits shdr
+
+let get_section_number elfbits ehdr shdr_arr name =
+  let sec_string_tab = extract_section elfbits shdr_arr.(ehdr.e_shstrndx) in
+  let found = ref None in
+  for i = 1 to Array.length shdr_arr - 1 do
+    let this_section_name = get_string sec_string_tab
+			      (Int32.to_int shdr_arr.(i).sh_name) in
+    if this_section_name = name then
+      found := Some i
+  done;
+  match !found with
+    None -> raise Not_found
+  | Some n -> n
 
 (* Return bits from SECTION offset by OFFSET bytes.  *)
 

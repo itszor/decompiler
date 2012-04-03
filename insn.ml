@@ -2,6 +2,7 @@ type operand =
     Hard_reg of int
   | Immediate of int32
   | Address of int32
+  | PC_relative of int32
   | Stack of int
 
 and cc_bits = C | V | N | Z
@@ -31,6 +32,10 @@ type opcode =
   | Mov
   | Bic
   | Mvn
+  | B
+  | Bl
+  | Ldm of multimem_info
+  | Stm of multimem_info
   | Shifted of opcode * shift_opcode
   | Conditional of condition * opcode
   | BAD
@@ -54,6 +59,12 @@ and access_info =
     addr_mode : addr_mode;
     writeback : bool;
     pre_modify : bool
+  }
+
+and multimem_info =
+  {
+    before : bool;
+    increment : bool
   }
 
 type insn =
