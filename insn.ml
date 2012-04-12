@@ -36,6 +36,14 @@ type opcode =
   | Bl
   | Ldm of multimem_info
   | Stm of multimem_info
+  | Mul
+  | Mla
+  | Umaal
+  | Mls
+  | Umull
+  | Umlal
+  | Smull
+  | Smlal
   | Shifted of opcode * shift_opcode
   | Conditional of condition * opcode
   | BAD

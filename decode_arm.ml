@@ -35,6 +35,8 @@ let conditionalise cond opcode =
     None -> opcode
   | Some cond -> Conditional (cond, opcode)
 
+let hard_reg n = Hard_reg n
+
 (* Decode 28 remaining bits of NV space.  *)
 let decode_nv_space ibits =
   bad_insn
@@ -54,16 +56,93 @@ let decode_misc cond op1 bits19_8 op2 bits3_0 =
 let decode_halfword_mul_mac cond op1 bints19_8 op2 bits3_0 =
   bad_insn
 
+(* op1 is bits 24-20 inclusive.  *)
 let decode_mul_mac cond op1 bits19_8 bits3_0 =
-  bad_insn
+  bitmatch Bitstring.dropbits 1 op1 with
+    { 0b000 : 3; s_bit : 1 } ->
+      let rd, rm =
+        (bitmatch bits19_8 with { rd : 4; _ : 4; rm : 4 } -> rd, rm)
+      and rn = (bitmatch bits3_0 with { rn : 4 } -> rn) in
+      {
+        opcode = conditionalise cond Mul;
+	write_operands = [| hard_reg rd |];
+	read_operands = [| hard_reg rn; hard_reg rm |];
+	read_flags = [];
+	write_flags = if s_bit then [N; Z] else [];
+	clobber_flags = []
+      }
+  | { 0b001 : 3; s_bit : 1 } ->
+      let rd, ra, rm =
+        (bitmatch bits19_8 with { rd : 4; ra : 4; rm : 4 } -> rd, ra, rm)
+      and rn = (bitmatch bits3_0 with { rn : 4 } -> rn) in
+      {
+        opcode = conditionalise cond Mla;
+	write_operands = [| hard_reg rd |];
+	read_operands = [| hard_reg rn; hard_reg rm; hard_reg ra |];
+	read_flags = [];
+	write_flags = if s_bit then [N; Z] else [];
+	clobber_flags = []
+      }
+  | { 0b0100 : 4 } ->
+      let rdhi, rdlo, rm =
+        (bitmatch bits19_8 with { rdhi : 4; rdlo : 4; rm : 4 } ->
+	  rdhi, rdlo, rm)
+      and rn = (bitmatch bits3_0 with { rn : 4 } -> rn) in
+      {
+        opcode = conditionalise cond Umaal;
+	write_operands = [| hard_reg rdlo; hard_reg rdhi |];
+	read_operands = [| hard_reg rdlo; hard_reg rdhi; hard_reg rn;
+			   hard_reg rm |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { 0b0101 : 4 } -> bad_insn
+  | { 0b0110 : 4 } ->
+      let rd, ra, rm =
+        (bitmatch bits19_8 with { rd : 4; ra : 4; rm : 4 } -> rd, ra, rm)
+      and rn = (bitmatch bits3_0 with { rn : 4 } -> rn) in
+      {
+        opcode = conditionalise cond Mls;
+	write_operands = [| hard_reg rd |];
+	read_operands = [| hard_reg rn; hard_reg rm; hard_reg ra |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { 0b0111 : 4 } -> bad_insn
+  | { true : 1; signed : 1; false : 1; s_bit : 1 } ->
+      let rdhi, rdlo, rm =
+        (bitmatch bits19_8 with { rdhi : 4; rdlo : 4; rm : 4 } ->
+	  rdhi, rdlo, rm)
+      and rn = (bitmatch bits3_0 with { rn : 4 } -> rn) in
+      let opc = if signed then Smull else Umull in
+      {
+        opcode = conditionalise cond opc;
+	write_operands = [| hard_reg rdlo; hard_reg rdhi |];
+	read_operands = [| hard_reg rn; hard_reg rm |];
+	read_flags = [];
+	write_flags = if s_bit then [N; Z] else [];
+	clobber_flags = []
+      }
+  | { true : 1; signed : 1; true : 1; s_bit : 1 } ->
+      let rdhi, rdlo, rm =
+        (bitmatch bits19_8 with { rdhi : 4; rdlo : 4; rm : 4 } ->
+	  rdhi, rdlo, rm)
+      and rn = (bitmatch bits3_0 with { rn : 4 } -> rn) in
+      let opc = if signed then Smlal else Umlal in
+      {
+        opcode = conditionalise cond opc;
+	write_operands = [| hard_reg rdlo; hard_reg rdhi |];
+	read_operands = [| hard_reg rdlo; hard_reg rdhi; hard_reg rn;
+			   hard_reg rm |];
+	read_flags = [];
+	write_flags = if s_bit then [N; Z] else [];
+	clobber_flags = []
+      }
+  | { _ } -> bad_insn
 
 let decode_sync cond op1 bits19_8 bits3_0 =
   bad_insn
 
 let decode_extra_ld_st ~unpriv cond op1 bits19_8 bits3_0 =
   bad_insn
-
-let hard_reg n = Hard_reg n
 
 let union_flags a b =
   a @ b
@@ -259,6 +338,7 @@ let decode_dp_reg_or_imm cond bits24_0 ~reg =
       decode_dp cond Bic ~s_bit ~reg bits19_0
   | { 0b1111 : 4; s_bit : 1; bits19_0 : 20 : bitstring } ->
       decode_dp cond Mvn ~s_bit ~reg bits19_0
+  | { _ } -> bad_insn
 
 let decode_dp_reg_shifted_reg cond op1 bits19_8 op2 bits3_0 =
   bad_insn
@@ -285,7 +365,7 @@ let decode_dp_misc cond ibits =
       op2 : 4 : bitstring;
       bits3_0 : 4 : bitstring } ->
         let bits24_0 = Bitstring.subbitstring ibits 7 25 in
-        (bitmatch (Bitstring.concat [op1; op2]) with
+        (bitmatch Bitstring.concat [op1; op2] with
 	  { 0b10 : 2; _ : 2; false : 1;
 	    false : 1; _ : 3 } ->
 	    decode_misc cond op1 bits19_8 op2 bits3_0
@@ -516,7 +596,7 @@ let decode_insn ibits =
   bitmatch ibits with
     { 0b1111 : 4; rest : 28 : bitstring } ->
       decode_nv_space rest
-  | { cond : 4; (0b000 | 0b001) : 3; _ : 25 : bitstring } ->
+  | { cond : 4; (0b000 | 0b001) : 3 } ->
       decode_dp_misc (cond_of_code cond) ibits
   | { cond : 4; 0b010 : 3 } ->
       decode_ldr_str_ldrb_strb (cond_of_code cond) ibits
@@ -547,3 +627,7 @@ let decode_insns ibits num_insns =
 	  scan (decoded_insn :: acc) rest (pred insns_left)
       | { bad : -1 : bitstring } -> scan acc bad 0 in
   scan [] ibits num_insns
+
+let decode_immediate imm_insn =
+  let insn_bits = BITSTRING { imm_insn : 32 } in
+  decode_insn insn_bits

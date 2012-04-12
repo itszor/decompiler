@@ -42,3 +42,8 @@ let fetch_die () =
   print_all_dies x h*)
 
 (* Next, we need to decode .debug_line!  *)
+
+let code () =
+  code_for_sym "foo"
+
+let _ = code ()

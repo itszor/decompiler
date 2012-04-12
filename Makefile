@@ -1,5 +1,6 @@
 # Makefile for awesome decompiler project
 
+OCAMLFIND = ocamlfind
 OCAMLC = ocamlc -g
 OCAMLLEX = ocamllex
 OCAMLYACC = ocamlyacc -v
@@ -14,11 +15,16 @@ BITSTRING_PP := -pp "camlp4of bitstring/bitstring.cma \
 		     bitstring/bitstring_persistent.cma \
 		     $(OCAMLWHERE)/bitstring/pa_bitstring.cmo"
 
-# Source plus generated files.
-OCAMLSRC := decompiler.ml dwarfreader.ml elfreader.ml dwarfprint.ml line.ml \
-	    decode_arm.ml insn.ml symbols.ml
+SYNTAX := -syntax camlp4o
 
-OCAMLOBJ := $(shell < .depend $(OCAMLDSORT) -byte $(OCAMLSRC))
+PACKAGES := -package camlp4.macro,bitstring,bitstring.syntax,num,unix
+
+# Source plus generated files.
+OCAMLSRC := elfreader.ml dwarfreader.ml dwarfprint.ml line.ml \
+	    decode_arm.ml insn.ml symbols.ml decompiler.ml
+
+# OCAMLOBJ := $(shell < .depend $(OCAMLDSORT) -byte $(OCAMLSRC))
+OCAMLOBJ := $(OCAMLSRC:.ml=.cmo)
 
 OCAMLLIBS := nums.cma unix.cma -I +bitstring bitstring.cma
 
@@ -40,17 +46,17 @@ ML_ERROR:
 
 # core compiler
 $(TARGET): $(OCAMLOBJ)
-	$(OCAMLC) $(OCAMLLIBS) $(OCAMLOBJ) -o $@
+	$(OCAMLFIND) ocamlc $(PACKAGES) -linkpkg $(OCAMLOBJ) -o $@
 
 # Also include (lex, yacc) generated files here.
 .depend:	$(OCAMLSRC)
-	$(OCAMLDEP) $(BITSTRING_PP) $(OCAMLSRC) > .depend
+	$(OCAMLFIND) ocamldep $(SYNTAX) $(PACKAGES) $(OCAMLSRC) > .depend
 
 %.cmo: %.ml
-	$(OCAMLC) $(OCAMLINC) $(BITSTRING_PP) $< -c -o $@
+	$(OCAMLFIND) ocamlc $(SYNTAX) $(PACKAGES) $< -c -o $@
 
 %.cmi: %.mli
-	$(OCAMLC) $< -c -o $@
+	$(OCAMLFIND) ocamlc $(SYNTAX) $(PACKAGES) $< -c -o $@
 
 %.ml: %.mly
 	$(MENHIR) --infer $<
