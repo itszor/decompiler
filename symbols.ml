@@ -69,3 +69,7 @@ let find_named_symbol symbols strtab name =
     (fun sym -> symbol_name sym strtab = name)
     symbols
 
+let find_symbol_by_addr symbols addr =
+  List.find
+    (fun sym -> sym.Elfreader.st_value = addr)
+    symbols

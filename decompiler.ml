@@ -116,6 +116,21 @@ let code_for_sym section mapping_syms sym =
   finish_seq ();
   seq_hash
 
+module BS = Ir.IrBS
+
+let bs_of_code_hash code_hash =
+  let idx = ref 0 in
+  let ht = Hashtbl.create 10 in
+  let blockseq = Hashtbl.fold
+    (fun addr code bseq ->
+      let irblock = Insn_to_ir.convert_block code in
+      Hashtbl.add ht addr !idx;
+      incr idx;
+      BS.cons irblock bseq)
+    code_hash
+    BS.empty in
+  blockseq, ht
+
 let code_for_named_sym section symbols mapping_syms strtab symname =
   let sym = Symbols.find_named_symbol symbols strtab symname in
   code_for_sym section mapping_syms sym

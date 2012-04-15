@@ -105,9 +105,10 @@ let convert_insn insn ilist =
   | Ldrb ainf -> convert_load ainf insn Irtypes.U8 ilist
   | Str ainf -> convert_store ainf insn Irtypes.Word ilist
   | Strb ainf -> convert_store ainf insn Irtypes.U8 ilist
+  | _ -> ilist
 
 let convert_block insn_list =
-  List.fold_right
+  Deque.fold_right
     (fun insn acc -> convert_insn insn acc)
     insn_list
     IL.empty

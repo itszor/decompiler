@@ -39,15 +39,27 @@ module IrCT =
 module IrBS =
   struct
     include Ranlist
-    type blockref = int
-    type reftable = unit
+    type blockref = int32
+    type reftable = (int32, int) Hashtbl.t
     
-    let of_index reftable x = x
-    let to_index reftable x = x
+    let of_index reftable x =
+      let found = Hashtbl.fold
+        (fun blkref idx acc ->
+	  if x = idx then
+	    Some blkref
+	  else
+	    acc)
+	reftable
+	None in
+      match found with
+        Some x -> x
+      | None -> raise Not_found
+
+    let to_index reftable x = Hashtbl.find reftable x
     
     let lookup_ref things reftable r = lookup things (to_index reftable r)
     
-    let string_of_blockref x = string_of_int x
+    let string_of_blockref x = Int32.to_string x
   end
 
 module IrCS =
