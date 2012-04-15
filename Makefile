@@ -21,7 +21,9 @@ PACKAGES := -package camlp4.macro,bitstring,bitstring.syntax,num,unix
 
 # Source plus generated files.
 OCAMLSRC := elfreader.ml dwarfreader.ml dwarfprint.ml line.ml \
-	    decode_arm.ml insn.ml symbols.ml decompiler.ml
+	    decode_arm.ml insn.ml symbols.ml mapping.ml emit.ml deque.ml \
+	    ranlist.ml boolset.ml getoption.ml code.ml block.ml ir.ml \
+	    insn_to_ir.ml dfs.ml dominator.ml decompiler.ml
 
 # OCAMLOBJ := $(shell < .depend $(OCAMLDSORT) -byte $(OCAMLSRC))
 OCAMLOBJ := $(OCAMLSRC:.ml=.cmo)
@@ -46,17 +48,17 @@ ML_ERROR:
 
 # core compiler
 $(TARGET): $(OCAMLOBJ)
-	$(OCAMLFIND) ocamlc $(PACKAGES) -linkpkg $(OCAMLOBJ) -o $@
+	$(OCAMLFIND) ocamlc -g $(PACKAGES) -linkpkg $(OCAMLOBJ) -o $@
 
 # Also include (lex, yacc) generated files here.
 .depend:	$(OCAMLSRC)
 	$(OCAMLFIND) ocamldep $(SYNTAX) $(PACKAGES) $(OCAMLSRC) > .depend
 
 %.cmo: %.ml
-	$(OCAMLFIND) ocamlc $(SYNTAX) $(PACKAGES) $< -c -o $@
+	$(OCAMLFIND) ocamlc -g $(SYNTAX) $(PACKAGES) $< -c -o $@
 
 %.cmi: %.mli
-	$(OCAMLFIND) ocamlc $(SYNTAX) $(PACKAGES) $< -c -o $@
+	$(OCAMLFIND) ocamlc -g $(SYNTAX) $(PACKAGES) $< -c -o $@
 
 %.ml: %.mly
 	$(MENHIR) --infer $<

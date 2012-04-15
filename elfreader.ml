@@ -291,6 +291,17 @@ let get_section_number elfbits ehdr shdr_arr name =
     None -> raise Not_found
   | Some n -> n
 
+let get_section_num_by_addr elfbits ehdr shdr_arr addr =
+  let found_sec = ref None in
+  for i = 1 to Array.length shdr_arr - 1 do
+    if addr >= shdr_arr.(i).sh_addr
+       && addr < (Int32.add shdr_arr.(i).sh_addr shdr_arr.(i).sh_size) then
+      found_sec := Some i
+  done;
+  match !found_sec with
+    None -> raise Not_found
+  | Some n -> n
+
 (* Return bits from SECTION offset by OFFSET bytes.  *)
 
 let offset_section secbits offset =

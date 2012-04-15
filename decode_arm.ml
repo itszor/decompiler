@@ -50,8 +50,61 @@ let decode_movt cond ibits =
 let decode_msr_and_hints cond op1 rest =
   bad_insn
 
-let decode_misc cond op1 bits19_8 op2 bits3_0 =
+let decode_mrs cond bits22_0 =
   bad_insn
+
+let decode_msr_reg cond bits22_0 ~sys =
+  bad_insn
+
+let decode_bx cond bits22_0 =
+  bitmatch bits22_0 with
+    { 0b010 : 3; _ : 12; 0b0001 : 4; rm : 4 } ->
+      {
+        opcode = conditionalise cond Bx;
+	read_operands = [| hard_reg rm |];
+	write_operands = [| |];
+	write_flags = []; read_flags = []; clobber_flags = []
+      }
+
+let decode_clz cond bits22_0 =
+  bad_insn
+
+let decode_bxj cond bits22_0 =
+  bad_insn
+
+let decode_sat_add_sub cond bits22_0 =
+  bad_insn
+
+let decode_bkpt cond bits22_0 =
+  bad_insn
+
+let decode_smc cond bits22_0 =
+  bad_insn
+
+let decode_misc cond bits22_0 =
+  bitmatch bits22_0 with
+    { (0b000 | 0b100) : 3; _ : 12; 0b0000 : 4 } ->
+      decode_mrs cond bits22_0
+  | { 0b010 : 3; _ : 2; 0b00 : 2; _ : 8; 0b0000 : 4 } ->
+      decode_msr_reg cond bits22_0 ~sys:false
+  | { 0b010 : 3; _ : 2; 0b01 : 2; _ : 8; 0b0000 : 4 } ->
+      decode_msr_reg cond bits22_0 ~sys:true
+  | { 0b010 : 3; _ : 2; true : 1; _ : 1; _ : 8; 0b0000 : 4 } ->
+      decode_msr_reg cond bits22_0 ~sys:true
+  | { 0b110 : 3; _ : 12; 0b0000 : 4 } ->
+      decode_msr_reg cond bits22_0 ~sys:true
+  | { 0b010 : 3; _ : 12; 0b0001 : 4 } ->
+      decode_bx cond bits22_0
+  | { 0b110 : 3; _ : 12; 0b0001 : 4 } ->
+      decode_clz cond bits22_0
+  | { 0b010 : 3; _ : 12; 0b0010 : 4 } ->
+      decode_bxj cond bits22_0
+  | { _ : 2; false : 1; _ : 12; 0b0101 : 4 } ->
+      decode_sat_add_sub cond bits22_0
+  | { 0b010 : 3; _ : 12; 0b0111 : 4 } ->
+      decode_bkpt cond bits22_0
+  | { 0b110 : 3; _ : 12; 0b0111 : 4 } ->
+      decode_smc cond bits22_0
 
 let decode_halfword_mul_mac cond op1 bints19_8 op2 bits3_0 =
   bad_insn
@@ -368,7 +421,8 @@ let decode_dp_misc cond ibits =
         (bitmatch Bitstring.concat [op1; op2] with
 	  { 0b10 : 2; _ : 2; false : 1;
 	    false : 1; _ : 3 } ->
-	    decode_misc cond op1 bits19_8 op2 bits3_0
+	    let bits22_0 = Bitstring.subbitstring ibits 9 23 in
+	    decode_misc cond bits22_0
 	| { 0b10 : 2; _ : 2; false : 1;
 	    true : 1; _ : 2; false : 1 } ->
 	    decode_halfword_mul_mac cond op1 bits19_8 op2 bits3_0
@@ -526,7 +580,7 @@ let decode_media cond ibits =
 let decode_branch cond ~link bits23_0 =
   bitmatch bits23_0 with
     { bits : 24 } ->
-      let offset = sign_extend (Int32.of_int bits) 23 in
+      let offset = sign_extend (Int32.of_int (bits * 4)) 23 in
       let opcode = if link then Bl else B in
         {
 	  opcode = conditionalise cond opcode;
@@ -592,7 +646,7 @@ let decode_branch_block_xfer cond ibits =
 let decode_svc_copro cond ibits =
   bad_insn
 
-let decode_insn ibits =
+let decode_insn_byterev ibits =
   bitmatch ibits with
     { 0b1111 : 4; rest : 28 : bitstring } ->
       decode_nv_space rest
@@ -610,7 +664,16 @@ let decode_insn ibits =
       decode_svc_copro (cond_of_code cond) ibits
   | { _ } ->
       bad_insn
-  
+
+let decode_insn ibits =
+  bitmatch ibits with
+   { b0 : 8 : bitstring;
+     b1 : 8 : bitstring;
+     b2 : 8 : bitstring;
+     b3 : 8 : bitstring } ->
+     let insn = Bitstring.concat [b3; b2; b1; b0] in
+     decode_insn_byterev insn
+
 let decode_insns ibits num_insns =
   let rec scan acc ibits insns_left =
     if insns_left = 0 then
@@ -623,7 +686,7 @@ let decode_insns ibits num_insns =
 	  b3 : 8 : bitstring;
 	  rest : -1 : bitstring } ->
 	  let insn = Bitstring.concat [b3; b2; b1; b0] in
-          let decoded_insn = decode_insn insn in
+          let decoded_insn = decode_insn_byterev insn in
 	  scan (decoded_insn :: acc) rest (pred insns_left)
       | { bad : -1 : bitstring } -> scan acc bad 0 in
   scan [] ibits num_insns

@@ -34,6 +34,7 @@ type opcode =
   | Mvn
   | B
   | Bl
+  | Bx
   | Ldm of multimem_info
   | Stm of multimem_info
   | Mul
