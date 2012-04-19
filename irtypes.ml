@@ -1,5 +1,6 @@
 type ir_nulop =
     Nop
+  | Untranslated
 
 type ir_unop =
     Not

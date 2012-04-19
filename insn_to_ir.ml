@@ -19,6 +19,14 @@ let convert_operand op =
   | Immediate i -> C.Immed i
   | _ -> failwith "boo"
 
+let convert_mov insn ilist =
+  if insn.write_flags = [] && insn.read_flags = [] then begin
+    let dst = convert_operand insn.write_operands.(0)
+    and op1 = convert_operand insn.read_operands.(0) in
+    IL.snoc ilist (C.Set (dst, op1))
+  end else
+    IL.snoc ilist (C.Nullary (Irtypes.Untranslated))
+
 let convert_binop opcode insn ilist =
   if insn.write_flags = [] && insn.read_flags = [] then begin
     let dst = convert_operand insn.write_operands.(0)
@@ -26,7 +34,7 @@ let convert_binop opcode insn ilist =
     and op2 = convert_operand insn.read_operands.(1) in
     IL.snoc ilist (C.Set (dst, C.Binary (opcode, op1, op2)))
   end else
-    IL.snoc ilist (C.Nullary (Irtypes.Nop))
+    IL.snoc ilist (C.Nullary (Irtypes.Untranslated))
 
 let convert_rsb insn ilist =
   if insn.write_flags = [] && insn.read_flags = [] then begin
@@ -35,7 +43,7 @@ let convert_rsb insn ilist =
     and op2 = convert_operand insn.read_operands.(1) in
     IL.snoc ilist (C.Set (dst, C.Binary (Irtypes.Sub, op2, op1)))
   end else
-    IL.snoc ilist (C.Nullary (Irtypes.Nop))
+    IL.snoc ilist (C.Nullary (Irtypes.Untranslated))
 
 let convert_carry_in_op opcode insn ilist =
   if insn.write_flags = [] && insn.read_flags = [C] then begin
@@ -44,7 +52,7 @@ let convert_carry_in_op opcode insn ilist =
     and op2 = convert_operand insn.read_operands.(1) in
     IL.snoc ilist (C.Set (dst, C.Trinary (opcode, op1, op2, C.Reg (IT.Carry))))
   end else
-    IL.snoc ilist (C.Nullary (Irtypes.Nop))
+    IL.snoc ilist (C.Nullary (Irtypes.Untranslated))
 
 let convert_address ainf insn base index =
   match ainf.addr_mode with
@@ -90,9 +98,28 @@ let convert_store ainf insn access ilist =
     IL.snoc ilist (C.Set (w_base, addr))
   end
 
+let convert_bx insn ilist =
+  let dest = insn.read_operands.(0) in
+  match dest with
+    Hard_reg r ->
+      let ctrl = C.Control (C.Jump_ext (IT.Branch_exchange, IT.Reg_addr r)) in
+      IL.snoc ilist ctrl
+  | _ -> failwith "unexpected bx operand"
+
+let convert_bl insn ilist =
+  let dest = insn.read_operands.(0) in
+  match dest with
+    PC_relative i ->
+      (*let ctrl = C.Control (C.Call_ext (IT.Unknown_abi, IT.Absolute i)) in*)
+      IL.snoc ilist (C.Nullary Irtypes.Untranslated)
+  | _ -> failwith "unexpected bx operand"
+
+exception Unsupported_opcode of Insn.opcode
+
 let convert_insn insn ilist =
   match insn.opcode with
-    Add -> convert_binop Irtypes.Add insn ilist
+    Mov -> convert_mov insn ilist
+  | Add -> convert_binop Irtypes.Add insn ilist
   | Sub -> convert_binop Irtypes.Sub insn ilist
   | And -> convert_binop Irtypes.And insn ilist
   | Eor -> convert_binop Irtypes.Eor insn ilist
@@ -105,7 +132,9 @@ let convert_insn insn ilist =
   | Ldrb ainf -> convert_load ainf insn Irtypes.U8 ilist
   | Str ainf -> convert_store ainf insn Irtypes.Word ilist
   | Strb ainf -> convert_store ainf insn Irtypes.U8 ilist
-  | _ -> ilist
+  | Bx -> convert_bx insn ilist
+  | Bl -> convert_bl insn ilist
+  | x -> raise (Unsupported_opcode x)
 
 let convert_block insn_list =
   Deque.fold_right

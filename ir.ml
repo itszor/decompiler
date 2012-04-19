@@ -17,11 +17,13 @@ module IrCT =
 	     | Carry
     type mem = ir_mem
     type entity = unit
-    type abi = unit
+    type abi = Branch_exchange
+	     | Unknown_abi
 
     type blockref = int
     type immed = int32
-    type addr = int32
+    type addr = Absolute of int32
+              | Reg_addr of int
     
     let string_of_nulop = fun _ -> ""
     let string_of_unop = fun _ -> ""
