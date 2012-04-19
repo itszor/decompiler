@@ -36,11 +36,9 @@ let strip_condition = function
 
 exception Not_PC_relative
 
-(* Is it a good idea to handle PC pipelining offset here?  *)
-
 let absolute_address addr operand =
   match operand with
-    Insn.PC_relative offset -> Int32.add (Int32.add addr offset) 8l
+    Insn.PC_relative offset -> Int32.add addr offset
   | _ -> raise Not_PC_relative
 
 module LabelSet = Set.Make
@@ -118,12 +116,12 @@ let code_for_sym section mapping_syms sym =
 
 module BS = Ir.IrBS
 
-let bs_of_code_hash code_hash =
+let bs_of_code_hash symbols code_hash =
   let idx = ref 0 in
   let ht = Hashtbl.create 10 in
   let blockseq = Hashtbl.fold
     (fun addr code bseq ->
-      let irblock = Insn_to_ir.convert_block code in
+      let irblock = Insn_to_ir.convert_block symbols addr code in
       Hashtbl.add ht addr !idx;
       incr idx;
       BS.cons irblock bseq)

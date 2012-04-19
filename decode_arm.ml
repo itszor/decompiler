@@ -581,6 +581,8 @@ let decode_branch cond ~link bits23_0 =
   bitmatch bits23_0 with
     { bits : 24 } ->
       let offset = sign_extend (Int32.of_int (bits * 4)) 23 in
+      (* Do the pipelining offset here!  *)
+      let offset = Int32.add offset 8l in
       let opcode = if link then Bl else B in
         {
 	  opcode = conditionalise cond opcode;

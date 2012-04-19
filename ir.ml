@@ -24,6 +24,7 @@ module IrCT =
     type immed = int32
     type addr = Absolute of int32
               | Reg_addr of int
+	      | Symbol of Elfreader.elf_sym
     
     let string_of_nulop = fun _ -> ""
     let string_of_unop = fun _ -> ""

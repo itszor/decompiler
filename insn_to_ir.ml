@@ -106,17 +106,29 @@ let convert_bx insn ilist =
       IL.snoc ilist ctrl
   | _ -> failwith "unexpected bx operand"
 
-let convert_bl insn ilist =
+let find_symbol symbols addr =
+  try
+    let symbol = Symbols.find_symbol_by_addr symbols addr in
+    IT.Symbol symbol
+  with Not_found ->
+    IT.Absolute addr
+
+let convert_bl symbols addr insn ilist =
   let dest = insn.read_operands.(0) in
   match dest with
     PC_relative i ->
-      (*let ctrl = C.Control (C.Call_ext (IT.Unknown_abi, IT.Absolute i)) in*)
-      IL.snoc ilist (C.Nullary Irtypes.Untranslated)
+      let no_arg = C.Nullary Irtypes.Nop in
+      let ret_addr = Int32.add addr 4l in
+      let call_addr = Int32.add addr i in
+      let sym_or_addr = find_symbol symbols call_addr in
+      let ctrl = C.Control (C.Call_ext (IT.Unknown_abi, sym_or_addr,
+					no_arg, ret_addr, no_arg)) in
+      IL.snoc ilist ctrl
   | _ -> failwith "unexpected bx operand"
 
 exception Unsupported_opcode of Insn.opcode
 
-let convert_insn insn ilist =
+let convert_insn symbols addr insn ilist =
   match insn.opcode with
     Mov -> convert_mov insn ilist
   | Add -> convert_binop Irtypes.Add insn ilist
@@ -133,11 +145,13 @@ let convert_insn insn ilist =
   | Str ainf -> convert_store ainf insn Irtypes.Word ilist
   | Strb ainf -> convert_store ainf insn Irtypes.U8 ilist
   | Bx -> convert_bx insn ilist
-  | Bl -> convert_bl insn ilist
+  | Bl -> convert_bl symbols addr insn ilist
   | x -> raise (Unsupported_opcode x)
 
-let convert_block insn_list =
-  Deque.fold_right
-    (fun insn acc -> convert_insn insn acc)
+let convert_block symbols addr insn_list =
+  Deque.fold_left
+    (fun (acc, offset) insn ->
+      let ilist' = convert_insn symbols (Int32.add addr offset) insn acc in
+      ilist', Int32.add offset 4l)
+    (IL.empty, 0l)
     insn_list
-    IL.empty
