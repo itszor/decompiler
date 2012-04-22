@@ -58,12 +58,11 @@ let targets addr insn labelset =
   | Insn.Conditional (_, Insn.B)
   | Insn.Conditional (_, Insn.Bl)
   | Insn.Conditional (_, Insn.Bx) ->
+      let labelset' = LabelSet.add (Int32.add addr 4l) labelset in
       begin try
-	let labelset'
-          = LabelSet.add (absolute_address addr insn.Insn.read_operands.(0))
-			 labelset in
-	LabelSet.add (Int32.add addr 4l) labelset'
-      with Not_PC_relative -> labelset
+	LabelSet.add (absolute_address addr insn.Insn.read_operands.(0))
+		     labelset'
+      with Not_PC_relative -> labelset'
       end
   | Insn.Conditional (_, _) ->
       LabelSet.add (Int32.add addr 4l) labelset
@@ -124,7 +123,7 @@ module CS = Ir.IrCS
 module CT = Ir.IrCT
 module C = Ir.Ir
 
-let eabi_pre_prologue idx real_entry_point =
+let eabi_pre_prologue real_entry_point =
   let insns =
     [C.Set (C.Reg (CT.Hard_reg 0), C.Nullary Irtypes.Arg_in);
      C.Set (C.Reg (CT.Hard_reg 1), C.Nullary Irtypes.Arg_in);
@@ -147,7 +146,7 @@ let eabi_pre_prologue idx real_entry_point =
      C.Set (C.Reg (CT.Status Irtypes.Carry), C.Nullary Irtypes.Special);
      C.Control (C.Jump real_entry_point)] in
   let cs = CS.of_list insns in
-  Block.make_block idx "entry block" cs
+  Block.make_block "entry block" cs
 
 let bs_of_code_hash symbols code_hash entry_pt =
   let idx = ref (Hashtbl.length code_hash) in
@@ -159,12 +158,12 @@ let bs_of_code_hash symbols code_hash entry_pt =
       Printf.printf "%s\n" (Ir.Ir.string_of_codeseq ir_cs);
       Hashtbl.add ht addr !idx;
       let name = Printf.sprintf "block_for_addr_%ld" addr in
-      let block = Block.make_block !idx name ir_cs in
+      let block = Block.make_block name ir_cs in
       decr idx;
       BS.cons block bseq)
     code_hash
     BS.empty in
-  let pre_prologue_blk = eabi_pre_prologue 0 entry_pt in
+  let pre_prologue_blk = eabi_pre_prologue entry_pt in
   let with_entry_pt = BS.cons pre_prologue_blk blockseq in
   Hashtbl.add ht 0l 0;
   with_entry_pt, ht
@@ -189,40 +188,40 @@ let fetch_die () =
 (* Next, we need to decode .debug_line!  *)
 
 let print_blockseq_dfsinfo bseq =
-  for i=0 to (BS.length bseq)-1 do
-    let blk = BS.lookup bseq i in
-    Printf.printf "blk %d, self_index %d, id '%s', dfnum %d, vertex %d, pred [%s], succ [%s], parent %s, idom %s, idomchild [%s]\n"
+  for i = 0 to Array.length bseq - 1 do
+    let blk = bseq.(i) in
+    Printf.printf "blk %d, id '%s', dfnum %d, pred [%s], succ [%s], parent %s, idom %s, idomchild [%s], domfront [%s]\n"
       i
-      blk.Block.self_index
       blk.Block.id
       blk.Block.dfnum
-      (match blk.Block.vertex with Some v -> v.Block.self_index | _ -> -99)
       (String.concat ", " 
 	(List.map
-	  (fun node -> string_of_int (node.Block.self_index))
+	  (fun node -> string_of_int (node.Block.dfnum))
 	  blk.Block.predecessors))
       (String.concat ", " 
 	(List.map
-	  (fun node -> string_of_int (node.Block.self_index))
+	  (fun node -> string_of_int (node.Block.dfnum))
 	  blk.Block.successors))
       (match blk.Block.parent with
 	None -> "none"
-      | Some p -> string_of_int p.Block.self_index)
+      | Some p -> string_of_int p.Block.dfnum)
       (match blk.Block.idom with
 	None -> "none"
-      | Some idom -> string_of_int idom.Block.self_index)
+      | Some idom -> string_of_int idom)
       (String.concat "," (List.map
-        (fun node -> string_of_int (node.Block.self_index))
+        (fun node -> string_of_int node)
 	blk.Block.idomchild))
+      (String.concat "," (List.map
+        (fun node -> string_of_int node)
+	blk.Block.domfront))
   done
 
 let dump_blockseq bs =
-  let bsl = BS.to_list bs in
-  List.iter
+  Array.iter
     (fun block ->
       Printf.printf "block id \"%s\":\n" block.Block.id;
       Printf.printf "%s\n" (Ir.Ir.string_of_codeseq block.Block.code))
-    (List.sort (fun a b -> compare a.Block.dfnum b.Block.dfnum) bsl)
+    bs
 
 let mapping_syms = Mapping.get_mapping_symbols elfbits ehdr shdr_arr strtab
 					       symbols ".text"
@@ -240,15 +239,17 @@ let go symname =
   Printf.printf "entry point %lx, ref %d\n" entry_point entry_point_ref;
   IrDfs.pred_succ ~whole_program:false blockseq ht;
   IrDfs.dfs blockseq ht 0l;
+  let blk_arr = IrDfs.blockseq_to_dfs_array blockseq in
   Printf.printf "--- after doing DFS ---\n";
-  print_blockseq_dfsinfo blockseq;
-  IrDominator.dominators blockseq;
-  IrDominator.computedf blockseq;
+  print_blockseq_dfsinfo blk_arr;
+  flush stdout;
+  IrDominator.dominators blk_arr;
+  IrDominator.computedf blk_arr;
   Printf.printf "--- after computing dominators ---\n";
-  print_blockseq_dfsinfo blockseq;
-  let regset = IrPhiPlacement.place blockseq in
-  let blockseq' = IrPhiPlacement.rename blockseq 0 regset in
+  print_blockseq_dfsinfo blk_arr;
+  let regset = IrPhiPlacement.place blk_arr in
+  IrPhiPlacement.rename blk_arr 0 regset;
   Printf.printf "after SSA conversion:\n";
-  dump_blockseq blockseq'
+  dump_blockseq blk_arr
 
 let _ = go "loop"

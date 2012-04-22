@@ -110,11 +110,32 @@ let convert_bx insn ilist =
       IL.snoc ilist ctrl
   | _ -> failwith "unexpected bx operand"
 
-let convert_cond_bx cond insn ilist =
+let convert_condition cond =
+  let code =
+    match cond with
+      Ne -> Irtypes.Status_ne
+    | Eq -> Irtypes.Status_eq
+    | Lt -> Irtypes.Status_lt
+    | Le -> Irtypes.Status_le
+    | Gt -> Irtypes.Status_gt
+    | Ge -> Irtypes.Status_ge
+    | Mi -> Irtypes.Status_ltu
+    | Pl -> Irtypes.Status_geu
+    | Hi -> Irtypes.Status_gtu
+    | Ls -> Irtypes.Status_leu
+    | Cc -> Irtypes.Status_cc
+    | Cs -> Irtypes.Status_cs
+    | Vc -> Irtypes.Status_vc
+    | Vs -> Irtypes.Status_vs in
+  C.Unary (code, C.Reg (IT.Status Irtypes.CondFlags))
+
+let convert_cond_bx cond addr insn ilist =
   let dest = insn.read_operands.(0) in
   match dest with
     Hard_reg r ->
-      let ctrl = C.Control (C.Jump_ext (IT.Branch_exchange, IT.Reg_addr r)) in
+      let falseblock = Int32.add addr 4l in
+      let ctrl = C.Control (C.Branch (convert_condition cond, falseblock,
+			    falseblock)) in
       IL.snoc ilist ctrl
   | _ -> failwith "unexpected bx operand"
 
@@ -146,25 +167,6 @@ let convert_cmp insn ilist =
 		    C.Binary (Irtypes.Cmp, op1, op2)))
   end else
     IL.snoc ilist (C.Nullary (Irtypes.Untranslated))
-
-let convert_condition cond =
-  let code =
-    match cond with
-      Ne -> Irtypes.Status_ne
-    | Eq -> Irtypes.Status_eq
-    | Lt -> Irtypes.Status_lt
-    | Le -> Irtypes.Status_le
-    | Gt -> Irtypes.Status_gt
-    | Ge -> Irtypes.Status_ge
-    | Mi -> Irtypes.Status_ltu
-    | Pl -> Irtypes.Status_geu
-    | Hi -> Irtypes.Status_gtu
-    | Ls -> Irtypes.Status_leu
-    | Cc -> Irtypes.Status_cc
-    | Cs -> Irtypes.Status_cs
-    | Vc -> Irtypes.Status_vc
-    | Vs -> Irtypes.Status_vs in
-  C.Unary (code, C.Reg (IT.Status Irtypes.CondFlags))
 
 let convert_cbranch cond addr insn ilist =
   let dest = insn.read_operands.(0) in
@@ -208,7 +210,7 @@ let rec convert_insn symbols addr insn ilist =
   | Bl -> convert_bl symbols addr insn ilist
   | B -> convert_branch addr insn ilist
   | Conditional (cond, B) -> convert_cbranch cond addr insn ilist
-  | Conditional (cond, Bx) -> convert_cond_bx cond insn ilist
+  | Conditional (cond, Bx) -> convert_cond_bx cond addr insn ilist
   | x -> raise (Unsupported_opcode x)
 
 let convert_block symbols addr insn_list =

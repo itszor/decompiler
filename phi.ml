@@ -61,26 +61,31 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
       with Not_found ->
         Hashtbl.add htab reg [blk]
     
-    let regs_and_defsites_in_blockseq blks =
+    let regs_and_defsites_in_blockseq blk_arr =
       let defsites = Hashtbl.create 10 in
-      let defined_regs = BS.fold_right
+      let defined_regs = Array.fold_right
         (fun blk defined_regs' ->
 	  let in_blk = regs_assigned_in_block blk R.empty in
-	  R.iter (fun reg -> add_blk_for_reg defsites reg blk) in_blk;
+	  R.iter
+	    (fun reg ->
+	      Printf.printf "reg %s defined in %d\n"
+	        (CT.string_of_reg reg) blk.dfnum;
+	      add_blk_for_reg defsites reg blk.dfnum)
+	    in_blk;
 	  R.union in_blk defined_regs')
-	blks
+	blk_arr
 	R.empty in
       defined_regs, defsites
     
-    let place blks =
-      let regset, defsites = regs_and_defsites_in_blockseq blks in
-      let phi_for_reg = Array.create (BS.length blks) R.empty in
+    let place blk_arr =
+      let regset, defsites = regs_and_defsites_in_blockseq blk_arr in
+      let phi_for_reg = Array.make (Array.length blk_arr) R.empty in
       let reg_has_phi_node_for_blk_p reg blk =
-        let regset = phi_for_reg.(blk.dfnum) in
+        let regset = phi_for_reg.(blk) in
 	R.mem reg regset
       and mark_phi_node_for_reg_in_blk reg blk =
-        let regset = phi_for_reg.(blk.dfnum) in
-	phi_for_reg.(blk.dfnum) <- R.add reg regset
+        let regset = phi_for_reg.(blk) in
+	phi_for_reg.(blk) <- R.add reg regset
       and reg_defined_in_blk reg blk =
         let blks_for_reg = Hashtbl.find defsites reg in
 	List.mem blk blks_for_reg in
@@ -90,24 +95,26 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
 	  let rec scan = function
 	    [] -> ()
 	  | n::defs ->
+	      Printf.printf "reg %s, blk %d.\n" (CT.string_of_reg reg) n;
+	      let defs_remaining = ref defs in
 	      List.iter
 	        (fun blk_in_df ->
 		  if not (reg_has_phi_node_for_blk_p reg blk_in_df) then begin
 		    let num_predecessors =
-		      List.length blk_in_df.predecessors
-		    and reg_code = C.Reg reg in
-		    let new_phi = C.Set (reg_code,
-					 C.Phi (Array.create num_predecessors
-						  reg_code)) in
-		    let prepended_code = CS.cons new_phi blk_in_df.code in
-		    blk_in_df.code <- prepended_code;
+		      List.length blk_arr.(blk_in_df).predecessors in
+		    let new_phi = C.Set (C.Reg reg,
+					 C.Phi (Array.init num_predecessors
+						  (fun _ -> C.Reg reg))) in
+		    let prepended_code
+		      = CS.cons new_phi blk_arr.(blk_in_df).code in
+		    Printf.printf "*** inserting phi in blk %d\n" blk_in_df;
+		    blk_arr.(blk_in_df).code <- prepended_code;
 		    mark_phi_node_for_reg_in_blk reg blk_in_df;
 		    if not (reg_defined_in_blk reg blk_in_df) then
-		      scan (blk_in_df :: defs)
-		    else
-		      scan defs
+		      defs_remaining := blk_in_df :: !defs_remaining;
 		  end)
-		n.domfront in
+		blk_arr.(n).domfront;
+	      scan !defs_remaining in
 	  scan defs)
         regset;
       regset
@@ -161,10 +168,10 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
 
     (* Rename variables into SSA variables (both uses and definitions).  Works
        on a blockseq, i.e. the code within a single function.  *)
-    let rename blks entry_pt_idx all_regs =
+    let rename blk_arr entry_pt_idx all_regs =
       let rnum_htab, num_regs = enumerate_regs all_regs in
-      let count = Array.create num_regs 0
-      and stack = Array.create num_regs [0] in
+      let count = Array.make num_regs 0
+      and stack = Array.make num_regs [0] in
       (* rewrite_statements is functional: returns a new modified copy of the
          code sequence.  *)
       let rewrite_statements blk_n =
@@ -198,37 +205,38 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
 	  (fun blk_y ->
 	    let jth_pred, _ = List.fold_right
 	      (fun chk_pred (found, num) ->
-	        if chk_pred.self_index = blk_n.self_index then
+	        if chk_pred.dfnum = blk_n.dfnum then
 		  (num, succ num)
 		else
 		  (found, succ num))
 	      blk_y.predecessors
 	      (-1, 0) in
 	    assert (jth_pred != -1);
-	    CS.iter
+	    let new_code = CS.map
 	      (function
-	          C.Set (lhs, C.Phi args) ->
+	        C.Set (lhs, C.Phi args) ->
 		  let jth_arg = args.(jth_pred) in
-		  begin match jth_arg with
+		  let rewrote_reg = match jth_arg with
 		    C.Reg r ->
 		      let rnum = Hashtbl.find rnum_htab r in
 		      let idx = List.hd stack.(rnum) in
-		      args.(jth_pred) <- C.SSAReg (r, idx)
-		  | _ -> failwith "Non-register in PHI node"
-		  end
-		| _ -> ())
-	      blk_y.code)
+		      C.SSAReg (r, idx)
+		  | x -> x (* failwith "Non-register in PHI node" *) in
+		  args.(jth_pred) <- rewrote_reg;
+		  C.Set (lhs, C.Phi args)
+	      | x -> x)
+	      blk_y.code in
+	    blk_y.code <- new_code)
 	  blk_n.successors in
-      let rec rename' blks blk_idx =
-        let blk_n = BS.lookup blks blk_idx in
-	let blk_n' = { blk_n with code = rewrite_statements blk_n } in
-	rewrite_phi_nodes blk_n';
-	let blks' = BS.update blks blk_idx blk_n' in
-	let blks'' = List.fold_left
-	  (fun blks child ->
-	    rename' blks child.self_index)
-	  blks'
-	  blk_n'.idomchild in (* The right children?  *)
+      let rec rename' blk_arr blk_idx =
+        let blk_n = blk_arr.(blk_idx) in
+	blk_n.code <- rewrite_statements blk_n;
+	rewrite_phi_nodes blk_n;
+	blk_arr.(blk_idx) <- blk_n;
+	List.iter
+	  (fun child ->
+	    rename' blk_arr child)
+	  blk_n.idomchild; (* The right children?  *)
 	(* Pop variables originally defined in block off the stack.  *)
 	CS.iter
 	  (function
@@ -237,10 +245,9 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
 	        let rdnum = Hashtbl.find rnum_htab rd in
 		stack.(rdnum) <- List.tl stack.(rdnum)
 	    | _ -> ())
-	  blk_n'.code;
-        blks'' in
+	  blk_n.code in
       (* Perform renaming.  *)
-      rename' blks entry_pt_idx
+      rename' blk_arr entry_pt_idx
       
   end
   
@@ -595,7 +602,7 @@ let eliminate_phi_in mods selectedlist preds =
 (* Convert phi nodes into moves *)
 let eliminate vertices =
   let num = DynArray.length vertices in
-  let mods = Array.create num [] in
+  let mods = Array.make num [] in
   for i=0 to num-1 do
     let tag = DynArray.get vertices i in
     let preds = Array.of_list tag.predecessors in

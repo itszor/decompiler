@@ -52,10 +52,9 @@ module Dfs (CT : Code.CODETYPES) (CS : Code.CODESEQ) (BS : Code.BLOCKSEQ) =
     (* Enumerate blocks depth-first.  *)
     let dfs blks reftable entry_pt =
       let rec scan ?parent ~dfcount node =
-        Printf.printf "giving node %d dfnum %d\n" node.self_index dfcount;
+        (*Printf.printf "giving node %d dfnum %d\n" node.self_index dfcount;*)
         node.dfnum <- dfcount;
         node.parent <- parent;
-        (BS.lookup blks dfcount).vertex <- Some node;
 	List.fold_left
 	  (fun dfcount w ->
 	    if w.dfnum == -1 then
@@ -67,12 +66,18 @@ module Dfs (CT : Code.CODETYPES) (CS : Code.CODESEQ) (BS : Code.BLOCKSEQ) =
       in
         ignore (scan ~dfcount:0 (BS.lookup_ref blks reftable entry_pt))
 
+    let blockseq_to_dfs_array blks =
+      let len = BS.length blks in
+      let arr = Array.init len (fun n -> BS.lookup blks n) in
+      Array.sort (fun a b -> compare a.dfnum b.dfnum) arr;
+      arr
+
     (* If we're using functional-style update on the block sequence data
        structure, the mutable bits can get out-of-date and point to old
        versions of the data.  Call this to point to the current structure
        instead.  This is pretty ugly, but that's what you get for mixing
        mutable and immutable data structures.  FIXME: Don't do that?  *)
-    let refresh blks reftable =
+    (*let refresh blks reftable =
       let refresh_list = List.map (fun ptr -> BS.lookup blks ptr.self_index)
       and refresh_option = function
         None -> None
@@ -82,5 +87,5 @@ module Dfs (CT : Code.CODETYPES) (CS : Code.CODESEQ) (BS : Code.BLOCKSEQ) =
 	  blk.predecessors <- refresh_list blk.predecessors;
 	  blk.successors <- refresh_list blk.successors;
 	  blk.parent <- refresh_option blk.parent)
-	blks
+	blks*)
   end
