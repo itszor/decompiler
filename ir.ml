@@ -14,7 +14,7 @@ module IrCT =
     type reg = Hard_reg of int
              | Stack of int
 	     | Temp of int
-	     | Carry
+	     | Status of ir_statusbits
     type mem = ir_mem
     type entity = unit
     type abi = Branch_exchange
@@ -26,24 +26,82 @@ module IrCT =
               | Reg_addr of int
 	      | Symbol of Elfreader.elf_sym
     
-    let string_of_nulop = fun _ -> ""
-    let string_of_unop = fun _ -> ""
-    let string_of_binop = fun _ -> ""
-    let string_of_triop = fun _ -> ""
+    let string_of_nulop = function
+      Nop -> "nop"
+    | Untranslated -> "**UNTRANSLATED**"
+    | Arg_in -> "arg_in"
+    | Caller_saved -> "caller_saved"
+    | Special -> "special"
+    
+    let string_of_unop = function
+      Not -> "not"
+    | Status_eq -> "status_eq"
+    | Status_ne -> "status_ne"
+    | Status_lt -> "status_lt"
+    | Status_le -> "status_le"
+    | Status_gt -> "status_gt"
+    | Status_ge -> "status_ge"
+    | Status_ltu -> "status_ltu"
+    | Status_leu -> "status_leu"
+    | Status_gtu -> "status_gtu"
+    | Status_geu -> "status_geu"
+    | Status_cc -> "status_cc"
+    | Status_cs -> "status_cs"
+    | Status_vc -> "status_vc"
+    | Status_vs -> "status_vs"
+
+    let string_of_binop = function
+      Add -> "add"
+    | Sub -> "sub"
+    | And -> "and"
+    | Eor -> "eor"
+    | Or -> "or"
+    | Mul -> "mul"
+    | Cmp -> "cmp"
+    
+    let string_of_triop = function
+      Adc -> "adc"
+    | Sbc -> "sbc"
+    
     let string_of_extop = fun _ -> ""
-    let string_of_reg = fun _ -> ""
-    let string_of_mem = fun _ -> ""
+
+    let string_of_status = function
+      Carry -> "carry"
+    | CondFlags -> "condflags"
+    | NZFlags -> "nzflags"
+
+    let string_of_reg = function
+      Hard_reg r -> Printf.sprintf "r%d" r
+    | Stack s -> Printf.sprintf "stack+%d" s
+    | Temp t -> Printf.sprintf "tmp%d" t
+    | Status sb -> Printf.sprintf "status(%s)" (string_of_status sb)
+    
+    let string_of_mem = function
+      U8 -> "u8"
+    | S8 -> "s8"
+    | U16 -> "u16"
+    | S16 -> "s16"
+    | Word -> "word"
+    
     let string_of_entity = fun _ -> ""
-    let string_of_abi = fun _ -> ""
-    let string_of_immed = fun _ -> ""
-    let string_of_addr = fun _ -> ""
+
+    let string_of_abi = function
+      Branch_exchange -> "branch_exchange"
+    | Unknown_abi -> "unknown_abi"
+    
+    let string_of_immed i = Int32.to_string i
+
+    let string_of_addr = function
+      Absolute i -> Printf.sprintf "absolute(%lx)" i
+    | Reg_addr r -> Printf.sprintf "reg-addr(%d)" r
+    | Symbol _ -> Printf.sprintf "symbol(...)"
   end
 
 module IrBS =
   struct
     include Ranlist
-    type blockref = int32
-    type reftable = (int32, int) Hashtbl.t
+    type blockref = ir_blockref
+    type reftable = (ir_blockref, int) Hashtbl.t
     
     let of_index reftable x =
       let found = Hashtbl.fold

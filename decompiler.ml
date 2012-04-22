@@ -54,7 +54,10 @@ let targets addr insn labelset =
   match strip_condition insn.Insn.opcode with
     Insn.B
   | Insn.Bl
-  | Insn.Bx ->
+  | Insn.Bx
+  | Insn.Conditional (_, Insn.B)
+  | Insn.Conditional (_, Insn.Bl)
+  | Insn.Conditional (_, Insn.Bx) ->
       begin try
 	let labelset'
           = LabelSet.add (absolute_address addr insn.Insn.read_operands.(0))
@@ -62,6 +65,8 @@ let targets addr insn labelset =
 	LabelSet.add (Int32.add addr 4l) labelset'
       with Not_PC_relative -> labelset
       end
+  | Insn.Conditional (_, _) ->
+      LabelSet.add (Int32.add addr 4l) labelset
   | _ -> labelset
 
 let code_for_sym section mapping_syms sym =
@@ -115,19 +120,54 @@ let code_for_sym section mapping_syms sym =
   seq_hash
 
 module BS = Ir.IrBS
+module CS = Ir.IrCS
+module CT = Ir.IrCT
+module C = Ir.Ir
 
-let bs_of_code_hash symbols code_hash =
-  let idx = ref 0 in
+let eabi_pre_prologue idx real_entry_point =
+  let insns =
+    [C.Set (C.Reg (CT.Hard_reg 0), C.Nullary Irtypes.Arg_in);
+     C.Set (C.Reg (CT.Hard_reg 1), C.Nullary Irtypes.Arg_in);
+     C.Set (C.Reg (CT.Hard_reg 2), C.Nullary Irtypes.Arg_in);
+     C.Set (C.Reg (CT.Hard_reg 3), C.Nullary Irtypes.Arg_in);
+     C.Set (C.Reg (CT.Hard_reg 4), C.Nullary Irtypes.Caller_saved);
+     C.Set (C.Reg (CT.Hard_reg 5), C.Nullary Irtypes.Caller_saved);
+     C.Set (C.Reg (CT.Hard_reg 6), C.Nullary Irtypes.Caller_saved);
+     C.Set (C.Reg (CT.Hard_reg 7), C.Nullary Irtypes.Caller_saved);
+     C.Set (C.Reg (CT.Hard_reg 8), C.Nullary Irtypes.Caller_saved);
+     C.Set (C.Reg (CT.Hard_reg 9), C.Nullary Irtypes.Caller_saved);
+     C.Set (C.Reg (CT.Hard_reg 10), C.Nullary Irtypes.Caller_saved);
+     C.Set (C.Reg (CT.Hard_reg 11), C.Nullary Irtypes.Caller_saved);
+     C.Set (C.Reg (CT.Hard_reg 12), C.Nullary Irtypes.Special);
+     C.Set (C.Reg (CT.Hard_reg 13), C.Nullary Irtypes.Special);
+     C.Set (C.Reg (CT.Hard_reg 14), C.Nullary Irtypes.Special);
+     C.Set (C.Reg (CT.Hard_reg 15), C.Nullary Irtypes.Special);
+     C.Set (C.Reg (CT.Status Irtypes.CondFlags), C.Nullary Irtypes.Special);
+     C.Set (C.Reg (CT.Status Irtypes.NZFlags), C.Nullary Irtypes.Special);
+     C.Set (C.Reg (CT.Status Irtypes.Carry), C.Nullary Irtypes.Special);
+     C.Control (C.Jump real_entry_point)] in
+  let cs = CS.of_list insns in
+  Block.make_block idx "entry block" cs
+
+let bs_of_code_hash symbols code_hash entry_pt =
+  let idx = ref (Hashtbl.length code_hash) in
   let ht = Hashtbl.create 10 in
   let blockseq = Hashtbl.fold
     (fun addr code bseq ->
-      let irblock = Insn_to_ir.convert_block symbols addr code in
+      let ir_cs = Insn_to_ir.convert_block symbols addr code in
+      Printf.printf "block for addr %lx:\n" addr;
+      Printf.printf "%s\n" (Ir.Ir.string_of_codeseq ir_cs);
       Hashtbl.add ht addr !idx;
-      incr idx;
-      BS.cons irblock bseq)
+      let name = Printf.sprintf "block_for_addr_%ld" addr in
+      let block = Block.make_block !idx name ir_cs in
+      decr idx;
+      BS.cons block bseq)
     code_hash
     BS.empty in
-  blockseq, ht
+  let pre_prologue_blk = eabi_pre_prologue 0 entry_pt in
+  let with_entry_pt = BS.cons pre_prologue_blk blockseq in
+  Hashtbl.add ht 0l 0;
+  with_entry_pt, ht
 
 let code_for_named_sym section symbols mapping_syms strtab symname =
   let sym = Symbols.find_named_symbol symbols strtab symname in
@@ -148,10 +188,67 @@ let fetch_die () =
 
 (* Next, we need to decode .debug_line!  *)
 
+let print_blockseq_dfsinfo bseq =
+  for i=0 to (BS.length bseq)-1 do
+    let blk = BS.lookup bseq i in
+    Printf.printf "blk %d, self_index %d, id '%s', dfnum %d, vertex %d, pred [%s], succ [%s], parent %s, idom %s, idomchild [%s]\n"
+      i
+      blk.Block.self_index
+      blk.Block.id
+      blk.Block.dfnum
+      (match blk.Block.vertex with Some v -> v.Block.self_index | _ -> -99)
+      (String.concat ", " 
+	(List.map
+	  (fun node -> string_of_int (node.Block.self_index))
+	  blk.Block.predecessors))
+      (String.concat ", " 
+	(List.map
+	  (fun node -> string_of_int (node.Block.self_index))
+	  blk.Block.successors))
+      (match blk.Block.parent with
+	None -> "none"
+      | Some p -> string_of_int p.Block.self_index)
+      (match blk.Block.idom with
+	None -> "none"
+      | Some idom -> string_of_int idom.Block.self_index)
+      (String.concat "," (List.map
+        (fun node -> string_of_int (node.Block.self_index))
+	blk.Block.idomchild))
+  done
+
+let dump_blockseq bs =
+  let bsl = BS.to_list bs in
+  List.iter
+    (fun block ->
+      Printf.printf "block id \"%s\":\n" block.Block.id;
+      Printf.printf "%s\n" (Ir.Ir.string_of_codeseq block.Block.code))
+    (List.sort (fun a b -> compare a.Block.dfnum b.Block.dfnum) bsl)
+
 let mapping_syms = Mapping.get_mapping_symbols elfbits ehdr shdr_arr strtab
 					       symbols ".text"
 
-let code () =
-  code_for_named_sym text symbols mapping_syms strtab "main"
+module IrDfs = Dfs.Dfs (Ir.IrCT) (Ir.IrCS) (Ir.IrBS)
+module IrDominator = Dominator.Dominator (Ir.IrBS)
+module IrPhiPlacement = Phi.PhiPlacement (Ir.IrCT) (Ir.IrCS) (Ir.IrBS)
 
-let _ = code ()
+let go symname =
+  let sym = Symbols.find_named_symbol symbols strtab symname in
+  let entry_point = sym.Elfreader.st_value in
+  let code = code_for_sym text mapping_syms sym in
+  let blockseq, ht = bs_of_code_hash symbols code entry_point in
+  let entry_point_ref = Hashtbl.find ht entry_point in
+  Printf.printf "entry point %lx, ref %d\n" entry_point entry_point_ref;
+  IrDfs.pred_succ ~whole_program:false blockseq ht;
+  IrDfs.dfs blockseq ht 0l;
+  Printf.printf "--- after doing DFS ---\n";
+  print_blockseq_dfsinfo blockseq;
+  IrDominator.dominators blockseq;
+  IrDominator.computedf blockseq;
+  Printf.printf "--- after computing dominators ---\n";
+  print_blockseq_dfsinfo blockseq;
+  let regset = IrPhiPlacement.place blockseq in
+  let blockseq' = IrPhiPlacement.rename blockseq 0 regset in
+  Printf.printf "after SSA conversion:\n";
+  dump_blockseq blockseq'
+
+let _ = go "loop"
