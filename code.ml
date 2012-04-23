@@ -289,10 +289,7 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
 	fold_postorder ?inhibit_set_dest fn c3 acc''
     | Jump _ | Jump_ext _ -> acc
   
-  (* Pass inhibit_set_dest:true to avoid descending into the LHS of "Set"
-     nodes.  FIXME: Might also want to inhibit traversing phi nodes, depending
-     on implementation of Interference.ml etc.  *)
-  let map fn code =
+  let map fn ?(ctl_fn = fun x -> x) code =
     let rec scan e =
       match fn e with
 	(Entity _ | Reg _ | SSAReg _ | Immed _ | Nullary _) as x -> x
@@ -316,7 +313,7 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
 	  Phi (Array.map scan parr)
       | Protect child -> child
     and scan_ctl e =
-      match e with
+      match ctl_fn e with
 	TailCall (br, code) ->
 	  TailCall (br, scan code)
       | Call (call, carg, ret, retarg) ->
