@@ -129,6 +129,8 @@ let convert_condition cond =
     | Vs -> Irtypes.Status_vs in
   C.Unary (code, C.Reg (IT.Status Irtypes.CondFlags))
 
+(* This is entirely wrong!  *)
+
 let convert_cond_bx cond addr insn ilist =
   let dest = insn.read_operands.(0) in
   match dest with

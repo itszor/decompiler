@@ -177,18 +177,18 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
       let rewrite_statements blk_n =
         CS.fold_left
 	  (fun codeseq node ->
-            let node' = C.map_postorder
-	      ~inhibit_set_dest:true
+            let node' = C.map
 	      (function
-	          (* We set inhibit_set_dest so this rule can match without
-		     matching the LHS "Reg" first (since we're performing a
-		     postorder traversal).  *)
 		  C.Set (C.Reg rd, rhs) ->
 		    let rdnum = Hashtbl.find rnum_htab rd in
 		    count.(rdnum) <- count.(rdnum) + 1;
 		    let idx = count.(rdnum) in
 		    stack.(rdnum) <- idx :: stack.(rdnum);
-		    C.Set (C.SSAReg (rd, idx), rhs)
+		    let rhs' =
+		      match rhs with
+			C.Phi _ -> C.Protect rhs
+		      | _ -> rhs in
+		    C.Set (C.Protect (C.SSAReg (rd, idx)), rhs')
 		| C.Reg ru ->
 		    let runum = Hashtbl.find rnum_htab ru in
 		    let idx = List.hd stack.(runum) in
@@ -234,8 +234,7 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
 	rewrite_phi_nodes blk_n;
 	blk_arr.(blk_idx) <- blk_n;
 	List.iter
-	  (fun child ->
-	    rename' blk_arr child)
+	  (fun child -> rename' blk_arr child)
 	  blk_n.idomchild; (* The right children?  *)
 	(* Pop variables originally defined in block off the stack.  *)
 	CS.iter

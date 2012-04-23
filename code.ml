@@ -127,6 +127,9 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
       | Control of control
       | Phi of code array
       | Entity of CT.entity
+      (* Just for iterating over code sequences.  Don't process "protected"
+         child nodes.  *)
+      | Protect of code
 
     (* FIXME: Seems like these need sanitizing a bit.  *)
     and control =
@@ -212,6 +215,7 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
         str "phi (%s)" (String.concat ", " (Array.to_list
 	  (Array.map string_of_code carr)))
     | Entity e -> CT.string_of_entity e
+    | Protect x -> str "*protect* (%s)" (string_of_code x)
   
   let string_of_codeseq cs =
     let buf = CS.fold_left
@@ -288,88 +292,54 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
   (* Pass inhibit_set_dest:true to avoid descending into the LHS of "Set"
      nodes.  FIXME: Might also want to inhibit traversing phi nodes, depending
      on implementation of Interference.ml etc.  *)
-  let rec map_postorder ?inhibit_set_dest fn code =
-    match code with
-      Entity _ | Reg _ | SSAReg _ | Immed _ | Nullary _ ->
-        fn code
-    | Load (mem, code) ->
-        let code' = map_postorder ?inhibit_set_dest fn code in
-	Load (mem, code')
-    | Store (mem, code, v) ->
-        let code' = map_postorder ?inhibit_set_dest fn code in
-	let v' = map_postorder ?inhibit_set_dest fn v in
-	fn (Store (mem, code', v'))
-    | Nary (op, clist) ->
-        let clist' = List.map (map_postorder ?inhibit_set_dest fn) clist in
-	fn (Nary (op, clist'))
-    | Trinary (op, a, b, c) ->
-        let a' = map_postorder ?inhibit_set_dest fn a
-	and b' = map_postorder ?inhibit_set_dest fn b
-	and c' = map_postorder ?inhibit_set_dest fn c in
-	fn (Trinary (op, a', b', c'))
-    | Binary (op, a, b) ->
-        let a' = map_postorder ?inhibit_set_dest fn a
-	and b' = map_postorder ?inhibit_set_dest fn b in
-	fn (Binary (op, a', b'))
-    | Unary (op, a) ->
-        let a' = map_postorder ?inhibit_set_dest fn a in
-	fn (Unary (op, a'))
-    | Set (d, s) ->
-        begin match inhibit_set_dest with
-	  Some true ->
-	    let s' = map_postorder ?inhibit_set_dest fn s in
-	    fn (Set (d, s'))
-	| _ ->
-            let d' = map_postorder ?inhibit_set_dest fn d
-	    and s' = map_postorder ?inhibit_set_dest fn s in
-	    fn (Set (d', s'))
-	end
-    | Control c ->
-        let c' = map_ctl_postorder ?inhibit_set_dest fn c in
-	fn (Control c')
-    | Phi parr ->
-        let parr' = Array.map (map_postorder ?inhibit_set_dest fn) parr in
-	fn (Phi parr')
-
-  and map_ctl_postorder ?inhibit_set_dest fn ctl =
-    match ctl with
-      TailCall (br, code) ->
-        let code' = map_postorder ?inhibit_set_dest fn code in
-	TailCall (br, code')
-    | Call (call, carg, ret, retarg) ->
-        let carg' = map_postorder ?inhibit_set_dest fn carg
-	and retarg' = map_postorder ?inhibit_set_dest fn retarg in
-	Call (call, carg', ret, retarg')
-    | Jump _ -> ctl
-    | Branch (code, tr, fa) ->
-        let code' = map_postorder ?inhibit_set_dest fn code in
-	Branch (code', tr, fa)
-    | Return code ->
-        let code' = map_postorder ?inhibit_set_dest fn code in
-	Return code'
-    | CompTailCall (dst, arg) ->
-        let dst' = map_postorder ?inhibit_set_dest fn dst
-	and arg' = map_postorder ?inhibit_set_dest fn arg in
-	CompTailCall (dst', arg')
-    | CompCall (dst, arg, ret, retarg) ->
-        let dst' = map_postorder ?inhibit_set_dest fn dst
-	and arg' = map_postorder ?inhibit_set_dest fn arg
-	and retarg' = map_postorder ?inhibit_set_dest fn retarg in
-	CompCall (dst', arg', ret, retarg')
-    | CompJump (code, dl) ->
-        let code' = map_postorder ?inhibit_set_dest fn code in
-	CompJump (code', dl)
-    | TailCall_ext (abi, addr, code) ->
-        let code' = map_postorder ?inhibit_set_dest fn code in
-	TailCall_ext (abi, addr, code')
-    | Call_ext (abi, addr, arg, ret, retarg) ->
-        let arg' = map_postorder ?inhibit_set_dest fn arg
-	and retarg' = map_postorder ?inhibit_set_dest fn retarg in
-	Call_ext (abi, addr, arg', ret, retarg')
-    | Jump_ext _ -> ctl
-    | CompJump_ext (abi, dst) ->
-        let dst' = map_postorder ?inhibit_set_dest fn dst in
-	CompJump_ext (abi, dst')
+  let map fn code =
+    let rec scan e =
+      match fn e with
+	(Entity _ | Reg _ | SSAReg _ | Immed _ | Nullary _) as x -> x
+      | Load (mem, code) ->
+	  Load (mem, scan code)
+      | Store (mem, code, v) ->
+	  Store (mem, scan code, scan v)
+      | Nary (op, clist) ->
+	  Nary (op, List.map scan clist)
+      | Trinary (op, a, b, c) ->
+	  Trinary (op, scan a, scan b, scan c)
+      | Binary (op, a, b) ->
+	  Binary (op, scan a, scan b)
+      | Unary (op, a) ->
+	  Unary (op, scan a)
+      | Set (d, s) ->
+	  Set (scan d, scan s)
+      | Control c ->
+	  Control (scan_ctl c)
+      | Phi parr ->
+	  Phi (Array.map scan parr)
+      | Protect child -> child
+    and scan_ctl e =
+      match e with
+	TailCall (br, code) ->
+	  TailCall (br, scan code)
+      | Call (call, carg, ret, retarg) ->
+	  Call (call, scan carg, ret, scan retarg)
+      | Jump _ -> e
+      | Branch (code, tr, fa) ->
+	  Branch (scan code, tr, fa)
+      | Return code ->
+	  Return (scan code)
+      | CompTailCall (dst, arg) ->
+	  CompTailCall (scan dst, scan arg)
+      | CompCall (dst, arg, ret, retarg) ->
+	  CompCall (scan dst, scan arg, ret, scan retarg)
+      | CompJump (code, dl) ->
+	  CompJump (scan code, dl)
+      | TailCall_ext (abi, addr, code) ->
+	  TailCall_ext (abi, addr, scan code)
+      | Call_ext (abi, addr, arg, ret, retarg) ->
+	  Call_ext (abi, addr, scan arg, ret, scan retarg)
+      | Jump_ext _ -> e
+      | CompJump_ext (abi, dst) ->
+	  CompJump_ext (abi, scan dst) in
+    scan code
 	
   end
 
