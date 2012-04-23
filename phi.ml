@@ -179,23 +179,29 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
 	  (fun codeseq node ->
             let node' = C.map
 	      (function
-		  C.Set (C.Reg rd, rhs) ->
+	        C.Set (lhs, (C.Phi _ as rhs)) ->
+		  (* Don't process phi nodes.  *)
+		  C.Protect (C.Set (lhs, rhs))
+	      | C.Set ((C.Reg _ as lhs), rhs) ->
+	          (* Only interested in uses, not defs.  *)
+	          C.Set (C.Protect lhs, rhs)
+	      | C.Reg ru ->
+		  let runum = Hashtbl.find rnum_htab ru in
+		  let idx = List.hd stack.(runum) in
+		  C.SSAReg (ru, idx)
+	      | x -> x)
+	      node in
+	    let node'' = C.map
+	      (function
+	        C.Set (C.Reg rd, rhs) ->
 		    let rdnum = Hashtbl.find rnum_htab rd in
 		    count.(rdnum) <- count.(rdnum) + 1;
 		    let idx = count.(rdnum) in
 		    stack.(rdnum) <- idx :: stack.(rdnum);
-		    let rhs' =
-		      match rhs with
-			C.Phi _ -> C.Protect rhs
-		      | _ -> rhs in
-		    C.Set (C.Protect (C.SSAReg (rd, idx)), rhs')
-		| C.Reg ru ->
-		    let runum = Hashtbl.find rnum_htab ru in
-		    let idx = List.hd stack.(runum) in
-		    C.SSAReg (ru, idx)
-		| x -> x)
-	      node in
-	    CS.snoc codeseq node')
+		    C.Protect (C.Set (C.SSAReg (rd, idx), rhs))
+	      | x -> x)
+	      node' in
+	    CS.snoc codeseq node'')
 	  CS.empty
 	  blk_n.code in
       (* ...but rewrite_phi_nodes is imperative, and modifies the block
