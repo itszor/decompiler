@@ -148,9 +148,31 @@ let eabi_pre_prologue real_entry_point =
   let cs = CS.of_list insns in
   Block.make_block "entry block" cs
 
+let eabi_post_epilogue () =
+  let insns =
+    [C.Set (C.Reg CT.Arg_out, C.Reg (CT.Hard_reg 0));
+     C.Set (C.Reg CT.Arg_out, C.Reg (CT.Hard_reg 1));
+     C.Set (C.Reg CT.Arg_out, C.Reg (CT.Hard_reg 2));
+     C.Set (C.Reg CT.Arg_out, C.Reg (CT.Hard_reg 3));
+     C.Set (C.Reg CT.Caller_restored, C.Reg (CT.Hard_reg 4));
+     C.Set (C.Reg CT.Caller_restored, C.Reg (CT.Hard_reg 5));
+     C.Set (C.Reg CT.Caller_restored, C.Reg (CT.Hard_reg 6));
+     C.Set (C.Reg CT.Caller_restored, C.Reg (CT.Hard_reg 7));
+     C.Set (C.Reg CT.Caller_restored, C.Reg (CT.Hard_reg 8));
+     C.Set (C.Reg CT.Caller_restored, C.Reg (CT.Hard_reg 9));
+     C.Set (C.Reg CT.Caller_restored, C.Reg (CT.Hard_reg 10));
+     C.Set (C.Reg CT.Caller_restored, C.Reg (CT.Hard_reg 11));
+     C.Control C.Virtual_exit] in
+  let cs = CS.of_list insns in
+  Block.make_block "exit block" cs
+
 let bs_of_code_hash symbols code_hash entry_pt =
-  let idx = ref (Hashtbl.length code_hash) in
+  let num_blocks = Hashtbl.length code_hash in
+  let idx = ref num_blocks in
   let ht = Hashtbl.create 10 in
+  let virtual_exit = eabi_post_epilogue () in
+  let virtual_exit_ref = num_blocks + 1 in
+  let blockseq0 = BS.cons virtual_exit BS.empty in
   let blockseq = Hashtbl.fold
     (fun addr code bseq ->
       let ir_cs = Insn_to_ir.convert_block symbols addr code in
@@ -162,10 +184,11 @@ let bs_of_code_hash symbols code_hash entry_pt =
       decr idx;
       BS.cons block bseq)
     code_hash
-    BS.empty in
+    blockseq0 in
   let pre_prologue_blk = eabi_pre_prologue entry_pt in
   let with_entry_pt = BS.cons pre_prologue_blk blockseq in
   Hashtbl.add ht 0l 0;
+  Hashtbl.add ht 0xffffffffl virtual_exit_ref;
   with_entry_pt, ht
 
 let code_for_named_sym section symbols mapping_syms strtab symname =
@@ -237,7 +260,7 @@ let go symname =
   let blockseq, ht = bs_of_code_hash symbols code entry_point in
   let entry_point_ref = Hashtbl.find ht entry_point in
   Printf.printf "entry point %lx, ref %d\n" entry_point entry_point_ref;
-  IrDfs.pred_succ ~whole_program:false blockseq ht;
+  IrDfs.pred_succ ~whole_program:false blockseq ht 0xffffffffl;
   IrDfs.dfs blockseq ht 0l;
   let blk_arr = IrDfs.blockseq_to_dfs_array blockseq in
   Printf.printf "--- after doing DFS ---\n";

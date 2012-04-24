@@ -106,7 +106,8 @@ let convert_bx insn ilist =
   let dest = insn.read_operands.(0) in
   match dest with
     Hard_reg r ->
-      let ctrl = C.Control (C.Jump_ext (IT.Branch_exchange, IT.Reg_addr r)) in
+      let ctrl = C.Control (C.CompJump_ext (IT.Branch_exchange,
+					    convert_operand dest)) in
       IL.snoc ilist ctrl
   | _ -> failwith "unexpected bx operand"
 

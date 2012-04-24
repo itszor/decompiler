@@ -146,6 +146,7 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
       | Call_ext of CT.abi * CT.addr * code * BS.blockref * code
       | Jump_ext of CT.abi * CT.addr
       | CompJump_ext of CT.abi * code
+      | Virtual_exit
     
     let get_last blk = CS.get_last blk
     
@@ -187,6 +188,7 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
         str "jump_ext (%s, %s)" (CT.string_of_abi abi) (CT.string_of_addr addr)
     | CompJump_ext (abi, code) ->
         str "compjump_ext (%s, %s)" (CT.string_of_abi abi) (string_of_code code)
+    | Virtual_exit -> "virtual_exit"
     
     and string_of_code = function
       Reg r -> CT.string_of_reg r
@@ -318,7 +320,7 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
 	  TailCall (br, scan code)
       | Call (call, carg, ret, retarg) ->
 	  Call (call, scan carg, ret, scan retarg)
-      | Jump _ -> e
+      | Jump _ as c -> c
       | Branch (code, tr, fa) ->
 	  Branch (scan code, tr, fa)
       | Return code ->
@@ -333,9 +335,10 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
 	  TailCall_ext (abi, addr, scan code)
       | Call_ext (abi, addr, arg, ret, retarg) ->
 	  Call_ext (abi, addr, scan arg, ret, scan retarg)
-      | Jump_ext _ -> e
+      | Jump_ext _ as c -> c
       | CompJump_ext (abi, dst) ->
-	  CompJump_ext (abi, scan dst) in
+	  CompJump_ext (abi, scan dst)
+      | Virtual_exit -> Virtual_exit in
     scan code
 	
   end

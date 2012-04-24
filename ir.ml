@@ -15,6 +15,8 @@ module IrCT =
              | Stack of int
 	     | Temp of int
 	     | Status of ir_statusbits
+	     | Arg_out
+	     | Caller_restored
     type mem = ir_mem
     type entity = unit
     type abi = Branch_exchange
@@ -23,7 +25,6 @@ module IrCT =
     type blockref = int
     type immed = int32
     type addr = Absolute of int32
-              | Reg_addr of int
 	      | Symbol of Elfreader.elf_sym
     
     let string_of_nulop = function
@@ -75,6 +76,8 @@ module IrCT =
     | Stack s -> Printf.sprintf "stack+%d" s
     | Temp t -> Printf.sprintf "tmp%d" t
     | Status sb -> Printf.sprintf "status(%s)" (string_of_status sb)
+    | Arg_out -> "arg_out"
+    | Caller_restored -> "caller_restored"
     
     let string_of_mem = function
       U8 -> "u8"
@@ -93,7 +96,6 @@ module IrCT =
 
     let string_of_addr = function
       Absolute i -> Printf.sprintf "absolute(%lx)" i
-    | Reg_addr r -> Printf.sprintf "reg-addr(%d)" r
     | Symbol _ -> Printf.sprintf "symbol(...)"
   end
 

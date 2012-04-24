@@ -6,7 +6,7 @@ module Dfs (CT : Code.CODETYPES) (CS : Code.CODESEQ) (BS : Code.BLOCKSEQ) =
     open Block
 
     (* Calculate predecessors and successors.  *)
-    let pred_succ ~whole_program blks reftable =
+    let pred_succ ~whole_program blks reftable virtual_exit =
       let link fromblk dstref =
         let toblk = BS.lookup_ref blks reftable dstref in
         fromblk.successors <- toblk :: fromblk.successors;
@@ -38,14 +38,19 @@ module Dfs (CT : Code.CODETYPES) (CS : Code.CODESEQ) (BS : Code.BLOCKSEQ) =
                 | ret::rest ->
                     link hd ret;
                     scan (BS.tail lst) rest
-              end else
-                (* ??? *)
+              end else begin
+                link hd virtual_exit;
                 scan (BS.tail lst) retstk
+	      end
           | C.CompJump (_, dests) ->
               List.iter (fun dst -> link hd dst) dests;
               scan (BS.tail lst) retstk
+          | C.CompJump_ext _ ->
+	      (* This is used for the exit of the function.  *)
+	      link hd virtual_exit;
+	      scan (BS.tail lst) retstk
           (* FIXME: Several control types not implemented here.  *)
-          | _ -> scan (BS.tail lst) retstk
+	  | _ -> scan (BS.tail lst) retstk
       in
         scan blks []
 
