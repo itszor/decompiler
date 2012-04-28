@@ -27,7 +27,13 @@ let convert_operand op =
   match op with
     Hard_reg r -> C.Reg (IT.Hard_reg r)
   | Immediate i -> C.Immed i
-  | _ -> failwith "boo"
+  | _ -> failwith "convert_operand"
+
+let convert_maybe_pc_operand op =
+  match op with
+    Hard_reg 15 -> C.Reg (create_pseudo ()), true
+  | Hard_reg r -> C.Reg (IT.Hard_reg r), false
+  | _ -> failwith "convert_maybe_pc_operand"
 
 let convert_mov insn =
   if insn.write_flags = [] && insn.read_flags = [] then begin
@@ -75,8 +81,8 @@ let convert_load ainf insn access ilist =
   let base = convert_operand insn.read_operands.(0)
   and index = convert_operand insn.read_operands.(1) in
   let addr = convert_address ainf insn base index
-  and dst = convert_operand insn.write_operands.(0) in
-  if ainf.pre_modify then begin
+  and dst, loads_pc = convert_maybe_pc_operand insn.write_operands.(0) in
+  let ilist' = if ainf.pre_modify then begin
     let ilist = IL.snoc ilist (C.Set (dst, C.Load (access, addr))) in
     if ainf.writeback then
       let w_base = convert_operand insn.write_operands.(1) in
@@ -88,7 +94,11 @@ let convert_load ainf insn access ilist =
     let w_base = convert_operand insn.write_operands.(1) in
     let ilist = IL.snoc ilist (C.Set (dst, C.Load (access, base))) in
     IL.snoc ilist (C.Set (w_base, addr))
-  end
+  end in
+  if loads_pc then
+    IL.snoc ilist' (C.Control (C.CompJump_ext (IT.Branch_exchange, dst)))
+  else
+    ilist'
 
 let convert_store ainf insn access ilist =
   let base = convert_operand insn.read_operands.(1)

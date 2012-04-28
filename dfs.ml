@@ -49,6 +49,9 @@ module Dfs (CT : Code.CODETYPES) (CS : Code.CODESEQ) (BS : Code.BLOCKSEQ) =
 	      (* This is used for the exit of the function.  *)
 	      link hd virtual_exit;
 	      scan (BS.tail lst) retstk
+	  | C.Call_ext (_, _, _, ret, _) ->
+	      link hd ret;
+	      scan (BS.tail lst) retstk
           (* FIXME: Several control types not implemented here.  *)
 	  | _ -> scan (BS.tail lst) retstk
       in

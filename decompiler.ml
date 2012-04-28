@@ -276,4 +276,4 @@ let go symname =
   Printf.printf "after SSA conversion:\n";
   dump_blockseq blk_arr
 
-let _ = go "loop"
+let _ = go "main"
