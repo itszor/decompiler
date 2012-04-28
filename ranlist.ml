@@ -132,6 +132,12 @@ let iter fn ranlist =
 let map fn ranlist =
   fold_right (fun hd newlist -> cons (fn hd) newlist) ranlist empty
 
+let append a b =
+  fold_right cons a b
+
+let rev a =
+  fold_left (fun r i -> cons i r) empty a
+
 (* There's probably a quicker (i.e. log(n)?) way of doing this, perhaps?  *)
 let length rls =
   fold_left (fun acc _ -> succ acc) 0 rls

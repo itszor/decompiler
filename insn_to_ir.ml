@@ -16,47 +16,54 @@ let create_pseudo () =
   incr pseudo_num;
   tmp
 
+let blk_num = ref 0
+
+let create_blkref () =
+  let blk = Irtypes.BlockNum !blk_num in
+  incr blk_num;
+  blk
+
 let convert_operand op =
   match op with
     Hard_reg r -> C.Reg (IT.Hard_reg r)
   | Immediate i -> C.Immed i
   | _ -> failwith "boo"
 
-let convert_mov insn ilist =
+let convert_mov insn =
   if insn.write_flags = [] && insn.read_flags = [] then begin
     let dst = convert_operand insn.write_operands.(0)
     and op1 = convert_operand insn.read_operands.(0) in
-    IL.snoc ilist (C.Set (dst, op1))
+    C.Set (dst, op1)
   end else
-    IL.snoc ilist (C.Nullary (Irtypes.Untranslated))
+    C.Nullary (Irtypes.Untranslated)
 
-let convert_binop opcode insn ilist =
+let convert_binop opcode insn =
   if insn.write_flags = [] && insn.read_flags = [] then begin
     let dst = convert_operand insn.write_operands.(0)
     and op1 = convert_operand insn.read_operands.(0)
     and op2 = convert_operand insn.read_operands.(1) in
-    IL.snoc ilist (C.Set (dst, C.Binary (opcode, op1, op2)))
+    C.Set (dst, C.Binary (opcode, op1, op2))
   end else
-    IL.snoc ilist (C.Nullary (Irtypes.Untranslated))
+    C.Nullary (Irtypes.Untranslated)
 
-let convert_rsb insn ilist =
+let convert_rsb insn =
   if insn.write_flags = [] && insn.read_flags = [] then begin
     let dst = convert_operand insn.write_operands.(0)
     and op1 = convert_operand insn.read_operands.(0)
     and op2 = convert_operand insn.read_operands.(1) in
-    IL.snoc ilist (C.Set (dst, C.Binary (Irtypes.Sub, op2, op1)))
+    C.Set (dst, C.Binary (Irtypes.Sub, op2, op1))
   end else
-    IL.snoc ilist (C.Nullary (Irtypes.Untranslated))
+    C.Nullary (Irtypes.Untranslated)
 
-let convert_carry_in_op opcode insn ilist =
+let convert_carry_in_op opcode insn =
   if insn.write_flags = [] && insn.read_flags = [C] then begin
     let dst = convert_operand insn.write_operands.(0)
     and op1 = convert_operand insn.read_operands.(0)
     and op2 = convert_operand insn.read_operands.(1) in
-    IL.snoc ilist (C.Set (dst, C.Trinary (opcode, op1, op2,
-		     C.Reg (IT.Status Irtypes.Carry))))
+    C.Set (dst, C.Trinary (opcode, op1, op2,
+	   C.Reg (IT.Status Irtypes.Carry)))
   end else
-    IL.snoc ilist (C.Nullary (Irtypes.Untranslated))
+    C.Nullary (Irtypes.Untranslated)
 
 let convert_address ainf insn base index =
   match ainf.addr_mode with
@@ -102,13 +109,11 @@ let convert_store ainf insn access ilist =
     IL.snoc ilist (C.Set (w_base, addr))
   end
 
-let convert_bx insn ilist =
+let convert_bx insn =
   let dest = insn.read_operands.(0) in
   match dest with
     Hard_reg r ->
-      let ctrl = C.Control (C.CompJump_ext (IT.Branch_exchange,
-					    convert_operand dest)) in
-      IL.snoc ilist ctrl
+      C.Control (C.CompJump_ext (IT.Branch_exchange, convert_operand dest))
   | _ -> failwith "unexpected bx operand"
 
 let convert_condition cond =
@@ -132,14 +137,14 @@ let convert_condition cond =
 
 (* This is entirely wrong!  *)
 
-let convert_cond_bx cond addr insn ilist =
+let convert_cond_bx cond addr insn =
   let dest = insn.read_operands.(0) in
   match dest with
     Hard_reg r ->
       let falseblock = Int32.add addr 4l in
-      let ctrl = C.Control (C.Branch (convert_condition cond, falseblock,
-			    falseblock)) in
-      IL.snoc ilist ctrl
+      C.Control (C.Branch (convert_condition cond,
+			   Irtypes.BlockAddr falseblock,
+			   Irtypes.BlockAddr falseblock))
   | _ -> failwith "unexpected bx operand"
 
 let find_symbol symbols addr =
@@ -149,86 +154,137 @@ let find_symbol symbols addr =
   with Not_found ->
     IT.Absolute addr
 
-let convert_bl symbols addr insn ilist =
+let convert_bl symbols addr insn =
   let dest = insn.read_operands.(0) in
   match dest with
     PC_relative i ->
       let no_arg = C.Nullary Irtypes.Nop in
-      let ret_addr = Int32.add addr 4l in
+      let ret_addr = Irtypes.BlockAddr (Int32.add addr 4l) in
       let call_addr = Int32.add addr i in
       let sym_or_addr = find_symbol symbols call_addr in
-      let ctrl = C.Control (C.Call_ext (IT.Unknown_abi, sym_or_addr,
-					no_arg, ret_addr, no_arg)) in
-      IL.snoc ilist ctrl
+      C.Control (C.Call_ext (IT.Unknown_abi, sym_or_addr, no_arg, ret_addr,
+			     no_arg))
   | _ -> failwith "unexpected bx operand"
 
-let convert_cmp insn ilist =
+let convert_cmp insn =
   if insn.read_flags = [] && flags_match insn.write_flags [C;V;N;Z] then begin
     let op1 = convert_operand insn.read_operands.(0)
     and op2 = convert_operand insn.read_operands.(1) in
-    IL.snoc ilist (C.Set (C.Reg (IT.Status Irtypes.CondFlags),
-		    C.Binary (Irtypes.Cmp, op1, op2)))
+    C.Set (C.Reg (IT.Status Irtypes.CondFlags),
+	   C.Binary (Irtypes.Cmp, op1, op2))
   end else
-    IL.snoc ilist (C.Nullary (Irtypes.Untranslated))
+    C.Nullary (Irtypes.Untranslated)
 
-let convert_cbranch cond addr insn ilist =
+let convert_cbranch cond addr insn =
   let dest = insn.read_operands.(0) in
   match dest with
     PC_relative i ->
-      let trueblock = Int32.add addr i
-      and falseblock = Int32.add addr 4l in
-      let branch = C.Control (C.Branch (convert_condition cond, trueblock,
-					falseblock)) in
-      IL.snoc ilist branch
+      let trueblock = Irtypes.BlockAddr (Int32.add addr i)
+      and falseblock = Irtypes.BlockAddr (Int32.add addr 4l) in
+      C.Control (C.Branch (convert_condition cond, trueblock, falseblock))
   | _ -> failwith "unexpected b<cond> operand"
 
-let convert_branch addr insn ilist =
+let convert_branch addr insn =
   let dest = insn.read_operands.(0) in
   match dest with
     PC_relative i ->
-      let branch = C.Control (C.Jump (Int32.add addr i)) in
-      IL.snoc ilist branch
+      C.Control (C.Jump (Irtypes.BlockAddr (Int32.add addr i)))
   | _ -> failwith "unexpected b operand"
 
 exception Unsupported_opcode of Insn.opcode
 
-let rec convert_insn symbols addr insn ilist =
+let name_for_block_id = function
+    Irtypes.BlockAddr addr -> Printf.sprintf "block_for_addr_0x%lx" addr
+  | Irtypes.BlockNum n -> Printf.sprintf "block_num_%d" n
+  | Irtypes.Virtual_entry -> "virtual_entry"
+  | Irtypes.Virtual_exit -> "virtual_exit"
+
+(* Start a new block, adding the insns for the previous block to the block
+   sequence and adding it to the block index hashtbl.  If the insn list
+   doesn't end with a control flow insn and CHAIN is set to a block id, adds a
+   jump from the end of the old block to the new one.  Returns new blockseq.  *)
+
+let finish_block block_id ?chain insnlist bseq bseq_cons =
+  let insnlist' =
+    if not (IL.is_empty insnlist) then begin
+      match IL.noced insnlist with
+	prev, C.Control _ -> insnlist
+      | _ ->
+        begin match chain with
+	  None -> insnlist
+	| Some chain ->
+	    let fallthru = C.Control (C.Jump chain) in
+	    IL.snoc insnlist fallthru
+	end
+    end else begin
+      match chain with
+	None -> insnlist
+      | Some chain ->
+	  let fallthru = C.Control (C.Jump chain) in
+	  IL.snoc insnlist fallthru
+    end in
+  let name = name_for_block_id block_id in
+  let blk = Block.make_block name insnlist' in
+  bseq_cons block_id blk bseq
+
+let rec convert_insn symbols addr insn ilist blk_id bseq bseq_cons =
+  let append insn =
+    IL.snoc ilist insn, blk_id, bseq
+  and same_blk ilist =
+    ilist, blk_id, bseq in
   match insn.opcode with
-    Mov -> convert_mov insn ilist
-  | Add -> convert_binop Irtypes.Add insn ilist
-  | Sub -> convert_binop Irtypes.Sub insn ilist
-  | And -> convert_binop Irtypes.And insn ilist
-  | Eor -> convert_binop Irtypes.Eor insn ilist
-  | Orr -> convert_binop Irtypes.Or insn ilist
-  | Mul -> convert_binop Irtypes.Mul insn ilist
-  | Rsb -> convert_rsb insn ilist
-  | Adc -> convert_carry_in_op Irtypes.Adc insn ilist
-  | Sbc -> convert_carry_in_op Irtypes.Sbc insn ilist
-  | Cmp -> convert_cmp insn ilist
-  | Ldr ainf -> convert_load ainf insn Irtypes.Word ilist
-  | Ldrb ainf -> convert_load ainf insn Irtypes.U8 ilist
-  | Str ainf -> convert_store ainf insn Irtypes.Word ilist
-  | Strb ainf -> convert_store ainf insn Irtypes.U8 ilist
-  | Bx -> convert_bx insn ilist
-  | Bl -> convert_bl symbols addr insn ilist
-  | B -> convert_branch addr insn ilist
-  | Conditional (cond, B) -> convert_cbranch cond addr insn ilist
-  | Conditional (cond, Bx) -> convert_cond_bx cond addr insn ilist
+    Mov -> append (convert_mov insn)
+  | Add -> append (convert_binop Irtypes.Add insn)
+  | Sub -> append (convert_binop Irtypes.Sub insn)
+  | And -> append (convert_binop Irtypes.And insn)
+  | Eor -> append (convert_binop Irtypes.Eor insn)
+  | Orr -> append (convert_binop Irtypes.Or insn)
+  | Mul -> append (convert_binop Irtypes.Mul insn)
+  | Rsb -> append (convert_rsb insn)
+  | Adc -> append (convert_carry_in_op Irtypes.Adc insn)
+  | Sbc -> append (convert_carry_in_op Irtypes.Sbc insn)
+  | Cmp -> append (convert_cmp insn)
+  | Ldr ainf -> same_blk (convert_load ainf insn Irtypes.Word ilist)
+  | Ldrb ainf -> same_blk (convert_load ainf insn Irtypes.U8 ilist)
+  | Str ainf -> same_blk (convert_store ainf insn Irtypes.Word ilist)
+  | Strb ainf -> same_blk (convert_store ainf insn Irtypes.U8 ilist)
+  | Bx -> append (convert_bx insn)
+  | Bl -> append (convert_bl symbols addr insn)
+  | B -> append (convert_branch addr insn)
+  | Conditional (cond, B) -> append (convert_cbranch cond addr insn)
+  | Conditional (cond, _) ->
+      convert_conditional symbols addr cond insn ilist blk_id bseq bseq_cons
   | x -> raise (Unsupported_opcode x)
 
-let convert_block symbols addr insn_list =
-  let code_deque, last_offset = Deque.fold_left
-    (fun (acc, offset) insn ->
-      let ilist' = convert_insn symbols (Int32.add addr offset) insn acc in
-      ilist', Int32.add offset 4l)
-    (IL.empty, 0l)
+and convert_conditional symbols addr cond insn ilist blk_id bseq bseq_cons =
+  let cond_passed = create_blkref () in
+  let after_insn = create_blkref () in
+  let cond = C.Control (C.Branch (convert_condition cond, cond_passed,
+				  after_insn)) in
+  let ilist = IL.snoc ilist cond in
+  let bseq' = finish_block blk_id ilist bseq bseq_cons in
+  let cond_ilist, cond_blk_id, bseq'' =
+    match insn.opcode with
+      Conditional (_, op) ->
+        convert_insn symbols addr { insn with opcode = op } IL.empty
+		     cond_passed bseq' bseq_cons
+    | _ -> failwith "not a conditional insn" in
+  let cond_ilist' = IL.snoc cond_ilist (C.Control (C.Jump after_insn)) in
+  let bseq'3 = finish_block cond_blk_id cond_ilist' bseq'' bseq_cons in
+  IL.empty, after_insn, bseq'3
+
+let convert_block symbols block_id bseq bseq_cons addr insn_list code_hash =
+  let code_deque, blk_id', bseq', last_offset = Deque.fold_left
+    (fun (acc, blk_id, bseq, offset) insn ->
+      let ilist', blk_id', bseq'
+        = convert_insn symbols (Int32.add addr offset) insn acc blk_id bseq
+		       bseq_cons in
+      ilist', blk_id', bseq', Int32.add offset 4l)
+    (IL.empty, block_id, bseq, 0l)
     insn_list in
-  if not (IL.is_empty code_deque) then
-    match IL.noced code_deque with
-      prev, C.Control _ -> code_deque
-    | _ ->
-      let fallthru = C.Control (C.Jump (Int32.add addr last_offset)) in
-      IL.snoc code_deque fallthru
+  let next_addr = Int32.add addr last_offset in
+  if Hashtbl.mem code_hash next_addr then
+    finish_block blk_id' ~chain:(Irtypes.BlockAddr next_addr) code_deque
+		 bseq' bseq_cons
   else
-    code_deque
-  
+    finish_block blk_id' code_deque bseq' bseq_cons

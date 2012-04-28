@@ -47,4 +47,8 @@ type ir_statusbits =
   | CondFlags  (* All the condition flags: C, V, N & Z.  *)
   | NZFlags    (* Just the N & Z flags.  *)
 
-type ir_blockref = int32
+type ir_blockref =
+    BlockAddr of int32
+  | BlockNum of int
+  | Virtual_entry
+  | Virtual_exit

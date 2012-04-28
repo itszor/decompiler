@@ -166,30 +166,30 @@ let eabi_post_epilogue () =
   let cs = CS.of_list insns in
   Block.make_block "exit block" cs
 
+let cons_and_add_to_index blk bseq ht blockref idx =
+  Hashtbl.add ht blockref !idx;
+  incr idx;
+  BS.cons blk bseq
+
 let bs_of_code_hash symbols code_hash entry_pt =
-  let num_blocks = Hashtbl.length code_hash in
-  let idx = ref num_blocks in
+  let idx = ref 0 in
   let ht = Hashtbl.create 10 in
-  let virtual_exit = eabi_post_epilogue () in
-  let virtual_exit_ref = num_blocks + 1 in
-  let blockseq0 = BS.cons virtual_exit BS.empty in
+  let bseq_cons blk_id blk bseq =
+    cons_and_add_to_index blk bseq ht blk_id idx in
   let blockseq = Hashtbl.fold
     (fun addr code bseq ->
-      let ir_cs = Insn_to_ir.convert_block symbols addr code in
-      Printf.printf "block for addr %lx:\n" addr;
-      Printf.printf "%s\n" (Ir.Ir.string_of_codeseq ir_cs);
-      Hashtbl.add ht addr !idx;
-      let name = Printf.sprintf "block_for_addr_%ld" addr in
-      let block = Block.make_block name ir_cs in
-      decr idx;
-      BS.cons block bseq)
+      let block_id = Irtypes.BlockAddr addr in
+      Insn_to_ir.convert_block symbols block_id bseq bseq_cons addr code
+			       code_hash)
     code_hash
-    blockseq0 in
-  let pre_prologue_blk = eabi_pre_prologue entry_pt in
-  let with_entry_pt = BS.cons pre_prologue_blk blockseq in
-  Hashtbl.add ht 0l 0;
-  Hashtbl.add ht 0xffffffffl virtual_exit_ref;
-  with_entry_pt, ht
+    BS.empty in
+  let pre_prologue_blk = eabi_pre_prologue entry_pt
+  and virtual_exit = eabi_post_epilogue () in
+  let with_entry_pt
+    = bseq_cons Irtypes.Virtual_entry pre_prologue_blk blockseq in
+  let with_exit_pt
+    = bseq_cons Irtypes.Virtual_exit virtual_exit with_entry_pt in
+  BS.rev with_exit_pt, ht
 
 let code_for_named_sym section symbols mapping_syms strtab symname =
   let sym = Symbols.find_named_symbol symbols strtab symname in
@@ -256,12 +256,13 @@ module IrPhiPlacement = Phi.PhiPlacement (Ir.IrCT) (Ir.IrCS) (Ir.IrBS)
 let go symname =
   let sym = Symbols.find_named_symbol symbols strtab symname in
   let entry_point = sym.Elfreader.st_value in
+  let entry_point_ba = Irtypes.BlockAddr entry_point in
   let code = code_for_sym text mapping_syms sym in
-  let blockseq, ht = bs_of_code_hash symbols code entry_point in
-  let entry_point_ref = Hashtbl.find ht entry_point in
+  let blockseq, ht = bs_of_code_hash symbols code entry_point_ba in
+  let entry_point_ref = Hashtbl.find ht entry_point_ba in
   Printf.printf "entry point %lx, ref %d\n" entry_point entry_point_ref;
-  IrDfs.pred_succ ~whole_program:false blockseq ht 0xffffffffl;
-  IrDfs.dfs blockseq ht 0l;
+  IrDfs.pred_succ ~whole_program:false blockseq ht Irtypes.Virtual_exit;
+  IrDfs.dfs blockseq ht Irtypes.Virtual_entry;
   let blk_arr = IrDfs.blockseq_to_dfs_array blockseq in
   Printf.printf "--- after doing DFS ---\n";
   print_blockseq_dfsinfo blk_arr;

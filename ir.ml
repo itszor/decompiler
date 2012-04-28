@@ -122,7 +122,11 @@ module IrBS =
     
     let lookup_ref things reftable r = lookup things (to_index reftable r)
     
-    let string_of_blockref x = Int32.to_string x
+    let string_of_blockref = function
+      BlockAddr x -> Printf.sprintf "addr_0x%lx" x
+    | BlockNum i -> Printf.sprintf "block_num_%d" i
+    | Virtual_entry -> "virtual_entry"
+    | Virtual_exit -> "virtual_exit"
   end
 
 module IrCS =
