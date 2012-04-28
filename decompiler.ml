@@ -3,6 +3,7 @@ open Dwarfreader
 open Dwarfprint
 
 let elfbits, ehdr = read_file "foo"
+(*let elfbits, ehdr = read_file "libGLESv2.so"*)
 let shdr_arr = get_section_headers elfbits ehdr
 let debug_info = get_section_by_name elfbits ehdr shdr_arr ".debug_info"
 let debug_info_len = Bitstring.bitstring_length debug_info
@@ -274,6 +275,8 @@ let go symname =
   let regset = IrPhiPlacement.place blk_arr in
   IrPhiPlacement.rename blk_arr 0 regset;
   Printf.printf "after SSA conversion:\n";
-  dump_blockseq blk_arr
+  dump_blockseq blk_arr;
+  Printf.printf "gather info...\n";
+  Typedb.gather_info blk_arr
 
-let _ = go "main"
+(*let _ = go "main"*)
