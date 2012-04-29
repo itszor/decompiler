@@ -17,6 +17,10 @@ type infotag =
   | Word_stores
   | Code_pointer
 
+(* This is a really basic kind of type information, derived by scanning
+   instructions.  Attempt to tell apart values which are used as pointers
+   from those which are not (scalars).  The aim (so far) is just to help
+   resolve minipool references.  *)
 and implication =
     Int
   | Pointer
@@ -52,6 +56,9 @@ let record_info ht reg info =
   with Not_found ->
     Hashtbl.add ht reg [info]
 
+let record_impl ht reg info =
+  Hashtbl.add ht reg info
+
 let info_of_mem_type ~load = function
     Irtypes.Word -> if load then Word_loads else Word_stores
   | Irtypes.U8 -> if load then Byte_loads else Byte_stores
@@ -73,24 +80,24 @@ let gather_info blk_arr =
 		     C.SSAReg (rb, rbn))) ->
 	      record_info ht (rd, rdn) (info_of_mem_type ~load:true memtype);
 	      record_info ht (rb, rbn) (Used_as_addr memtype);
-	      record_info impl_ht (rb, rbn) Pointer
+	      record_impl impl_ht (rb, rbn) Pointer
 	  | C.Store (memtype, C.Binary (Irtypes.Add,
 					C.SSAReg (rb, rbn), C.Immed _),
 		     C.SSAReg (rs, rsn))
 	  | C.Store (memtype, C.SSAReg (rb, rbn), C.SSAReg (rs, rsn)) ->
 	      record_info ht (rb, rbn) (Used_as_addr memtype);
 	      record_info ht (rs, rsn) (info_of_mem_type ~load:false memtype);
-	      record_info impl_ht (rb, rbn) Pointer
+	      record_impl impl_ht (rb, rbn) Pointer
 	  | C.Set (C.SSAReg (rd, rdn), C.Binary ((Irtypes.Add | Irtypes.Sub),
 		     C.SSAReg (ra, ran), C.SSAReg (rb, rbn))) ->
-	      record_info impl_ht (rd, rdn)
+	      record_impl impl_ht (rd, rdn)
 		(One_of
 		  [Binary_imp ((ra, ran), Int, (rb, rbn), Int, Int);
 		   Binary_imp ((ra, ran), Pointer, (rb, rbn), Int, Pointer);
 		   Binary_imp ((ra, ran), Int, (rb, rbn), Pointer, Pointer)])
 	  | C.Set (C.SSAReg (rd, rdn), C.Binary ((Irtypes.Add | Irtypes.Sub),
 		    C.SSAReg (ra, ran), C.Immed _)) ->
-	      record_info impl_ht (rd, rdn)
+	      record_impl impl_ht (rd, rdn)
 	        (One_of
 		  [Unary_imp ((ra, ran), Int, Int);
 		   Unary_imp ((ra, ran), Pointer, Pointer)])
@@ -98,12 +105,18 @@ let gather_info blk_arr =
 		   C.Binary ((Irtypes.Mul | Irtypes.And | Irtypes.Eor
 			      | Irtypes.Or),
 			     C.SSAReg (ra, ran), C.SSAReg (rb, rbn))) ->
-	      (* If we're doing multiplies/logic ops, the destination is
-	         unlikely to be a pointer, but it's not impossible!  Maybe
-		 make this more configurable.  *)
-	      record_info impl_ht (rd, rdn)
-	        (Binary_imp ((ra, ran), Int, (rb, rbn), Int, Int))
-	  | _ -> ())
+	      (* If we're doing multiplies/logic ops, none of the operands
+	         involved is likely to be a pointer, but it's not impossible! 
+		 Maybe make this more configurable.  *)
+	      record_impl impl_ht (rd, rdn) Int;
+	      record_impl impl_ht (ra, ran) Int;
+	      record_impl impl_ht (rb, rbn) Int
+	  | C.Control (C.CompJump_ext (_, C.SSAReg (rc, rcn))) ->
+	      record_info ht (rc, rcn) Code_pointer
+	  | _ ->
+	      Printf.printf "gathered no info for '%s'\n"
+			    (C.string_of_code insn);
+	      ())
 	blk.Block.code)
     blk_arr;
   ht, impl_ht
@@ -147,10 +160,79 @@ let print_info ht =
 
 let print_implied_info ht =
   Hashtbl.iter
-    (fun (reg, regn) impllist ->
-      List.iter
-        (fun impl ->
-	  Printf.printf "%s : %s\n" (string_of_ssa_reg reg regn)
-				    (string_of_implied_info impl))
-	impllist)
+    (fun (reg, regn) impl ->
+      Printf.printf "%s : %s\n" (string_of_ssa_reg reg regn)
+				(string_of_implied_info impl))
     ht
+
+let basic_type impl_ht regid =
+  let datas = Hashtbl.find_all impl_ht regid in
+  try
+    let i = List.find (function Int | Pointer -> true | _ -> false) datas in
+    Some i
+  with Not_found ->
+    None
+
+let rec simplify_one_implication impl_ht impl =
+  let known_type regid typ =
+    try 
+      (Hashtbl.find impl_ht regid) = typ
+    with Not_found -> false in
+  match impl with
+    Int | Pointer -> impl
+  | Unary_imp (regid, typ, impltyp) when known_type regid typ -> impltyp
+  | Binary_imp (regid1, typ1, regid2, typ2, impltyp)
+      when known_type regid1 typ1 && known_type regid2 typ2 -> impltyp
+  | Binary_imp (regid1, typ1, regid2, typ2, impltyp)
+      when known_type regid1 typ1 -> Unary_imp (regid2, typ2, impltyp)
+  | Binary_imp (regid1, typ1, regid2, typ2, impltyp)
+      when known_type regid2 typ2 -> Unary_imp (regid1, typ1, impltyp)
+  | One_of il ->
+      let newlist = List.map (fun i -> simplify_one_implication impl_ht i)
+			     il in
+      begin try
+        List.find
+	  (function Int | Pointer -> true | _ -> false)
+	  newlist
+      with Not_found ->
+        One_of newlist
+      end
+  | x -> x
+
+let simplify_implications impl_ht =
+  let finished = ref false in
+  let old_contents = ref [] in
+  let rec iterate () =
+    let contents =
+      Hashtbl.fold
+	(fun reg impl reg_impl_list -> (reg, impl)::reg_impl_list)
+	impl_ht
+	[] in
+    let contents' = List.map
+      (fun (regid, impl) ->
+	let impl' = simplify_one_implication impl_ht impl in
+	(regid, impl'))
+      contents in
+    (* Quite inefficient, but never mind...  *)
+    if contents' = !old_contents then
+      finished := true
+    else
+      old_contents := contents';
+    Hashtbl.clear impl_ht;
+    List.iter
+      (fun (regid, impl) ->
+	match impl, basic_type impl_ht regid with
+          (Int | Pointer), None -> Hashtbl.add impl_ht regid impl
+	| (Int | Pointer) as newtype, Some othertype ->
+            if newtype <> othertype then
+	      Printf.printf "types don't match for '%s'\n"
+		(string_of_ssa_reg (fst regid) (snd regid))
+	| (Int | Pointer) as newtype, _ ->
+            Hashtbl.replace impl_ht regid newtype
+	| _, Some _ ->
+            ()
+	| _, _ ->
+            Hashtbl.add impl_ht regid impl)
+      contents';
+    if not !finished then iterate () in
+  iterate ()
