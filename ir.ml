@@ -18,14 +18,15 @@ module IrCT =
 	     | Arg_out
 	     | Caller_restored
     type mem = ir_mem
-    type entity = unit
+    type entity = PC of int32
+		| Symbol_addr of string * Elfreader.elf_sym
     type abi = Branch_exchange
 	     | Unknown_abi
 
     type blockref = int
     type immed = int32
     type addr = Absolute of int32
-	      | Symbol of Elfreader.elf_sym
+	      | Symbol of string * Elfreader.elf_sym
     
     let string_of_nulop = function
       Nop -> "nop"
@@ -86,7 +87,9 @@ module IrCT =
     | S16 -> "s16"
     | Word -> "word"
     
-    let string_of_entity = fun _ -> ""
+    let string_of_entity = function
+      PC loc -> Printf.sprintf "pc(0x%lx)" loc
+    | Symbol_addr (name, _) -> Printf.sprintf "&%s" name
 
     let string_of_abi = function
       Branch_exchange -> "branch_exchange"
@@ -96,7 +99,7 @@ module IrCT =
 
     let string_of_addr = function
       Absolute i -> Printf.sprintf "absolute(%lx)" i
-    | Symbol _ -> Printf.sprintf "symbol(...)"
+    | Symbol (name, _) -> Printf.sprintf "symbol(%s)" name
   end
 
 module IrBS =

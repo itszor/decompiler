@@ -306,3 +306,13 @@ let get_section_num_by_addr elfbits ehdr shdr_arr addr =
 
 let offset_section secbits offset =
   Bitstring.dropbits (8 * (Int32.to_int offset)) secbits
+
+let section_writable sec =
+  (Int32.logand sec.sh_flags 0x1l) <> 0l
+
+let get_word shdr section addr =
+  let start_offset = Int32.sub addr shdr.sh_addr in
+  let sec_bits = Bitstring.dropbits (8 * (Int32.to_int start_offset)) section in
+  bitmatch sec_bits with
+    { word : 32 : littleendian } -> word
+  | { _ } -> failwith "can't read word"

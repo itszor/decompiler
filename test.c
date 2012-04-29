@@ -13,7 +13,7 @@ volatile int x;
 int loop (int c)
 {
   int i;
-  for (i = 0; i < c; i++)
+  for (i = 0x12345; i < c; i++)
     x = i;
   return c;
 }

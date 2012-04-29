@@ -172,7 +172,7 @@ let cons_and_add_to_index blk bseq ht blockref idx =
   incr idx;
   BS.cons blk bseq
 
-let bs_of_code_hash symbols code_hash entry_pt =
+let bs_of_code_hash symbols strtab code_hash entry_pt =
   let idx = ref 0 in
   let ht = Hashtbl.create 10 in
   let bseq_cons blk_id blk bseq =
@@ -180,7 +180,7 @@ let bs_of_code_hash symbols code_hash entry_pt =
   let blockseq = Hashtbl.fold
     (fun addr code bseq ->
       let block_id = Irtypes.BlockAddr addr in
-      Insn_to_ir.convert_block symbols block_id bseq bseq_cons addr code
+      Insn_to_ir.convert_block symbols strtab block_id bseq bseq_cons addr code
 			       code_hash)
     code_hash
     BS.empty in
@@ -259,7 +259,7 @@ let go symname =
   let entry_point = sym.Elfreader.st_value in
   let entry_point_ba = Irtypes.BlockAddr entry_point in
   let code = code_for_sym text mapping_syms sym in
-  let blockseq, ht = bs_of_code_hash symbols code entry_point_ba in
+  let blockseq, ht = bs_of_code_hash symbols strtab code entry_point_ba in
   let entry_point_ref = Hashtbl.find ht entry_point_ba in
   Printf.printf "entry point %lx, ref %d\n" entry_point entry_point_ref;
   IrDfs.pred_succ ~whole_program:false blockseq ht Irtypes.Virtual_exit;
@@ -277,6 +277,10 @@ let go symname =
   Printf.printf "after SSA conversion:\n";
   dump_blockseq blk_arr;
   Printf.printf "gather info...\n";
-  Typedb.gather_info blk_arr
+  let ht, hti = Typedb.gather_info blk_arr in
+  let blk_arr' =
+    Minipool.minipool_resolve elfbits ehdr shdr_arr symbols mapping_syms strtab
+			      blk_arr ht hti in
+  dump_blockseq blk_arr'
 
 (*let _ = go "main"*)

@@ -48,6 +48,22 @@ and ssa_reg_id = CT.reg * int
 let string_of_ssa_reg reg num =
   Printf.sprintf "%s_%d" (CT.string_of_reg reg) num
 
+let used_as_addr regid ht =
+  try
+    let features = Hashtbl.find ht regid in
+    List.exists (function Used_as_addr _ -> true | _ -> false) features
+  with Not_found -> false
+
+let implied_pointer regid hti =
+  try
+    match Hashtbl.find hti regid with
+      Pointer -> true
+    | _ -> false
+  with Not_found -> false
+
+let probably_pointer regid ht hti =
+  used_as_addr regid ht || implied_pointer regid hti
+
 let record_info ht reg info =
   try
     let infos = Hashtbl.find ht reg in
@@ -65,105 +81,6 @@ let info_of_mem_type ~load = function
   | Irtypes.U16 -> if load then Halfword_loads else Halfword_stores
   | Irtypes.S8 -> if load then Signed_byte_loads else Byte_stores
   | Irtypes.S16 -> if load then Signed_halfword_loads else Halfword_stores
-
-let gather_info blk_arr =
-  let ht = Hashtbl.create 10 in
-  let impl_ht = Hashtbl.create 10 in
-  Array.iter
-    (fun blk ->
-      CS.iter
-        (fun insn ->
-	  match insn with
-	    C.Set (C.SSAReg (rd, rdn), C.Load (memtype,
-		     C.Binary (Irtypes.Add, C.SSAReg (rb, rbn), C.Immed _)))
-	  | C.Set (C.SSAReg (rd, rdn), C.Load (memtype,
-		     C.SSAReg (rb, rbn))) ->
-	      record_info ht (rd, rdn) (info_of_mem_type ~load:true memtype);
-	      record_info ht (rb, rbn) (Used_as_addr memtype);
-	      record_impl impl_ht (rb, rbn) Pointer
-	  | C.Store (memtype, C.Binary (Irtypes.Add,
-					C.SSAReg (rb, rbn), C.Immed _),
-		     C.SSAReg (rs, rsn))
-	  | C.Store (memtype, C.SSAReg (rb, rbn), C.SSAReg (rs, rsn)) ->
-	      record_info ht (rb, rbn) (Used_as_addr memtype);
-	      record_info ht (rs, rsn) (info_of_mem_type ~load:false memtype);
-	      record_impl impl_ht (rb, rbn) Pointer
-	  | C.Set (C.SSAReg (rd, rdn), C.Binary ((Irtypes.Add | Irtypes.Sub),
-		     C.SSAReg (ra, ran), C.SSAReg (rb, rbn))) ->
-	      record_impl impl_ht (rd, rdn)
-		(One_of
-		  [Binary_imp ((ra, ran), Int, (rb, rbn), Int, Int);
-		   Binary_imp ((ra, ran), Pointer, (rb, rbn), Int, Pointer);
-		   Binary_imp ((ra, ran), Int, (rb, rbn), Pointer, Pointer)])
-	  | C.Set (C.SSAReg (rd, rdn), C.Binary ((Irtypes.Add | Irtypes.Sub),
-		    C.SSAReg (ra, ran), C.Immed _)) ->
-	      record_impl impl_ht (rd, rdn)
-	        (One_of
-		  [Unary_imp ((ra, ran), Int, Int);
-		   Unary_imp ((ra, ran), Pointer, Pointer)])
-	  | C.Set (C.SSAReg (rd, rdn),
-		   C.Binary ((Irtypes.Mul | Irtypes.And | Irtypes.Eor
-			      | Irtypes.Or),
-			     C.SSAReg (ra, ran), C.SSAReg (rb, rbn))) ->
-	      (* If we're doing multiplies/logic ops, none of the operands
-	         involved is likely to be a pointer, but it's not impossible! 
-		 Maybe make this more configurable.  *)
-	      record_impl impl_ht (rd, rdn) Int;
-	      record_impl impl_ht (ra, ran) Int;
-	      record_impl impl_ht (rb, rbn) Int
-	  | C.Control (C.CompJump_ext (_, C.SSAReg (rc, rcn))) ->
-	      record_info ht (rc, rcn) Code_pointer
-	  | _ ->
-	      Printf.printf "gathered no info for '%s'\n"
-			    (C.string_of_code insn);
-	      ())
-	blk.Block.code)
-    blk_arr;
-  ht, impl_ht
-
-let string_of_info = function
-    Used_as_addr meminfo ->
-      Printf.sprintf "used as addr (%s)" (CT.string_of_mem meminfo)
-  | Loaded_pc_rel -> "loaded PC-relative"
-  | Type_known _ -> "type known (...)"
-  | Byte_loads -> "byte loads"
-  | Signed_byte_loads -> "signed byte loads"
-  | Halfword_loads -> "halfword loads"
-  | Signed_halfword_loads -> "signed halfword loads"
-  | Halfword_stores -> "halfword stores"
-  | Word_loads -> "word loads"
-  | Word_stores -> "word stores"
-  | Code_pointer -> "used as code pointer"
-
-let rec string_of_implied_info = function
-    Int -> "int"
-  | Pointer -> "pointer"
-  | Unary_imp ((reg, regn), rtyp, rimp) ->
-      Printf.sprintf "%s(%s) -> %s" (string_of_ssa_reg reg regn)
-	(string_of_implied_info rtyp) (string_of_implied_info rimp)
-  | Binary_imp ((reg1, regn1), rtyp1, (reg2, regn2), rtyp2, rimp) ->
-      Printf.sprintf "%s(%s) && %s(%s) -> %s" (string_of_ssa_reg reg1 regn1)
-	(string_of_implied_info rtyp1) (string_of_ssa_reg reg2 regn2)
-	(string_of_implied_info rtyp2) (string_of_implied_info rimp)
-  | One_of impl_list ->
-      String.concat "\n| " (List.map string_of_implied_info impl_list)
-
-let print_info ht =
-  Hashtbl.iter
-    (fun (reg, regn) infolist ->
-      List.iter
-        (fun info ->
-	  Printf.printf "%s : %s\n" (string_of_ssa_reg reg regn)
-				    (string_of_info info))
-	infolist)
-    ht
-
-let print_implied_info ht =
-  Hashtbl.iter
-    (fun (reg, regn) impl ->
-      Printf.printf "%s : %s\n" (string_of_ssa_reg reg regn)
-				(string_of_implied_info impl))
-    ht
 
 let basic_type impl_ht regid =
   let datas = Hashtbl.find_all impl_ht regid in
@@ -236,3 +153,123 @@ let simplify_implications impl_ht =
       contents';
     if not !finished then iterate () in
   iterate ()
+
+let gather_info blk_arr =
+  let ht = Hashtbl.create 10 in
+  let impl_ht = Hashtbl.create 10 in
+  Array.iter
+    (fun blk ->
+      CS.iter
+        (fun insn ->
+	  match insn with
+	    C.Set (C.SSAReg (rd, rdn), C.Load (memtype,
+		     C.Binary (Irtypes.Add, C.SSAReg (rb, rbn), C.Immed _)))
+	  | C.Set (C.SSAReg (rd, rdn), C.Load (memtype,
+		     C.SSAReg (rb, rbn))) ->
+	      (* Load [reg] and load [reg+immediate].  *)
+	      record_info ht (rd, rdn) (info_of_mem_type ~load:true memtype);
+	      record_info ht (rb, rbn) (Used_as_addr memtype);
+	      record_impl impl_ht (rb, rbn) Pointer
+	  | C.Store (memtype, C.Binary (Irtypes.Add,
+					C.SSAReg (rb, rbn), C.Immed _),
+		     C.SSAReg (rs, rsn))
+	  | C.Store (memtype, C.SSAReg (rb, rbn), C.SSAReg (rs, rsn)) ->
+	      (* Store [reg] and store [reg+immediate].  *)
+	      record_info ht (rb, rbn) (Used_as_addr memtype);
+	      record_info ht (rs, rsn) (info_of_mem_type ~load:false memtype);
+	      record_impl impl_ht (rb, rbn) Pointer
+	  | C.Set (C.SSAReg (rd, rdn), C.SSAReg (rs, rsn)) ->
+	      (* Move rd <- rs.  *)
+	      record_impl impl_ht (rd, rdn)
+	        (One_of
+		  [Unary_imp ((rs, rsn), Int, Int);
+		   Unary_imp ((rs, rsn), Pointer, Pointer)])
+	  | C.Set (C.SSAReg (rd, rdn), C.Binary (Irtypes.Add,
+		     C.SSAReg (ra, ran), C.SSAReg (rb, rbn))) ->
+	      (* Add, rd <- ra + rb.  *)
+	      record_impl impl_ht (rd, rdn)
+		(One_of
+		  [Binary_imp ((ra, ran), Int, (rb, rbn), Int, Int);
+		   Binary_imp ((ra, ran), Pointer, (rb, rbn), Int, Pointer);
+		   Binary_imp ((ra, ran), Int, (rb, rbn), Pointer, Pointer)])
+	  | C.Set (C.SSAReg (rd, rdn), C.Binary (Irtypes.Sub,
+		     C.SSAReg (ra, ran), C.SSAReg (rb, rbn))) ->
+	      (* Add, rd <- ra - rb.  *)
+	      record_impl impl_ht (rd, rdn)
+		(One_of
+		  [Binary_imp ((ra, ran), Int, (rb, rbn), Int, Int);
+		   Binary_imp ((ra, ran), Pointer, (rb, rbn), Int, Pointer);
+		   Binary_imp ((ra, ran), Int, (rb, rbn), Pointer, Pointer);
+		   Binary_imp ((ra, ran), Pointer, (rb, rbn), Pointer, Int)])
+	  | C.Set (C.SSAReg (rd, rdn), C.Binary ((Irtypes.Add | Irtypes.Sub),
+		    C.SSAReg (ra, ran), C.Immed _)) ->
+	      (* Add or sub immediate, rd <- ra [+-] imm.  *)
+	      record_impl impl_ht (rd, rdn)
+	        (One_of
+		  [Unary_imp ((ra, ran), Int, Int);
+		   Unary_imp ((ra, ran), Pointer, Pointer)])
+	  | C.Set (C.SSAReg (rd, rdn),
+		   C.Binary ((Irtypes.Mul | Irtypes.And | Irtypes.Eor
+			      | Irtypes.Or),
+			     C.SSAReg (ra, ran), C.SSAReg (rb, rbn))) ->
+	      (* If we're doing multiplies/logic ops, none of the operands
+	         involved is likely to be a pointer, but it's not impossible! 
+		 Maybe make this more configurable.  *)
+	      record_impl impl_ht (rd, rdn) Int;
+	      record_impl impl_ht (ra, ran) Int;
+	      record_impl impl_ht (rb, rbn) Int
+	  | C.Control (C.CompJump_ext (_, C.SSAReg (rc, rcn))) ->
+	      record_info ht (rc, rcn) Code_pointer
+	  | _ ->
+	      Printf.printf "gathered no info for '%s'\n"
+			    (C.string_of_code insn);
+	      ())
+	blk.Block.code)
+    blk_arr;
+  simplify_implications impl_ht;
+  ht, impl_ht
+
+let string_of_info = function
+    Used_as_addr meminfo ->
+      Printf.sprintf "used as addr (%s)" (CT.string_of_mem meminfo)
+  | Loaded_pc_rel -> "loaded PC-relative"
+  | Type_known _ -> "type known (...)"
+  | Byte_loads -> "loaded as byte"
+  | Signed_byte_loads -> "loaded as signed byte"
+  | Halfword_loads -> "loaded as halfword"
+  | Signed_halfword_loads -> "loaded as signed halfword"
+  | Halfword_stores -> "stored as halfword"
+  | Word_loads -> "loaded as word"
+  | Word_stores -> "stored as word"
+  | Code_pointer -> "used as code pointer"
+
+let rec string_of_implied_info = function
+    Int -> "int"
+  | Pointer -> "pointer"
+  | Unary_imp ((reg, regn), rtyp, rimp) ->
+      Printf.sprintf "%s(%s) -> %s" (string_of_ssa_reg reg regn)
+	(string_of_implied_info rtyp) (string_of_implied_info rimp)
+  | Binary_imp ((reg1, regn1), rtyp1, (reg2, regn2), rtyp2, rimp) ->
+      Printf.sprintf "%s(%s) && %s(%s) -> %s" (string_of_ssa_reg reg1 regn1)
+	(string_of_implied_info rtyp1) (string_of_ssa_reg reg2 regn2)
+	(string_of_implied_info rtyp2) (string_of_implied_info rimp)
+  | One_of impl_list ->
+      String.concat "\n| " (List.map string_of_implied_info impl_list)
+
+let print_info ht =
+  Hashtbl.iter
+    (fun (reg, regn) infolist ->
+      List.iter
+        (fun info ->
+	  Printf.printf "%s : %s\n" (string_of_ssa_reg reg regn)
+				    (string_of_info info))
+	infolist)
+    ht
+
+let print_implied_info ht =
+  Hashtbl.iter
+    (fun (reg, regn) impl ->
+      Printf.printf "%s : %s\n" (string_of_ssa_reg reg regn)
+				(string_of_implied_info impl))
+    ht
+
