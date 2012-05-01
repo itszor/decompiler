@@ -36,11 +36,33 @@ let sp_track blk_arr =
     C.fold
       (fun expr found ->
         match expr with
-	  C.Set (dst, src) -> C.Set (C.Protect dst, src), found
+	  C.Load (m, addr) as e -> C.Protect e, found
+	| C.Set (dst, src) -> C.Set (C.Protect dst, src), found
 	| x when sp_reg x || sp_derived x -> x, true
 	| x -> x, found)
       code
       false in
+  let derive_sp offset = function
+    C.Set (C.SSAReg (r, rn), src) when sp_reg src ->
+      Hashtbl.add spht (r, rn) offset
+  | C.Set (C.SSAReg (r, rn), C.Binary (Irtypes.Add, base, C.Immed imm))
+      when sp_reg base ->
+      Hashtbl.add spht (r, rn) (offset + Int32.to_int imm)
+  | C.Set (C.SSAReg (r, rn), C.Binary (Irtypes.Sub, base, C.Immed imm))
+      when sp_reg base ->
+      Hashtbl.add spht (r, rn) (offset - Int32.to_int imm)
+  | x -> Printf.printf "Don't know how to derive SP from '%s'\n"
+	   (C.string_of_code x) in
+  let underive_sp insn r rn offset =
+    Printf.printf "Copying sp-derived var back to SP in '%s'\n"
+      (C.string_of_code insn);
+    let offset' = try
+      Hashtbl.find spht (r, rn)
+    with Not_found ->
+      Printf.printf "Unknown sp-derived reg\n";
+      offset in
+    Printf.printf "Offset now %d\n" offset';
+    offset' in
   Array.iter (fun blk -> blk.Block.visited <- false) blk_arr;
   let rec scan blk sp_offset =
     blk.Block.start_sp_offset
@@ -57,12 +79,23 @@ let sp_track blk_arr =
 	| C.Set (dst, C.Nullary Irtypes.Special) ->
 	    (* Ignore this pseudo-insn.  *)
 	    off
+	| C.Set (dst, C.SSAReg (r, rn)) when sp_reg dst ->
+	    underive_sp insn r rn off
+	| C.Set (dst, C.Binary (Irtypes.Add, C.SSAReg (r, rn), C.Immed i))
+	    when sp_reg dst ->
+	    underive_sp insn r rn (off + Int32.to_int i)
+	| C.Set (dst, C.Binary (Irtypes.Sub, C.SSAReg (r, rn), C.Immed i))
+	    when sp_reg dst ->
+	    underive_sp insn r rn (off - Int32.to_int i)
 	| C.Set (dst, _) when sp_reg dst ->
 	    Printf.printf "Unexpected write to sp in '%s'\n"
 	      (C.string_of_code insn);
 	    off
-	| C.Set (_, src) when sp_used src ->
-	    Printf.printf "SP used in '%s'\n" (C.string_of_code insn);
+	| C.Set (dst, src) when sp_used src ->
+	    Printf.printf
+	      "SP derived var '%s' in '%s' (initial sp offset %d)\n"
+	      (C.string_of_code dst) (C.string_of_code insn) off;
+	    derive_sp off insn;
 	    off
 	| _ -> off)
       sp_offset
