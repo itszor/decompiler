@@ -15,7 +15,9 @@ type 'code block =
     mutable domfront : int list;
     mutable visited : bool;
     mutable live_in : Boolset.t;
-    mutable live_out : Boolset.t
+    mutable live_out : Boolset.t;
+    mutable start_sp_offset : int option;
+    mutable end_sp_offset : int option
   }
 
 let make_block id code =
@@ -35,6 +37,8 @@ let make_block id code =
     domfront = [];
     visited = false;
     live_in = Boolset.empty;
-    live_out = Boolset.empty
+    live_out = Boolset.empty;
+    start_sp_offset = None;
+    end_sp_offset = None
   }
 

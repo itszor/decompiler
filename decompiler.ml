@@ -278,9 +278,12 @@ let go symname =
   dump_blockseq blk_arr;
   Printf.printf "gather info...\n";
   let ht, hti = Typedb.gather_info blk_arr in
+  Printf.printf "--- minipool resolution ---\n";
   let blk_arr' =
     Minipool.minipool_resolve elfbits ehdr shdr_arr symbols mapping_syms strtab
 			      blk_arr ht hti in
-  dump_blockseq blk_arr'
+  dump_blockseq blk_arr';
+  Printf.printf "--- sp tracking ---\n";
+  Sptracking.sp_track blk_arr'
 
 (*let _ = go "main"*)

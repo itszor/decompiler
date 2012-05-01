@@ -237,59 +237,51 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
       failwith (Printf.sprintf
 	"Last instruction of block (%s) does no control flow" insn)
 
-  let rec fold_postorder ?inhibit_set_dest fn code acc =
-    match code with
-      Entity _ | Reg _ | SSAReg _ | Immed _ | Nullary _ -> fn code acc
-    | Nary (_, clist) ->
-        let acc' = List.fold_right fn clist acc in
-	fn code acc'
-    | Trinary (_, a, b, c) ->
-        let acc' = fold_postorder ?inhibit_set_dest fn a acc in
-	let acc'' = fold_postorder ?inhibit_set_dest fn b acc' in
-	let acc''' = fold_postorder ?inhibit_set_dest fn c acc'' in
-	fn code acc'''
-    | Binary (_, a, b) ->
-        let acc' = fold_postorder ?inhibit_set_dest fn a acc in
-	let acc'' = fold_postorder ?inhibit_set_dest fn b acc' in
-	fn code acc''
-    | Unary (_, a) | Load (_, a) ->
-        let acc' = fold_postorder ?inhibit_set_dest fn a acc in
-	fn code acc'
-    | Store (_, a, b) ->
-        let acc' = fold_postorder ?inhibit_set_dest fn a acc in
-	let acc'' = fold_postorder ?inhibit_set_dest fn b acc' in
-	fn code acc''
-    | Set (d, s) ->
-        begin match inhibit_set_dest with
-	  Some true ->
-	    let acc' = fold_postorder ?inhibit_set_dest fn s acc in
-	    fn code acc'
-	| _ ->
-            let acc' = fold_postorder ?inhibit_set_dest fn d acc in
-	    let acc'' = fold_postorder ?inhibit_set_dest fn s acc' in
-	    fn code acc''
-	end
-    | Control c ->
-        let acc' = fold_ctl_postorder ?inhibit_set_dest fn c acc in
-	fn code acc'
-    | Phi parr ->
-        let acc' = Array.fold_right fn parr acc in
-	fn code acc'
-  
-  and fold_ctl_postorder ?inhibit_set_dest fn ctl acc =
-    match ctl with
-      TailCall (_, code) | Branch (code, _, _) | CompJump (code, _)
-    | TailCall_ext (_, _, code) | Return code | CompJump_ext (_, code) ->
-        fold_postorder ?inhibit_set_dest fn code acc
-    | Call (_, c1, _, c2) | CompTailCall (c1, c2)
-    | Call_ext (_, _, c1, _, c2) ->
-        let acc' = fold_postorder ?inhibit_set_dest fn c1 acc in
-	fold_postorder fn c2 acc'
-    | CompCall (c1, c2, _, c3) ->
-        let acc' = fold_postorder ?inhibit_set_dest fn c1 acc in
-	let acc'' = fold_postorder ?inhibit_set_dest fn c2 acc' in
-	fold_postorder ?inhibit_set_dest fn c3 acc''
-    | Jump _ | Jump_ext _ -> acc
+  let fold fn ?(ctl_fn = (fun ctl acc -> ctl, acc)) code acc =
+    let rec scan e acc =
+      let expr', acc' = fn e acc in
+      match expr' with
+	Entity _ | Reg _ | SSAReg _ | Immed _ | Nullary _ ->
+	  acc'
+      | Nary (_, clist) ->
+	  List.fold_right scan clist acc'
+      | Trinary (_, a, b, c) ->
+          let acc'' = scan c acc' in
+	  let acc''' = scan b acc'' in
+	  scan a acc'''
+      | Binary (_, a, b) ->
+          let acc'' = scan b acc' in
+	  scan a acc''
+      | Unary (_, a) | Load (_, a) ->
+          scan a acc'
+      | Store (_, a, b) ->
+          let acc'' = scan b acc' in
+	  scan a acc''
+      | Set (d, s) ->
+          let acc'' = scan d acc' in
+	  scan s acc''
+      | Control c ->
+          scan_ctl c acc'
+      | Phi parr ->
+          Array.fold_right scan parr acc
+      | Protect child ->
+	  acc'
+    and scan_ctl ctl acc =
+      let ctl', acc' = ctl_fn ctl acc in
+      match ctl' with
+	TailCall (_, code) | Branch (code, _, _) | CompJump (code, _)
+      | TailCall_ext (_, _, code) | Return code | CompJump_ext (_, code) ->
+          scan code acc'
+      | Call (_, c1, _, c2) | CompTailCall (c1, c2)
+      | Call_ext (_, _, c1, _, c2) ->
+          let acc'' = scan c2 acc' in
+	  scan c1 acc''
+      | CompCall (c1, c2, _, c3) ->
+          let acc'' = scan c3 acc' in
+	  let acc''' = scan c2 acc'' in
+	  scan c1 acc'''
+      | Jump _ | Jump_ext _ -> acc' in
+    scan code acc
   
   let map fn ?(ctl_fn = fun x -> x) code =
     let rec scan e =
