@@ -74,7 +74,7 @@ module IrCT =
 
     let string_of_reg = function
       Hard_reg r -> Printf.sprintf "r%d" r
-    | Stack s -> Printf.sprintf "stack+%d" s
+    | Stack s -> Printf.sprintf "stack%s%d" (if s < 0 then "" else "+") s
     | Temp t -> Printf.sprintf "tmp%d" t
     | Status sb -> Printf.sprintf "status(%s)" (string_of_status sb)
     | Arg_out -> "arg_out"

@@ -284,6 +284,7 @@ let go symname =
 			      blk_arr ht hti in
   dump_blockseq blk_arr';
   Printf.printf "--- sp tracking ---\n";
-  Sptracking.sp_track blk_arr'
+  Sptracking.sp_track blk_arr';
+  dump_blockseq blk_arr'
 
 (*let _ = go "main"*)
