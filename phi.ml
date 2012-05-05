@@ -246,9 +246,15 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
 	CS.iter
 	  (function
 	      C.Set (C.SSAReg _, C.Phi _) -> ()
-	    | C.Set (C.SSAReg (rd, _), _) ->
-	        let rdnum = Hashtbl.find rnum_htab rd in
-		stack.(rdnum) <- List.tl stack.(rdnum)
+	    | C.Set (C.SSAReg (rd, _) as c, _) ->
+	        begin try
+	          let rdnum = Hashtbl.find rnum_htab rd in
+		  stack.(rdnum) <- List.tl stack.(rdnum)
+		with Not_found ->
+		  Printf.printf "Ignoring SSA reg %s (already converted)\n"
+		    (C.string_of_code c);
+		  ()
+		end
 	    | _ -> ())
 	  blk_n.code in
       (* Perform renaming.  *)

@@ -43,6 +43,13 @@ let sp_track blk_arr =
 	| x -> x, found)
       code
       false in
+  let derived_offset base offset =
+    if sp_derived base then
+      match base with
+	C.SSAReg (r, rn) -> Hashtbl.find spht (r, rn)
+      | _ -> raise Not_found
+    else
+      offset in
   let derive_sp offset = function
     C.Set (C.SSAReg (r, rn), src) when sp_reg src ->
       Hashtbl.add spht (r, rn) offset
@@ -52,6 +59,14 @@ let sp_track blk_arr =
   | C.Set (C.SSAReg (r, rn), C.Binary (Irtypes.Sub, base, C.Immed imm))
       when sp_reg base ->
       Hashtbl.add spht (r, rn) (offset - Int32.to_int imm)
+  | C.Set (C.SSAReg (r, rn), C.Binary (Irtypes.Add, base, C.Immed imm))
+      when sp_derived base ->
+      let offset' = derived_offset base offset in
+      Hashtbl.add spht (r, rn) (offset' + Int32.to_int imm)
+  | C.Set (C.SSAReg (r, rn), C.Binary (Irtypes.Sub, base, C.Immed imm))
+      when sp_derived base ->
+      let offset' = derived_offset base offset in
+      Hashtbl.add spht (r, rn) (offset' - Int32.to_int imm)
   | x -> Printf.printf "Don't know how to derive SP from '%s'\n"
 	   (C.string_of_code x) in
   let underive_sp insn r rn offset =
@@ -64,13 +79,6 @@ let sp_track blk_arr =
       offset in
     Printf.printf "Offset now %d\n" offset';
     offset' in
-  let derived_offset base offset =
-    if sp_derived base then
-      match base with
-	C.SSAReg (r, rn) -> Hashtbl.find spht (r, rn)
-      | _ -> raise Not_found
-    else
-      offset in
   let rewrite_sp insn offset =
     C.map
       (function
@@ -99,6 +107,14 @@ let sp_track blk_arr =
       | C.Store (Irtypes.Word, base, src) when sp_reg base || sp_derived base ->
 	  let offset' = derived_offset base offset in
 	  C.Protect (C.Set (C.Reg (CT.Stack offset'), src))
+      | C.Load (Irtypes.Word, C.Binary (Irtypes.Add, base, C.Immed imm))
+          when sp_reg base || sp_derived base ->
+	  let offset' = derived_offset base offset in
+	  (* This is used for function arguments.  *)
+	  C.Protect (C.Reg (CT.Stack (offset' + Int32.to_int imm)))
+      | C.SSAReg _ as x when sp_derived x ->
+          let offset' = derived_offset x offset in
+          C.Protect (C.Unary (Irtypes.Address_of, C.Reg (CT.Stack offset')))
       | x -> x)
       insn in
   Array.iter (fun blk -> blk.Block.visited <- false) blk_arr;

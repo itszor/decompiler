@@ -172,6 +172,24 @@ let find_symbol symbols strtab addr =
   with Not_found ->
     IT.Absolute addr
 
+let fn_args name =
+  let ft = Function.type_for_function name in
+  let args_from_ctype = Array.mapi
+    (fun i typ ->
+      match i with
+        (0 | 1 | 2 | 3) as r -> C.Reg (IT.Hard_reg r)
+      | n -> C.Load (Irtypes.Word,
+		     C.Binary (Irtypes.Add, C.Reg (IT.Hard_reg 13),
+			       C.Immed (Int32.of_int ((n - 4) * 4)))))
+    ft.Function.args in
+  C.Nary (Irtypes.Fnargs, Array.to_list args_from_ctype)
+
+let fn_ret name =
+  let ft = Function.type_for_function name in
+  match ft.Function.return with
+    Ctype.C_void -> C.Nullary Irtypes.Nop
+  | _ -> C.Set (C.Reg (IT.Hard_reg 0), C.Entity IT.Arg_out)
+
 let convert_bl symbols strtab addr insn =
   let dest = insn.read_operands.(0) in
   match dest with
@@ -180,8 +198,11 @@ let convert_bl symbols strtab addr insn =
       let ret_addr = Irtypes.BlockAddr (Int32.add addr 4l) in
       let call_addr = Int32.add addr i in
       let sym_or_addr = find_symbol symbols strtab call_addr in
-      C.Control (C.Call_ext (IT.Unknown_abi, sym_or_addr, no_arg, ret_addr,
-			     no_arg))
+      let abi, passes, returns =
+	match sym_or_addr with
+          IT.Symbol (symname, _) -> IT.EABI, fn_args symname, fn_ret symname
+	| _ -> IT.Unknown_abi, no_arg, no_arg in
+      C.Control (C.Call_ext (abi, sym_or_addr, passes, ret_addr, returns))
   | _ -> failwith "unexpected bx operand"
 
 let convert_cmp addr insn =

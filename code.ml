@@ -280,7 +280,7 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
           let acc'' = scan c3 acc' in
 	  let acc''' = scan c2 acc'' in
 	  scan c1 acc'''
-      | Jump _ | Jump_ext _ -> acc' in
+      | Jump _ | Jump_ext _ | Virtual_exit -> acc' in
     scan code acc
   
   let map fn ?(ctl_fn = fun x -> x) code =

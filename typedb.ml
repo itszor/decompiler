@@ -1,3 +1,5 @@
+open Ctype
+
 module CS = Ir.IrCS
 module CT = Ir.IrCT
 module BS = Ir.IrBS
@@ -33,17 +35,13 @@ and implication =
 		  * implication
   | One_of of implication list
 
-and ctype =
-    C_void
-  | C_int
-  | C_short
-  | C_char
-  | C_signed of ctype
-  | C_unsigned of ctype
-  | C_pointer of ctype
-  | C_const of ctype
-
 and ssa_reg_id = CT.reg * int
+
+type info_record =
+  {
+    infotag : (ssa_reg_id, infotag list) Hashtbl.t;
+    implications : (ssa_reg_id, implication) Hashtbl.t
+  }
 
 let string_of_ssa_reg reg num =
   Printf.sprintf "%s_%d" (CT.string_of_reg reg) num
@@ -61,8 +59,9 @@ let implied_pointer regid hti =
     | _ -> false
   with Not_found -> false
 
-let probably_pointer regid ht hti =
-  used_as_addr regid ht || implied_pointer regid hti
+let probably_pointer regid inforec =
+  used_as_addr regid inforec.infotag
+  || implied_pointer regid inforec.implications
 
 let record_info ht reg info =
   try
@@ -73,7 +72,8 @@ let record_info ht reg info =
     Hashtbl.add ht reg [info]
 
 let record_impl ht reg info =
-  Hashtbl.add ht reg info
+  if not (Hashtbl.mem ht reg) then
+    Hashtbl.add ht reg info
 
 let info_of_mem_type ~load = function
     Irtypes.Word -> if load then Word_loads else Word_stores
@@ -140,10 +140,10 @@ let simplify_implications impl_ht =
       (fun (regid, impl) ->
 	match impl, basic_type impl_ht regid with
           (Int | Pointer), None -> Hashtbl.add impl_ht regid impl
-	| (Int | Pointer) as newtype, Some othertype ->
-            if newtype <> othertype then
-	      Printf.printf "types don't match for '%s'\n"
-		(string_of_ssa_reg (fst regid) (snd regid))
+	| (Int | Pointer) as newtype, Some othertype
+	    when newtype <> othertype ->
+	    Printf.printf "types don't match for '%s'\n"
+	      (string_of_ssa_reg (fst regid) (snd regid))
 	| (Int | Pointer) as newtype, _ ->
             Hashtbl.replace impl_ht regid newtype
 	| _, Some _ ->
@@ -154,9 +154,15 @@ let simplify_implications impl_ht =
     if not !finished then iterate () in
   iterate ()
 
-let gather_info blk_arr =
-  let ht = Hashtbl.create 10 in
-  let impl_ht = Hashtbl.create 10 in
+let create_info () =
+  {
+    infotag = Hashtbl.create 10;
+    implications = Hashtbl.create 10
+  }
+
+let gather_info blk_arr inforec =
+  let ht = inforec.infotag
+  and impl_ht = inforec.implications in
   Array.iter
     (fun blk ->
       CS.iter
@@ -226,8 +232,7 @@ let gather_info blk_arr =
 	      ())
 	blk.Block.code)
     blk_arr;
-  simplify_implications impl_ht;
-  ht, impl_ht
+  simplify_implications impl_ht
 
 let string_of_info = function
     Used_as_addr meminfo ->
@@ -235,6 +240,7 @@ let string_of_info = function
   | Loaded_pc_rel -> "loaded PC-relative"
   | Type_known _ -> "type known (...)"
   | Byte_loads -> "loaded as byte"
+  | Byte_stores -> "stored as byte"
   | Signed_byte_loads -> "loaded as signed byte"
   | Halfword_loads -> "loaded as halfword"
   | Signed_halfword_loads -> "loaded as signed halfword"
@@ -254,7 +260,7 @@ let rec string_of_implied_info = function
 	(string_of_implied_info rtyp1) (string_of_ssa_reg reg2 regn2)
 	(string_of_implied_info rtyp2) (string_of_implied_info rimp)
   | One_of impl_list ->
-      String.concat "\n| " (List.map string_of_implied_info impl_list)
+      String.concat "\n  | " (List.map string_of_implied_info impl_list)
 
 let print_info ht =
   Hashtbl.iter

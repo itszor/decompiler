@@ -8,6 +8,19 @@ long long int bar (int a, int b)
   return (long long int) a * (long long int) b;
 }
 
+int __attribute__((noinline)) blah2 (int *x)
+{
+  return *x;
+}
+
+int
+blah (int a, int b)
+{
+  int c = 5;
+
+  return blah2 (&c);
+}
+
 volatile int x;
 
 int loop (int c)

@@ -10,18 +10,19 @@ module IrCT =
     type unop = ir_unop
     type binop = ir_binop
     type triop = ir_triop
-    type extop = unit
+    type extop = ir_extop
     type reg = Hard_reg of int
              | Stack of int
 	     | Temp of int
 	     | Status of ir_statusbits
-	     | Arg_out
-	     | Caller_restored
     type mem = ir_mem
     type entity = PC of int32
 		| Symbol_addr of string * Elfreader.elf_sym
+		| Arg_out
+		| Caller_restored
     type abi = Branch_exchange
 	     | Unknown_abi
+	     | EABI
 
     type blockref = int
     type immed = int32
@@ -51,6 +52,7 @@ module IrCT =
     | Status_cs -> "status_cs"
     | Status_vc -> "status_vc"
     | Status_vs -> "status_vs"
+    | Address_of -> "address_of"
 
     let string_of_binop = function
       Add -> "add"
@@ -65,7 +67,8 @@ module IrCT =
       Adc -> "adc"
     | Sbc -> "sbc"
     
-    let string_of_extop = fun _ -> ""
+    let string_of_extop = function
+      Fnargs -> "fnargs"
 
     let string_of_status = function
       Carry -> "carry"
@@ -77,8 +80,6 @@ module IrCT =
     | Stack s -> Printf.sprintf "stack%s%d" (if s < 0 then "" else "+") s
     | Temp t -> Printf.sprintf "tmp%d" t
     | Status sb -> Printf.sprintf "status(%s)" (string_of_status sb)
-    | Arg_out -> "arg_out"
-    | Caller_restored -> "caller_restored"
     
     let string_of_mem = function
       U8 -> "u8"
@@ -90,10 +91,13 @@ module IrCT =
     let string_of_entity = function
       PC loc -> Printf.sprintf "pc(0x%lx)" loc
     | Symbol_addr (name, _) -> Printf.sprintf "&%s" name
+    | Arg_out -> "arg_out"
+    | Caller_restored -> "caller_restored"
 
     let string_of_abi = function
       Branch_exchange -> "branch_exchange"
     | Unknown_abi -> "unknown_abi"
+    | EABI -> "eabi"
     
     let string_of_immed i = Int32.to_string i
 

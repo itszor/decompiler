@@ -6,7 +6,7 @@ module BS = Ir.IrBS
 module C = Ir.Ir
 
 let minipool_resolve elfbits ehdr shdr_arr symbols mapping_syms strtab
-		     blk_arr ht hti =
+		     blk_arr inforec =
   Array.map
     (fun blk ->
       let code' = CS.map
@@ -33,7 +33,7 @@ let minipool_resolve elfbits ehdr shdr_arr symbols mapping_syms strtab
 			    shdr_arr.(section_num) in
 	    let word = Elfreader.get_word shdr_arr.(section_num) section addr in
 	    Printf.printf "loads word: %lx\n" word;
-	    let pointer_p = Typedb.probably_pointer (rd, rdn) ht hti in
+	    let pointer_p = Typedb.probably_pointer (rd, rdn) inforec in
 	    let new_rhs =
 	      if pointer_p then begin
 		print_endline "register loaded is used as pointer";

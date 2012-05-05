@@ -21,6 +21,7 @@ type ir_unop =
   | Status_cs
   | Status_vc
   | Status_vs
+  | Address_of
 
 type ir_binop =
     Add
@@ -34,6 +35,9 @@ type ir_binop =
 type ir_triop =
     Adc
   | Sbc
+
+type ir_extop =
+    Fnargs
 
 type ir_mem =
     U8

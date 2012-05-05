@@ -151,18 +151,18 @@ let eabi_pre_prologue real_entry_point =
 
 let eabi_post_epilogue () =
   let insns =
-    [C.Set (C.Reg CT.Arg_out, C.Reg (CT.Hard_reg 0));
-     C.Set (C.Reg CT.Arg_out, C.Reg (CT.Hard_reg 1));
-     C.Set (C.Reg CT.Arg_out, C.Reg (CT.Hard_reg 2));
-     C.Set (C.Reg CT.Arg_out, C.Reg (CT.Hard_reg 3));
-     C.Set (C.Reg CT.Caller_restored, C.Reg (CT.Hard_reg 4));
-     C.Set (C.Reg CT.Caller_restored, C.Reg (CT.Hard_reg 5));
-     C.Set (C.Reg CT.Caller_restored, C.Reg (CT.Hard_reg 6));
-     C.Set (C.Reg CT.Caller_restored, C.Reg (CT.Hard_reg 7));
-     C.Set (C.Reg CT.Caller_restored, C.Reg (CT.Hard_reg 8));
-     C.Set (C.Reg CT.Caller_restored, C.Reg (CT.Hard_reg 9));
-     C.Set (C.Reg CT.Caller_restored, C.Reg (CT.Hard_reg 10));
-     C.Set (C.Reg CT.Caller_restored, C.Reg (CT.Hard_reg 11));
+    [C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 0));
+     C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 1));
+     C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 2));
+     C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 3));
+     C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 4));
+     C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 5));
+     C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 6));
+     C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 7));
+     C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 8));
+     C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 9));
+     C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 10));
+     C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 11));
      C.Control C.Virtual_exit] in
   let cs = CS.of_list insns in
   Block.make_block "exit block" cs
@@ -254,6 +254,15 @@ module IrDfs = Dfs.Dfs (Ir.IrCT) (Ir.IrCS) (Ir.IrBS)
 module IrDominator = Dominator.Dominator (Ir.IrBS)
 module IrPhiPlacement = Phi.PhiPlacement (Ir.IrCT) (Ir.IrCS) (Ir.IrBS)
 
+let add_stackvars_to_entry_block blk_arr entry_pt_ref regset =
+  let code = blk_arr.(entry_pt_ref).Block.code in
+  let code' = IrPhiPlacement.R.fold
+    (fun stackvar code ->
+      CS.cons (C.Set (C.Reg stackvar, C.Nullary Irtypes.Arg_in)) code)
+    regset
+    code in
+  blk_arr.(entry_pt_ref).Block.code <- code'
+
 let go symname =
   let sym = Symbols.find_named_symbol symbols strtab symname in
   let entry_point = sym.Elfreader.st_value in
@@ -272,19 +281,30 @@ let go symname =
   IrDominator.computedf blk_arr;
   Printf.printf "--- after computing dominators ---\n";
   print_blockseq_dfsinfo blk_arr;
+  Printf.printf "--- SSA conversion (1) ---\n";
   let regset = IrPhiPlacement.place blk_arr in
   IrPhiPlacement.rename blk_arr 0 regset;
   Printf.printf "after SSA conversion:\n";
   dump_blockseq blk_arr;
-  Printf.printf "gather info...\n";
-  let ht, hti = Typedb.gather_info blk_arr in
+  Printf.printf "--- gather info (1) ---\n";
+  let inforec = Typedb.create_info () in
+  Typedb.gather_info blk_arr inforec;
   Printf.printf "--- minipool resolution ---\n";
   let blk_arr' =
     Minipool.minipool_resolve elfbits ehdr shdr_arr symbols mapping_syms strtab
-			      blk_arr ht hti in
+			      blk_arr inforec in
   dump_blockseq blk_arr';
   Printf.printf "--- sp tracking ---\n";
   Sptracking.sp_track blk_arr';
-  dump_blockseq blk_arr'
+  dump_blockseq blk_arr';
+  Printf.printf "--- SSA conversion (2) ---\n";
+  let regset2 = IrPhiPlacement.place blk_arr' in
+  (*add_stackvars_to_entry_block blk_arr' entry_point_ref regset2;*)
+  IrPhiPlacement.rename blk_arr' 0 regset2;
+  dump_blockseq blk_arr';
+  Printf.printf "--- gather info (2) ---\n";
+  Typedb.gather_info blk_arr' inforec;
+  Typedb.print_info inforec.Typedb.infotag;
+  Typedb.print_implied_info inforec.Typedb.implications
 
-(*let _ = go "main"*)
+(*let _ = go "blah"*)
