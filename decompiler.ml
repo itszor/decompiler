@@ -124,7 +124,7 @@ module CS = Ir.IrCS
 module CT = Ir.IrCT
 module C = Ir.Ir
 
-let eabi_pre_prologue real_entry_point =
+let eabi_pre_prologue name real_entry_point =
   let insns =
     [C.Set (C.Reg (CT.Hard_reg 0), C.Nullary Irtypes.Arg_in);
      C.Set (C.Reg (CT.Hard_reg 1), C.Nullary Irtypes.Arg_in);
@@ -144,9 +144,10 @@ let eabi_pre_prologue real_entry_point =
      C.Set (C.Reg (CT.Hard_reg 15), C.Nullary Irtypes.Special);
      C.Set (C.Reg (CT.Status Irtypes.CondFlags), C.Nullary Irtypes.Special);
      C.Set (C.Reg (CT.Status Irtypes.NZFlags), C.Nullary Irtypes.Special);
-     C.Set (C.Reg (CT.Status Irtypes.Carry), C.Nullary Irtypes.Special);
-     C.Control (C.Jump real_entry_point)] in
+     C.Set (C.Reg (CT.Status Irtypes.Carry), C.Nullary Irtypes.Special)] in
   let cs = CS.of_list insns in
+  let cs = Insn_to_ir.add_incoming_args name cs in
+  let cs = CS.snoc cs (C.Control (C.Jump real_entry_point)) in
   Block.make_block "entry block" cs
 
 let eabi_post_epilogue () =
@@ -172,7 +173,7 @@ let cons_and_add_to_index blk bseq ht blockref idx =
   incr idx;
   BS.cons blk bseq
 
-let bs_of_code_hash symbols strtab code_hash entry_pt =
+let bs_of_code_hash name symbols strtab code_hash entry_pt =
   let idx = ref 0 in
   let ht = Hashtbl.create 10 in
   let bseq_cons blk_id blk bseq =
@@ -184,7 +185,7 @@ let bs_of_code_hash symbols strtab code_hash entry_pt =
 			       code_hash)
     code_hash
     BS.empty in
-  let pre_prologue_blk = eabi_pre_prologue entry_pt
+  let pre_prologue_blk = eabi_pre_prologue name entry_pt
   and virtual_exit = eabi_post_epilogue () in
   let with_entry_pt
     = bseq_cons Irtypes.Virtual_entry pre_prologue_blk blockseq in
@@ -268,7 +269,8 @@ let go symname =
   let entry_point = sym.Elfreader.st_value in
   let entry_point_ba = Irtypes.BlockAddr entry_point in
   let code = code_for_sym text mapping_syms sym in
-  let blockseq, ht = bs_of_code_hash symbols strtab code entry_point_ba in
+  let blockseq, ht = bs_of_code_hash symname symbols strtab code
+				     entry_point_ba in
   let entry_point_ref = Hashtbl.find ht entry_point_ba in
   Printf.printf "entry point %lx, ref %d\n" entry_point entry_point_ref;
   IrDfs.pred_succ ~whole_program:false blockseq ht Irtypes.Virtual_exit;

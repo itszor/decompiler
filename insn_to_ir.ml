@@ -2,8 +2,8 @@
 
 open Insn
 
-module IL = Ir.IrCS
-module IT = Ir.IrCT
+module CS = Ir.IrCS
+module CT = Ir.IrCT
 module C = Ir.Ir
 
 let pseudo_num = ref 0
@@ -12,7 +12,7 @@ let flags_match a b =
   (List.sort compare a) = (List.sort compare b)
 
 let create_pseudo () =
-  let tmp = IT.Temp !pseudo_num in
+  let tmp = CT.Temp !pseudo_num in
   incr pseudo_num;
   tmp
 
@@ -25,15 +25,15 @@ let create_blkref () =
 
 let convert_operand addr op =
   match op with
-    Hard_reg 15 -> C.Entity (IT.PC (Int32.add addr 8l))
-  | Hard_reg r -> C.Reg (IT.Hard_reg r)
+    Hard_reg 15 -> C.Entity (CT.PC (Int32.add addr 8l))
+  | Hard_reg r -> C.Reg (CT.Hard_reg r)
   | Immediate i -> C.Immed i
   | _ -> failwith "convert_operand"
 
 let convert_maybe_pc_operand op =
   match op with
     Hard_reg 15 -> C.Reg (create_pseudo ()), true
-  | Hard_reg r -> C.Reg (IT.Hard_reg r), false
+  | Hard_reg r -> C.Reg (CT.Hard_reg r), false
   | _ -> failwith "convert_maybe_pc_operand"
 
 let convert_mov addr insn =
@@ -72,7 +72,7 @@ let convert_carry_in_op addr opcode insn =
     and op1 = convert_operand insn.read_operands.(0)
     and op2 = convert_operand insn.read_operands.(1) in
     C.Set (dst, C.Trinary (opcode, op1, op2,
-	   C.Reg (IT.Status Irtypes.Carry)))
+	   C.Reg (CT.Status Irtypes.Carry)))
   end else
     C.Nullary (Irtypes.Untranslated)
 
@@ -89,20 +89,20 @@ let convert_load addr ainf insn access ilist =
   let addr = convert_address ainf insn base index
   and dst, loads_pc = convert_maybe_pc_operand insn.write_operands.(0) in
   let ilist' = if ainf.pre_modify then begin
-    let ilist = IL.snoc ilist (C.Set (dst, C.Load (access, addr))) in
+    let ilist = CS.snoc ilist (C.Set (dst, C.Load (access, addr))) in
     if ainf.writeback then
       let w_base = convert_operand insn.write_operands.(1) in
-      IL.snoc ilist (C.Set (w_base, addr))
+      CS.snoc ilist (C.Set (w_base, addr))
     else
       ilist
   end else begin
     assert ainf.writeback;
     let w_base = convert_operand insn.write_operands.(1) in
-    let ilist = IL.snoc ilist (C.Set (dst, C.Load (access, base))) in
-    IL.snoc ilist (C.Set (w_base, addr))
+    let ilist = CS.snoc ilist (C.Set (dst, C.Load (access, base))) in
+    CS.snoc ilist (C.Set (w_base, addr))
   end in
   if loads_pc then
-    IL.snoc ilist' (C.Control (C.CompJump_ext (IT.Branch_exchange, dst)))
+    CS.snoc ilist' (C.Control (C.CompJump_ext (CT.Branch_exchange, dst)))
   else
     ilist'
 
@@ -113,24 +113,24 @@ let convert_store addr ainf insn access ilist =
   let addr = convert_address ainf insn base index
   and src = convert_operand insn.read_operands.(0) in
   if ainf.pre_modify then begin
-    let ilist = IL.snoc ilist (C.Store (access, addr, src)) in
+    let ilist = CS.snoc ilist (C.Store (access, addr, src)) in
     if ainf.writeback then
       let w_base = convert_operand insn.write_operands.(0) in
-      IL.snoc ilist (C.Set (w_base, addr))
+      CS.snoc ilist (C.Set (w_base, addr))
     else
       ilist
   end else begin
     assert ainf.writeback;
     let w_base = convert_operand insn.write_operands.(0) in
-    let ilist = IL.snoc ilist (C.Store (access, base, src)) in
-    IL.snoc ilist (C.Set (w_base, addr))
+    let ilist = CS.snoc ilist (C.Store (access, base, src)) in
+    CS.snoc ilist (C.Set (w_base, addr))
   end
 
 let convert_bx addr insn =
   let dest = insn.read_operands.(0) in
   match dest with
     Hard_reg r ->
-      C.Control (C.CompJump_ext (IT.Branch_exchange, convert_operand addr dest))
+      C.Control (C.CompJump_ext (CT.Branch_exchange, convert_operand addr dest))
   | _ -> failwith "unexpected bx operand"
 
 let convert_condition cond =
@@ -150,7 +150,7 @@ let convert_condition cond =
     | Cs -> Irtypes.Status_cs
     | Vc -> Irtypes.Status_vc
     | Vs -> Irtypes.Status_vs in
-  C.Unary (code, C.Reg (IT.Status Irtypes.CondFlags))
+  C.Unary (code, C.Reg (CT.Status Irtypes.CondFlags))
 
 (* This is entirely wrong!  *)
 
@@ -168,27 +168,43 @@ let find_symbol symbols strtab addr =
   try
     let symbol = Symbols.find_symbol_by_addr symbols addr in
     let symname = Symbols.symbol_name symbol strtab in
-    IT.Symbol (symname, symbol)
+    CT.Symbol (symname, symbol)
   with Not_found ->
-    IT.Absolute addr
+    CT.Absolute addr
 
 let fn_args name =
   let ft = Function.type_for_function name in
   let args_from_ctype = Array.mapi
     (fun i typ ->
       match i with
-        (0 | 1 | 2 | 3) as r -> C.Reg (IT.Hard_reg r)
+        (0 | 1 | 2 | 3) as r -> C.Reg (CT.Hard_reg r)
       | n -> C.Load (Irtypes.Word,
-		     C.Binary (Irtypes.Add, C.Reg (IT.Hard_reg 13),
+		     C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
 			       C.Immed (Int32.of_int ((n - 4) * 4)))))
     ft.Function.args in
   C.Nary (Irtypes.Fnargs, Array.to_list args_from_ctype)
+
+let add_incoming_args name code =
+  let ft = Function.type_for_function name in
+  let (_, code') = Array.fold_left
+    (fun (argn, code) arg ->
+      match argn with
+        (0 | 1 | 2 | 3) -> succ argn, code
+      | n ->
+          let arg_in = C.Store (Irtypes.Word,
+	    C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
+		      C.Immed (Int32.of_int ((n - 4) * 4))),
+	    C.Nullary Irtypes.Arg_in) in
+	  succ argn, CS.snoc code arg_in)
+    (0, code)
+    ft.Function.args in
+  code'
 
 let fn_ret name =
   let ft = Function.type_for_function name in
   match ft.Function.return with
     Ctype.C_void -> C.Nullary Irtypes.Nop
-  | _ -> C.Set (C.Reg (IT.Hard_reg 0), C.Entity IT.Arg_out)
+  | _ -> C.Set (C.Reg (CT.Hard_reg 0), C.Entity CT.Arg_out)
 
 let convert_bl symbols strtab addr insn =
   let dest = insn.read_operands.(0) in
@@ -200,8 +216,8 @@ let convert_bl symbols strtab addr insn =
       let sym_or_addr = find_symbol symbols strtab call_addr in
       let abi, passes, returns =
 	match sym_or_addr with
-          IT.Symbol (symname, _) -> IT.EABI, fn_args symname, fn_ret symname
-	| _ -> IT.Unknown_abi, no_arg, no_arg in
+          CT.Symbol (symname, _) -> CT.EABI, fn_args symname, fn_ret symname
+	| _ -> CT.Unknown_abi, no_arg, no_arg in
       C.Control (C.Call_ext (abi, sym_or_addr, passes, ret_addr, returns))
   | _ -> failwith "unexpected bx operand"
 
@@ -210,7 +226,7 @@ let convert_cmp addr insn =
   if insn.read_flags = [] && flags_match insn.write_flags [C;V;N;Z] then begin
     let op1 = convert_operand insn.read_operands.(0)
     and op2 = convert_operand insn.read_operands.(1) in
-    C.Set (C.Reg (IT.Status Irtypes.CondFlags),
+    C.Set (C.Reg (CT.Status Irtypes.CondFlags),
 	   C.Binary (Irtypes.Cmp, op1, op2))
   end else
     C.Nullary (Irtypes.Untranslated)
@@ -246,22 +262,22 @@ let name_for_block_id = function
 
 let finish_block block_id ?chain insnlist bseq bseq_cons =
   let insnlist' =
-    if not (IL.is_empty insnlist) then begin
-      match IL.noced insnlist with
+    if not (CS.is_empty insnlist) then begin
+      match CS.noced insnlist with
 	prev, C.Control _ -> insnlist
       | _ ->
         begin match chain with
 	  None -> insnlist
 	| Some chain ->
 	    let fallthru = C.Control (C.Jump chain) in
-	    IL.snoc insnlist fallthru
+	    CS.snoc insnlist fallthru
 	end
     end else begin
       match chain with
 	None -> insnlist
       | Some chain ->
 	  let fallthru = C.Control (C.Jump chain) in
-	  IL.snoc insnlist fallthru
+	  CS.snoc insnlist fallthru
     end in
   let name = name_for_block_id block_id in
   let blk = Block.make_block name insnlist' in
@@ -269,7 +285,7 @@ let finish_block block_id ?chain insnlist bseq bseq_cons =
 
 let rec convert_insn symbols strtab addr insn ilist blk_id bseq bseq_cons =
   let append insn =
-    IL.snoc ilist insn, blk_id, bseq
+    CS.snoc ilist insn, blk_id, bseq
   and same_blk ilist =
     ilist, blk_id, bseq in
   match insn.opcode with
@@ -303,17 +319,17 @@ and convert_conditional symbols strtab addr cond insn ilist blk_id bseq
   let after_insn = create_blkref () in
   let cond = C.Control (C.Branch (convert_condition cond, cond_passed,
 				  after_insn)) in
-  let ilist = IL.snoc ilist cond in
+  let ilist = CS.snoc ilist cond in
   let bseq' = finish_block blk_id ilist bseq bseq_cons in
   let cond_ilist, cond_blk_id, bseq'' =
     match insn.opcode with
       Conditional (_, op) ->
-        convert_insn symbols strtab addr { insn with opcode = op } IL.empty
+        convert_insn symbols strtab addr { insn with opcode = op } CS.empty
 		     cond_passed bseq' bseq_cons
     | _ -> failwith "not a conditional insn" in
-  let cond_ilist' = IL.snoc cond_ilist (C.Control (C.Jump after_insn)) in
+  let cond_ilist' = CS.snoc cond_ilist (C.Control (C.Jump after_insn)) in
   let bseq'3 = finish_block cond_blk_id cond_ilist' bseq'' bseq_cons in
-  IL.empty, after_insn, bseq'3
+  CS.empty, after_insn, bseq'3
 
 let convert_block symbols strtab block_id bseq bseq_cons addr insn_list
 		  code_hash =
@@ -323,7 +339,7 @@ let convert_block symbols strtab block_id bseq bseq_cons addr insn_list
         = convert_insn symbols strtab (Int32.add addr offset) insn acc blk_id
 		       bseq bseq_cons in
       ilist', blk_id', bseq', Int32.add offset 4l)
-    (IL.empty, block_id, bseq, 0l)
+    (CS.empty, block_id, bseq, 0l)
     insn_list in
   let next_addr = Int32.add addr last_offset in
   if Hashtbl.mem code_hash next_addr then

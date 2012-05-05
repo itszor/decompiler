@@ -17,4 +17,10 @@ let type_for_function name =
   | "blah2" ->
       { args = [| C_pointer C_int |];
         return = C_int }
+  | "main" ->
+      { args = [| |];
+        return = C_int }
+  | "loop" ->
+      { args = [| C_int |];
+        return = C_int }
   | _ -> raise Not_found
