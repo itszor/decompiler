@@ -307,6 +307,9 @@ let go symname =
   Printf.printf "--- gather info (2) ---\n";
   Typedb.gather_info blk_arr' inforec;
   Typedb.print_info inforec.Typedb.infotag;
-  Typedb.print_implied_info inforec.Typedb.implications
+  Typedb.print_implied_info inforec.Typedb.implications;
+  Printf.printf "--- eliminate phi nodes ---\n";
+  IrPhiPlacement.eliminate blk_arr';
+  dump_blockseq blk_arr'
 
 (*let _ = go "blah"*)

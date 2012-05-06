@@ -63,37 +63,6 @@ module type BLOCKSEQ =
     val string_of_blockref : blockref -> string
   end
 
-(*module type CODE = functor (CT : CODETYPES) -> functor (BS : BLOCKSEQ) ->
-  sig
-    type code =
-        Reg of CT.reg
-      | Mem of CT.mem * code
-      | Immed of CT.immed
-      | Nary of CT.extop * int * code list
-      | Trinary of CT.triop * code * code * code
-      | Binary of CT.binop * code * code
-      | Unary of CT.unop * code
-      | Nullary of CT.nulop
-      | Set of code * code
-      | Control of control
-      | Phi of code array
-
-    and control =
-        Jump of code list * BS.blockref
-      | Call of code list * BS.blockref * BS.blockref
-      | Branch of code * BS.blockref * BS.blockref
-      | Return
-      | Jump_ind of code
-      | Call_ind of code
-      | Jump_ext of CT.addr  (* External branches to OS routines, etc.  *)
-      | Call_ext of code list * CT.addr
-    
-    val get_last : code BS.t -> code
-    val get_control : code BS.t -> control
-    val int_of_reg : CT.reg -> int
-    val reg_of_int : int -> CT.reg
-  end*)
-
 module type CODESEQ =
   sig
     type 'a t
@@ -108,6 +77,9 @@ module type CODESEQ =
     val get_last : 'a t -> 'a
     val length : 'a t -> int
     val nth : 'a t -> int -> 'a
+    val is_empty : 'a t -> bool
+    val decon : 'a t -> 'a * 'a t
+    val noced : 'a t -> 'a t * 'a
   end
 
 module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
@@ -219,119 +191,133 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
     | Entity e -> CT.string_of_entity e
     | Protect x -> str "*protect* (%s)" (string_of_code x)
   
-  let string_of_codeseq cs =
-    let buf = CS.fold_left
-      (fun buf code ->
-        Buffer.add_string buf (string_of_code code);
-	Buffer.add_char buf '\n';
-	buf)
-      (Buffer.create 20)
-      cs in
-    Buffer.contents buf
-  
-  let get_control blk =
-    match get_last blk with
-      Control ctl -> ctl
-    | x ->
-      let insn = string_of_code x in
-      failwith (Printf.sprintf
-	"Last instruction of block (%s) does no control flow" insn)
+    let string_of_codeseq cs =
+      let buf = CS.fold_left
+	(fun buf code ->
+          Buffer.add_string buf (string_of_code code);
+	  Buffer.add_char buf '\n';
+	  buf)
+	(Buffer.create 20)
+	cs in
+      Buffer.contents buf
 
-  let fold fn ?(ctl_fn = (fun ctl acc -> ctl, acc)) code acc =
-    let rec scan e acc =
-      let expr', acc' = fn e acc in
-      match expr' with
-	Entity _ | Reg _ | SSAReg _ | Immed _ | Nullary _ ->
-	  acc'
-      | Nary (_, clist) ->
-	  List.fold_right scan clist acc'
-      | Trinary (_, a, b, c) ->
-          let acc'' = scan c acc' in
-	  let acc''' = scan b acc'' in
-	  scan a acc'''
-      | Binary (_, a, b) ->
-          let acc'' = scan b acc' in
-	  scan a acc''
-      | Unary (_, a) | Load (_, a) ->
-          scan a acc'
-      | Store (_, a, b) ->
-          let acc'' = scan b acc' in
-	  scan a acc''
-      | Set (d, s) ->
-          let acc'' = scan d acc' in
-	  scan s acc''
-      | Control c ->
-          scan_ctl c acc'
-      | Phi parr ->
-          Array.fold_right scan parr acc
-      | Protect child ->
-	  acc'
-    and scan_ctl ctl acc =
-      let ctl', acc' = ctl_fn ctl acc in
-      match ctl' with
-	TailCall (_, code) | Branch (code, _, _) | CompJump (code, _)
-      | TailCall_ext (_, _, code) | Return code | CompJump_ext (_, code) ->
-          scan code acc'
-      | Call (_, c1, _, c2) | CompTailCall (c1, c2)
-      | Call_ext (_, _, c1, _, c2) ->
-          let acc'' = scan c2 acc' in
-	  scan c1 acc''
-      | CompCall (c1, c2, _, c3) ->
-          let acc'' = scan c3 acc' in
-	  let acc''' = scan c2 acc'' in
-	  scan c1 acc'''
-      | Jump _ | Jump_ext _ | Virtual_exit -> acc' in
-    scan code acc
-  
-  let map fn ?(ctl_fn = fun x -> x) code =
-    let rec scan e =
-      match fn e with
-	(Entity _ | Reg _ | SSAReg _ | Immed _ | Nullary _) as x -> x
-      | Load (mem, code) ->
-	  Load (mem, scan code)
-      | Store (mem, code, v) ->
-	  Store (mem, scan code, scan v)
-      | Nary (op, clist) ->
-	  Nary (op, List.map scan clist)
-      | Trinary (op, a, b, c) ->
-	  Trinary (op, scan a, scan b, scan c)
-      | Binary (op, a, b) ->
-	  Binary (op, scan a, scan b)
-      | Unary (op, a) ->
-	  Unary (op, scan a)
-      | Set (d, s) ->
-	  Set (scan d, scan s)
-      | Control c ->
-	  Control (scan_ctl c)
-      | Phi parr ->
-	  Phi (Array.map scan parr)
-      | Protect child -> child
-    and scan_ctl e =
-      match ctl_fn e with
-	TailCall (br, code) ->
-	  TailCall (br, scan code)
-      | Call (call, carg, ret, retarg) ->
-	  Call (call, scan carg, ret, scan retarg)
-      | Jump _ as c -> c
-      | Branch (code, tr, fa) ->
-	  Branch (scan code, tr, fa)
-      | Return code ->
-	  Return (scan code)
-      | CompTailCall (dst, arg) ->
-	  CompTailCall (scan dst, scan arg)
-      | CompCall (dst, arg, ret, retarg) ->
-	  CompCall (scan dst, scan arg, ret, scan retarg)
-      | CompJump (code, dl) ->
-	  CompJump (scan code, dl)
-      | TailCall_ext (abi, addr, code) ->
-	  TailCall_ext (abi, addr, scan code)
-      | Call_ext (abi, addr, arg, ret, retarg) ->
-	  Call_ext (abi, addr, scan arg, ret, scan retarg)
-      | Jump_ext _ as c -> c
-      | CompJump_ext (abi, dst) ->
-	  CompJump_ext (abi, scan dst)
-      | Virtual_exit -> Virtual_exit in
-    scan code
+    let get_control blk =
+      match get_last blk with
+	Control ctl -> ctl
+      | x ->
+	let insn = string_of_code x in
+	failwith (Printf.sprintf
+	  "Last instruction of block (%s) does no control flow" insn)
+
+    (* Insert an insn at the end of a code sequence, before any control-flow
+       instruction if one is present.  *)
+    let insert_before_control cseq insn =
+      if CS.is_empty cseq then
+	CS.snoc cseq insn
+      else begin
+	match CS.noced cseq with
+          upto, ((Control _) as ctl) ->
+	    let cseq' = CS.snoc upto insn in
+	    CS.snoc cseq' ctl
+	| _, _ ->
+            CS.snoc cseq insn
+      end
+
+    let fold fn ?(ctl_fn = (fun ctl acc -> ctl, acc)) code acc =
+      let rec scan e acc =
+	let expr', acc' = fn e acc in
+	match expr' with
+	  Entity _ | Reg _ | SSAReg _ | Immed _ | Nullary _ ->
+	    acc'
+	| Nary (_, clist) ->
+	    List.fold_right scan clist acc'
+	| Trinary (_, a, b, c) ->
+            let acc'' = scan c acc' in
+	    let acc''' = scan b acc'' in
+	    scan a acc'''
+	| Binary (_, a, b) ->
+            let acc'' = scan b acc' in
+	    scan a acc''
+	| Unary (_, a) | Load (_, a) ->
+            scan a acc'
+	| Store (_, a, b) ->
+            let acc'' = scan b acc' in
+	    scan a acc''
+	| Set (d, s) ->
+            let acc'' = scan d acc' in
+	    scan s acc''
+	| Control c ->
+            scan_ctl c acc'
+	| Phi parr ->
+            Array.fold_right scan parr acc
+	| Protect child ->
+	    acc'
+      and scan_ctl ctl acc =
+	let ctl', acc' = ctl_fn ctl acc in
+	match ctl' with
+	  TailCall (_, code) | Branch (code, _, _) | CompJump (code, _)
+	| TailCall_ext (_, _, code) | Return code | CompJump_ext (_, code) ->
+            scan code acc'
+	| Call (_, c1, _, c2) | CompTailCall (c1, c2)
+	| Call_ext (_, _, c1, _, c2) ->
+            let acc'' = scan c2 acc' in
+	    scan c1 acc''
+	| CompCall (c1, c2, _, c3) ->
+            let acc'' = scan c3 acc' in
+	    let acc''' = scan c2 acc'' in
+	    scan c1 acc'''
+	| Jump _ | Jump_ext _ | Virtual_exit -> acc' in
+      scan code acc
+
+    let map fn ?(ctl_fn = fun x -> x) code =
+      let rec scan e =
+	match fn e with
+	  (Entity _ | Reg _ | SSAReg _ | Immed _ | Nullary _) as x -> x
+	| Load (mem, code) ->
+	    Load (mem, scan code)
+	| Store (mem, code, v) ->
+	    Store (mem, scan code, scan v)
+	| Nary (op, clist) ->
+	    Nary (op, List.map scan clist)
+	| Trinary (op, a, b, c) ->
+	    Trinary (op, scan a, scan b, scan c)
+	| Binary (op, a, b) ->
+	    Binary (op, scan a, scan b)
+	| Unary (op, a) ->
+	    Unary (op, scan a)
+	| Set (d, s) ->
+	    Set (scan d, scan s)
+	| Control c ->
+	    Control (scan_ctl c)
+	| Phi parr ->
+	    Phi (Array.map scan parr)
+	| Protect child -> child
+      and scan_ctl e =
+	match ctl_fn e with
+	  TailCall (br, code) ->
+	    TailCall (br, scan code)
+	| Call (call, carg, ret, retarg) ->
+	    Call (call, scan carg, ret, scan retarg)
+	| Jump _ as c -> c
+	| Branch (code, tr, fa) ->
+	    Branch (scan code, tr, fa)
+	| Return code ->
+	    Return (scan code)
+	| CompTailCall (dst, arg) ->
+	    CompTailCall (scan dst, scan arg)
+	| CompCall (dst, arg, ret, retarg) ->
+	    CompCall (scan dst, scan arg, ret, scan retarg)
+	| CompJump (code, dl) ->
+	    CompJump (scan code, dl)
+	| TailCall_ext (abi, addr, code) ->
+	    TailCall_ext (abi, addr, scan code)
+	| Call_ext (abi, addr, arg, ret, retarg) ->
+	    Call_ext (abi, addr, scan arg, ret, scan retarg)
+	| Jump_ext _ as c -> c
+	| CompJump_ext (abi, dst) ->
+	    CompJump_ext (abi, scan dst)
+	| Virtual_exit -> Virtual_exit in
+      scan code
 	
   end
 
