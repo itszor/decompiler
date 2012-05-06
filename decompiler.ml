@@ -2,8 +2,8 @@ open Elfreader
 open Dwarfreader
 open Dwarfprint
 
-let elfbits, ehdr = read_file "foo"
-(*let elfbits, ehdr = read_file "libGLESv2.so"*)
+(*let elfbits, ehdr = read_file "foo"*)
+let elfbits, ehdr = read_file "libGLESv2.so"
 let shdr_arr = get_section_headers elfbits ehdr
 let debug_info = get_section_by_name elfbits ehdr shdr_arr ".debug_info"
 let debug_info_len = Bitstring.bitstring_length debug_info
@@ -13,6 +13,7 @@ let debug_str_sec = get_section_by_name elfbits ehdr shdr_arr ".debug_str"
 let cu_debug_abbrev = offset_section debug_abbrev cu_header.debug_abbrev_offset
 let abbrevs = parse_abbrevs cu_debug_abbrev
 let debug_line = get_section_by_name elfbits ehdr shdr_arr ".debug_line"
+let debug_pubnames = get_section_by_name elfbits ehdr shdr_arr ".debug_pubnames"
 let lines, remaining_debug_line = Line.parse_lines debug_line
 let text = get_section_by_name elfbits ehdr shdr_arr ".text"
 (*let code, remaining_code = Decode_arm.decode_insns text 40*)
@@ -313,3 +314,5 @@ let go symname =
   dump_blockseq blk_arr'
 
 (*let _ = go "blah"*)
+
+let pubnames = Dwarfreader.parse_all_pubname_data debug_pubnames

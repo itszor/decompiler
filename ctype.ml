@@ -9,3 +9,4 @@ type ctype =
   | C_unsigned of ctype
   | C_pointer of ctype
   | C_const of ctype
+  | C_volatile of ctype

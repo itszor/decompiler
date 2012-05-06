@@ -848,6 +848,56 @@ let parse_die dwbits ~length ~abbrevs ~addr_size ~string_sec =
   let dies, dwbits' = build dwbits 0 in
   dies, die_hash, dwbits'
 
+type pubnames_header =
+  {
+    pn_unit_length : int32;
+    pn_version : int;
+    pn_debug_info_offset : int32;
+    pn_debug_info_length : int32
+  }
+
+let parse_pubnames_header dwbits =
+  bitmatch dwbits with
+    { unit_length : 32 : littleendian;
+      version : 16 : littleendian;
+      debug_info_offset : 32 : littleendian;
+      debug_info_length : 32 : littleendian;
+      rest : -1 : bitstring } ->
+      { pn_unit_length = unit_length;
+        pn_version = version;
+	pn_debug_info_offset = debug_info_offset;
+	pn_debug_info_length = debug_info_length }, rest
+  | { _ } -> raise (Dwarf_parse_error "parse_pubnames_header")
+
+let parse_pubname dwbits =
+  bitmatch dwbits with
+    { offset : 32 : littleendian;
+      namebits : -1 : bitstring } ->
+      if offset > 0l then
+	let name, rest = get_string namebits in
+	offset, name, rest
+      else
+        offset, "", namebits
+  | { _ } -> raise (Dwarf_parse_error "parse_pubname")
+
+let parse_pubnames dwbits =
+  let rec build dwbits' acc =
+    let offset, name, rest = parse_pubname dwbits' in
+    match offset with
+      0l -> acc, rest
+    | _ -> build rest ((offset, name) :: acc) in
+  build dwbits []
+
+let parse_all_pubname_data dwbits =
+  let rec build dwbits' acc =
+    if Bitstring.bitstring_length dwbits' = 0 then
+      acc
+    else
+      let hdr, contents = parse_pubnames_header dwbits' in
+      let pubnames, rest = parse_pubnames contents in
+      build rest ((hdr, pubnames) :: acc) in
+  build dwbits []
+
 exception Type_mismatch of string
 
 let get_attr_string attrs typ =

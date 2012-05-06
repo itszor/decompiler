@@ -3,7 +3,7 @@ int __attribute__((noinline)) foo (int a, int b, int c, int d, int e, int f)
   return (a + b) * (b + c) * (c + d) * (e + f);
 }
 
-long long int bar (int a, int b)
+long long int bar (unsigned int a, int b)
 {
   return (long long int) a * (long long int) b;
 }
