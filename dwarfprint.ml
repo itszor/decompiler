@@ -211,7 +211,7 @@ and print_typedef typedef_attrs hash =
       end
     with Not_found ->
       (* Missing DW_AT_type seems to mean "void".  *)
-      Format.printf "typedef void %s@," td_name
+      Format.printf "(missing DW_AT_type, void?) %s@," td_name
   end;
   Format.printf "@]"
 

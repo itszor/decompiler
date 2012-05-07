@@ -2,8 +2,8 @@ open Elfreader
 open Dwarfreader
 open Dwarfprint
 
-let elfbits, ehdr = read_file "foo"
-(*let elfbits, ehdr = read_file "libGLESv2.so"*)
+(*let elfbits, ehdr = read_file "foo"*)
+let elfbits, ehdr = read_file "libGLESv2.so"
 let shdr_arr = get_section_headers elfbits ehdr
 let debug_info = get_section_by_name elfbits ehdr shdr_arr ".debug_info"
 let debug_info_len = Bitstring.bitstring_length debug_info
@@ -200,7 +200,7 @@ let code_for_named_sym section symbols mapping_syms strtab symname =
 
 let debug_info_ptr = ref remaining_debug_info
 let fetch_die () =
-  let die_tree, die_hash, next_die = parse_die !debug_info_ptr
+  let die_tree, die_hash, next_die = parse_die_for_cu !debug_info_ptr
 				     ~length:debug_info_len
 				     ~abbrevs ~addr_size:cu_header.address_size
 				     ~string_sec:debug_str_sec in
@@ -322,50 +322,59 @@ let debug_inf =
     (fun (hdr, contents) ->
       let debug_inf_for_hdr =
         offset_section debug_info hdr.pn_debug_info_offset in
-      let cu_header, _ = parse_comp_unit_header debug_inf_for_hdr in
+      let cu_header, after_cu_hdr = parse_comp_unit_header debug_inf_for_hdr in
       let debug_abbr_offset = cu_header.debug_abbrev_offset in
       let debug_abbr = offset_section debug_abbrev debug_abbr_offset in
       let abbrevs = parse_abbrevs debug_abbr in
+      let _, die_hash, _ =
+        parse_die_for_cu after_cu_hdr
+	  ~length:(Bitstring.bitstring_length debug_inf_for_hdr)
+	  ~abbrevs:abbrevs ~addr_size:cu_header.address_size
+	  ~string_sec:debug_str_sec in
       List.map
 	(fun (offset, name) ->
 	  let die_bits = offset_section debug_inf_for_hdr offset in
-	  let die, die_hash, _ = parse_die_and_children die_bits
+	  let die, _ = parse_die_and_children die_bits
 	    ~abbrevs:abbrevs ~addr_size:cu_header.address_size
 	    ~string_sec:debug_str_sec in
 	  (*Format.printf "debug info for '%s':@," name;
 	  print_die die die_hash;*)
-	  name, abbrevs, die)
+	  name, debug_inf_for_hdr, abbrevs, die, die_hash)
 	contents)
     pubnames
 
-let rec function_arg die abbrevs argno =
+let rec function_arg die die_bits abbrevs die_hash argno =
   match die with
     Die_node ((DW_TAG_formal_parameter, attrs), sibl) ->
       let argname = get_attr_string attrs DW_AT_name in
       Format.printf "Arg %d, '%s':@." argno argname;
       let typeoffset = get_attr_ref attrs DW_AT_type in
-      let die_bits = offset_section debug_info typeoffset in
-      let die, die_hash, _ = parse_die_and_children die_bits ~abbrevs:abbrevs
+      let die_bits' = offset_section die_bits typeoffset in
+      let die, _ = parse_die_and_children die_bits' ~abbrevs:abbrevs
         ~addr_size:cu_header.address_size ~string_sec:debug_str_sec in
       print_die die die_hash;
-      function_arg sibl abbrevs (succ argno)
+      function_arg sibl die_bits abbrevs die_hash (succ argno)
   | _ -> ()
 
-let function_type fn =
-  let name, abbrevs, die = fn in
+let function_type (name, die_bits, abbrevs, die, die_hash) =
   Format.printf "Function '%s'@." name;
   match die with
     Die_tree ((DW_TAG_subprogram, attrs), child, _) ->
-      let typeoffset = get_attr_ref attrs DW_AT_type in
-      Format.printf "It's a subprogram (type=%ld).@."
-        typeoffset;
-      let die_bits = offset_section debug_info typeoffset in
-      let die, die_hash, _ = parse_die_and_children die_bits
-        ~abbrevs:abbrevs ~addr_size:cu_header.address_size
-	~string_sec:debug_str_sec in
-      print_die die die_hash;
-      function_arg child abbrevs 0
+      begin try
+        let typeoffset = get_attr_ref attrs DW_AT_type in
+	Format.printf "It's a subprogram (type=%ld).@."
+          typeoffset;
+	let die_bits' = offset_section die_bits typeoffset in
+	let die, _ = parse_die_and_children die_bits' ~abbrevs:abbrevs
+          ~addr_size:cu_header.address_size ~string_sec:debug_str_sec in
+	print_die die die_hash;
+      with Not_found ->
+        Format.printf "No DW_AT_type, assume return void.\n"
+      end;
+      function_arg child die_bits abbrevs die_hash 0
   | _ -> ()
+
+let q = function_type (List.nth (List.nth debug_inf 1) 3)
 
 (*let try_all =
   List.map

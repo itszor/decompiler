@@ -812,11 +812,29 @@ let parse_one_die dwbits ~abbrevs ~addr_size ~string_sec =
     Some (abbrev.abv_tag, attr_vals, abbrev.abv_has_children), dwbits
   end
 
+type attr_datum = [
+    `addr of int32
+  | `block of Bitstring.bitstring
+  | `data1 of int
+  | `data2 of int
+  | `data4 of int32
+  | `data8 of int64
+  | `flag of bool
+  | `ref1 of int
+  | `ref2 of int
+  | `ref4 of int32
+  | `ref8 of int64
+  | `sdata of Big_int.big_int
+  | `string of string
+  | `udata of Big_int.big_int
+  | `uref of Big_int.big_int
+]
+
 (* Parse a tree of DIE information.  Siblings are represented as a Die_node,
    children as a Die_tree.
    LENGTH should be the full length of the DIE section, including CU header.  *)
 
-let parse_die dwbits ~length ~abbrevs ~addr_size ~string_sec =
+let parse_die_for_cu dwbits ~length ~abbrevs ~addr_size ~string_sec =
   let die_hash = Hashtbl.create 10 in
   let rec build dwbits depth =
     let offset_bits = length - (Bitstring.bitstring_length dwbits) in
@@ -842,14 +860,17 @@ let parse_die dwbits ~length ~abbrevs ~addr_size ~string_sec =
 	    end
 	  end else
 	    Die_node (data, child_or_sibling), dwbits' in
+	(*Printf.printf "insert offset: %d\n" offset;*)
 	Hashtbl.add die_hash offset this_node;
 	this_node, dwbits'
     | None -> Die_empty, dwbits in
   let dies, dwbits' = build dwbits 0 in
-  dies, die_hash, dwbits'
+  dies,
+  (die_hash : (int, (dwarf_tag
+		    * (dwarf_attribute * attr_datum) list) die) Hashtbl.t),
+  dwbits'
 
 let parse_die_and_children dwbits ~abbrevs ~addr_size ~string_sec =
-  let die_hash = Hashtbl.create 10 in
   let rec build dwbits depth =
     (* Printf.printf "parsing die, offset %d\n" offset; *)
     let things, dwbits = parse_one_die dwbits ~abbrevs ~addr_size ~string_sec in
@@ -872,7 +893,7 @@ let parse_die_and_children dwbits ~abbrevs ~addr_size ~string_sec =
 	    Die_node (data, Die_empty), dwbits
     | None -> Die_empty, dwbits in
   let dies, dwbits' = build dwbits 0 in
-  dies, die_hash, dwbits'
+  dies, dwbits'
 
 type pubnames_header =
   {
@@ -961,7 +982,11 @@ let lookup_die tref hash =
 
 let get_attr_deref attrs typ hash =
   let die_ref = get_attr_ref attrs typ in
-  lookup_die die_ref hash
+  (*Format.printf "found ref: %ld@." die_ref;*)
+  try
+    lookup_die die_ref hash
+  with Not_found ->
+    failwith "dereferenced type not in hash table"
 
 let attr_present attrs typ =
   List.mem_assoc typ attrs
