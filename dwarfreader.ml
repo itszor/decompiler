@@ -848,6 +848,32 @@ let parse_die dwbits ~length ~abbrevs ~addr_size ~string_sec =
   let dies, dwbits' = build dwbits 0 in
   dies, die_hash, dwbits'
 
+let parse_die_and_children dwbits ~abbrevs ~addr_size ~string_sec =
+  let die_hash = Hashtbl.create 10 in
+  let rec build dwbits depth =
+    (* Printf.printf "parsing die, offset %d\n" offset; *)
+    let things, dwbits = parse_one_die dwbits ~abbrevs ~addr_size ~string_sec in
+    match things with
+      Some (tag, attr_vals, has_children) ->
+        let data = tag, attr_vals in
+	let cdepth = if has_children then succ depth else depth in
+	if depth > 0 then
+	  let child_or_sibling, dwbits' = build dwbits cdepth in
+	  if has_children then
+	    let sibling, dwbits'' = build dwbits' depth in
+	    Die_tree (data, child_or_sibling, sibling), dwbits''
+	  else
+	    Die_node (data, child_or_sibling), dwbits'
+	else
+	  if has_children then
+	    let child, dwbits' = build dwbits cdepth in
+	    Die_tree (data, child, Die_empty), dwbits'
+	  else
+	    Die_node (data, Die_empty), dwbits
+    | None -> Die_empty, dwbits in
+  let dies, dwbits' = build dwbits 0 in
+  dies, die_hash, dwbits'
+
 type pubnames_header =
   {
     pn_unit_length : int32;

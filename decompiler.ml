@@ -2,8 +2,8 @@ open Elfreader
 open Dwarfreader
 open Dwarfprint
 
-(*let elfbits, ehdr = read_file "foo"*)
-let elfbits, ehdr = read_file "libGLESv2.so"
+let elfbits, ehdr = read_file "foo"
+(*let elfbits, ehdr = read_file "libGLESv2.so"*)
 let shdr_arr = get_section_headers elfbits ehdr
 let debug_info = get_section_by_name elfbits ehdr shdr_arr ".debug_info"
 let debug_info_len = Bitstring.bitstring_length debug_info
@@ -316,3 +316,69 @@ let go symname =
 (*let _ = go "blah"*)
 
 let pubnames = Dwarfreader.parse_all_pubname_data debug_pubnames
+
+let debug_inf =
+  List.map
+    (fun (hdr, contents) ->
+      let debug_inf_for_hdr =
+        offset_section debug_info hdr.pn_debug_info_offset in
+      let cu_header, _ = parse_comp_unit_header debug_inf_for_hdr in
+      let debug_abbr_offset = cu_header.debug_abbrev_offset in
+      let debug_abbr = offset_section debug_abbrev debug_abbr_offset in
+      let abbrevs = parse_abbrevs debug_abbr in
+      List.map
+	(fun (offset, name) ->
+	  let die_bits = offset_section debug_inf_for_hdr offset in
+	  let die, die_hash, _ = parse_die_and_children die_bits
+	    ~abbrevs:abbrevs ~addr_size:cu_header.address_size
+	    ~string_sec:debug_str_sec in
+	  (*Format.printf "debug info for '%s':@," name;
+	  print_die die die_hash;*)
+	  name, abbrevs, die)
+	contents)
+    pubnames
+
+let rec function_arg die abbrevs argno =
+  match die with
+    Die_node ((DW_TAG_formal_parameter, attrs), sibl) ->
+      let argname = get_attr_string attrs DW_AT_name in
+      Format.printf "Arg %d, '%s':@." argno argname;
+      let typeoffset = get_attr_ref attrs DW_AT_type in
+      let die_bits = offset_section debug_info typeoffset in
+      let die, die_hash, _ = parse_die_and_children die_bits ~abbrevs:abbrevs
+        ~addr_size:cu_header.address_size ~string_sec:debug_str_sec in
+      print_die die die_hash;
+      function_arg sibl abbrevs (succ argno)
+  | _ -> ()
+
+let function_type fn =
+  let name, abbrevs, die = fn in
+  Format.printf "Function '%s'@." name;
+  match die with
+    Die_tree ((DW_TAG_subprogram, attrs), child, _) ->
+      let typeoffset = get_attr_ref attrs DW_AT_type in
+      Format.printf "It's a subprogram (type=%ld).@."
+        typeoffset;
+      let die_bits = offset_section debug_info typeoffset in
+      let die, die_hash, _ = parse_die_and_children die_bits
+        ~abbrevs:abbrevs ~addr_size:cu_header.address_size
+	~string_sec:debug_str_sec in
+      print_die die die_hash;
+      function_arg child abbrevs 0
+  | _ -> ()
+
+(*let try_all =
+  List.map
+    (fun nd_list ->
+      List.map
+        (fun (name, _) ->
+	  try
+	    Printf.printf "Trying '%s'\n" name;
+	    go name;
+	    Printf.printf "*** SUCCESS! ***\n"
+	  with _ ->
+	    Printf.printf "failed!\n"
+	    )
+	nd_list)
+    debug_inf
+*)
