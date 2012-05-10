@@ -350,7 +350,7 @@ let (name, die_bits, abbrevs, die, die_hash) =
 
 let r, a = Function.function_type name die die_hash
 
-let ft = Function.resolve_type (List.hd a) die_hash
+let ft = Ctype.resolve_type (List.hd a) die_hash
 
 (*let try_all =
   List.map

@@ -968,6 +968,12 @@ let get_attr_int32 attrs typ =
 let get_attr_int attrs typ =
   Int32.to_int (get_attr_int32 attrs typ)
 
+let get_attr_bool attrs typ =
+  match get_attr_int32 attrs typ with
+    0l -> false
+  | 1l -> true
+  | _ -> raise (Type_mismatch "bool")
+
 let get_attr_address attrs typ =
   match List.assoc typ attrs with
     `addr a -> a
