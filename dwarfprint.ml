@@ -261,7 +261,7 @@ and print_aggregate_members mem hash =
       print_decl mem_type mem_name hash;
       Format.printf ";";
       print_aggregate_members next hash
-  | Die_node _ -> raise (Dwarf_parse_error "non-enumerator in enum")
+  | Die_node _ -> raise (Dwarf_parse_error "non-member in aggregate")
   | Die_tree _ -> raise (Dwarf_parse_error "unexpected tree node")
 
 and print_struct_type struct_attrs struct_children hash =

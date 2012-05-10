@@ -870,6 +870,8 @@ let parse_die_for_cu dwbits ~length ~abbrevs ~addr_size ~string_sec =
 		    * (dwarf_attribute * attr_datum) list) die) Hashtbl.t),
   dwbits'
 
+(* This is probably not useful.  *)
+
 let parse_die_and_children dwbits ~abbrevs ~addr_size ~string_sec =
   let rec build dwbits depth =
     (* Printf.printf "parsing die, offset %d\n" offset; *)

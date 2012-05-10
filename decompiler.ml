@@ -333,48 +333,24 @@ let debug_inf =
 	  ~string_sec:debug_str_sec in
       List.map
 	(fun (offset, name) ->
-	  let die_bits = offset_section debug_inf_for_hdr offset in
-	  let die, _ = parse_die_and_children die_bits
+	  (*let die_bits = offset_section debug_inf_for_hdr offset in*)
+	  let die = Hashtbl.find die_hash (Int32.to_int offset) in
+	  (*parse_die_and_children die_bits
 	    ~abbrevs:abbrevs ~addr_size:cu_header.address_size
-	    ~string_sec:debug_str_sec in
+	    ~string_sec:debug_str_sec in *)
 	  (*Format.printf "debug info for '%s':@," name;
 	  print_die die die_hash;*)
 	  name, debug_inf_for_hdr, abbrevs, die, die_hash)
 	contents)
     pubnames
 
-let rec function_arg die die_bits abbrevs die_hash argno =
-  match die with
-    Die_node ((DW_TAG_formal_parameter, attrs), sibl) ->
-      let argname = get_attr_string attrs DW_AT_name in
-      Format.printf "Arg %d, '%s':@." argno argname;
-      let typeoffset = get_attr_ref attrs DW_AT_type in
-      let die_bits' = offset_section die_bits typeoffset in
-      let die, _ = parse_die_and_children die_bits' ~abbrevs:abbrevs
-        ~addr_size:cu_header.address_size ~string_sec:debug_str_sec in
-      print_die die die_hash;
-      function_arg sibl die_bits abbrevs die_hash (succ argno)
-  | _ -> ()
+let (name, die_bits, abbrevs, die, die_hash) =
+  List.nth (List.nth debug_inf 1) 3
+  (*Function.function_type name die_bits abbrevs die die_hash*)
 
-let function_type (name, die_bits, abbrevs, die, die_hash) =
-  Format.printf "Function '%s'@." name;
-  match die with
-    Die_tree ((DW_TAG_subprogram, attrs), child, _) ->
-      begin try
-        let typeoffset = get_attr_ref attrs DW_AT_type in
-	Format.printf "It's a subprogram (type=%ld).@."
-          typeoffset;
-	let die_bits' = offset_section die_bits typeoffset in
-	let die, _ = parse_die_and_children die_bits' ~abbrevs:abbrevs
-          ~addr_size:cu_header.address_size ~string_sec:debug_str_sec in
-	print_die die die_hash;
-      with Not_found ->
-        Format.printf "No DW_AT_type, assume return void.\n"
-      end;
-      function_arg child die_bits abbrevs die_hash 0
-  | _ -> ()
+let r, a = Function.function_type name die die_hash
 
-let q = function_type (List.nth (List.nth debug_inf 1) 3)
+let ft = Function.resolve_type (List.hd a) die_hash
 
 (*let try_all =
   List.map
