@@ -2,8 +2,27 @@ open Elfreader
 open Dwarfreader
 open Dwarfprint
 
+type binary_info = {
+  elfbits : Bitstring.bitstring;
+  ehdr : elf_ehdr;
+  shdr_arr : elf_shdr array;
+  debug_info : Bitstring.bitstring;
+  debug_abbrev : Bitstring.bitstring;
+  debug_str_sec : Bitstring.bitstring;
+  debug_line : Bitstring.bitstring;
+  debug_pubnames : Bitstring.bitstring;
+  debug_aranges : Bitstring.bitstring;
+  lines : Line.line_prog_hdr;
+  text : Bitstring.bitstring;
+  strtab : Bitstring.bitstring;
+  symtab : Bitstring.bitstring;
+  symbols : elf_sym list;
+  mapping_syms : elf_sym list
+}
+
 (*let elfbits, ehdr = read_file "foo"*)
-let elfbits, ehdr = read_file "libGLESv2.so"
+
+(*let elfbits, ehdr = read_file "libGLESv2.so"
 let shdr_arr = get_section_headers elfbits ehdr
 let debug_info = get_section_by_name elfbits ehdr shdr_arr ".debug_info"
 let debug_info_len = Bitstring.bitstring_length debug_info
@@ -20,6 +39,44 @@ let text = get_section_by_name elfbits ehdr shdr_arr ".text"
 let strtab = get_section_by_name elfbits ehdr shdr_arr ".strtab"
 let symtab = get_section_by_name elfbits ehdr shdr_arr ".symtab"
 let symbols = Symbols.read_symbols symtab
+*)
+
+let open_file filename =
+  let elfbits, ehdr = read_file filename in
+  let shdr_arr = get_section_headers elfbits ehdr in
+  let debug_info = get_section_by_name elfbits ehdr shdr_arr ".debug_info" in
+  let debug_abbrev = get_section_by_name elfbits ehdr shdr_arr
+					 ".debug_abbrev" in
+  let debug_str_sec = get_section_by_name elfbits ehdr shdr_arr ".debug_str" in
+  let debug_line = get_section_by_name elfbits ehdr shdr_arr ".debug_line" in
+  let debug_pubnames = get_section_by_name elfbits ehdr shdr_arr
+					   ".debug_pubnames" in
+  let debug_aranges = get_section_by_name elfbits ehdr shdr_arr
+					  ".debug_aranges" in
+  let lines, _ = Line.parse_lines debug_line in
+  let text = get_section_by_name elfbits ehdr shdr_arr ".text" in
+  let strtab = get_section_by_name elfbits ehdr shdr_arr ".strtab" in
+  let symtab = get_section_by_name elfbits ehdr shdr_arr ".symtab" in
+  let symbols = Symbols.read_symbols symtab in
+  let mapping_syms = Mapping.get_mapping_symbols elfbits ehdr shdr_arr strtab
+		     symbols ".text" in
+  {
+    elfbits = elfbits;
+    ehdr = ehdr;
+    shdr_arr = shdr_arr;
+    debug_info = debug_info;
+    debug_abbrev = debug_abbrev;
+    debug_str_sec = debug_str_sec;
+    debug_line = debug_line;
+    debug_pubnames = debug_pubnames;
+    debug_aranges = debug_aranges;
+    lines = lines;
+    text = text;
+    strtab = strtab;
+    symtab = symtab;
+    symbols = symbols;
+    mapping_syms = mapping_syms
+  }
 
 (*
 let code_for_sym symname =
@@ -70,16 +127,16 @@ let targets addr insn labelset =
       LabelSet.add (Int32.add addr 4l) labelset
   | _ -> labelset
 
-let code_for_sym section mapping_syms sym =
+let code_for_sym binf section mapping_syms sym =
   let start_offset = Int32.sub sym.st_value
-			       shdr_arr.(sym.st_shndx).sh_addr
+			       binf.shdr_arr.(sym.st_shndx).sh_addr
   and length = (Int32.to_int sym.st_size + 3) / 4 in
   let sym_bits = Bitstring.dropbits (8 * (Int32.to_int start_offset)) section in
   (* First pass: find labels.  *)
   let labelset = ref LabelSet.empty in
   for i = 0 to length - 1 do
     let insn_addr = Int32.add sym.st_value (Int32.of_int (i * 4)) in
-    let map = Mapping.mapping_for_addr mapping_syms strtab insn_addr in
+    let map = Mapping.mapping_for_addr mapping_syms binf.strtab insn_addr in
     match map with
       Mapping.ARM ->
         let decoded
@@ -106,7 +163,7 @@ let code_for_sym section mapping_syms sym =
       Printf.printf "finishing sequence at addr: %lx\n" insn_addr;
       finish_seq ()
     end;
-    let map = Mapping.mapping_for_addr mapping_syms strtab insn_addr in
+    let map = Mapping.mapping_for_addr mapping_syms binf.strtab insn_addr in
     match map with
       Mapping.ARM ->
         if !seq_start = None then
@@ -194,18 +251,19 @@ let bs_of_code_hash name symbols strtab code_hash entry_pt =
     = bseq_cons Irtypes.Virtual_exit virtual_exit with_entry_pt in
   BS.rev with_exit_pt, ht
 
-let code_for_named_sym section symbols mapping_syms strtab symname =
+let code_for_named_sym binf section symbols mapping_syms strtab symname =
   let sym = Symbols.find_named_symbol symbols strtab symname in
-  code_for_sym section mapping_syms sym
+  code_for_sym binf section mapping_syms sym
 
-let debug_info_ptr = ref remaining_debug_info
+(*let debug_info_ptr = ref remaining_debug_info
+
 let fetch_die () =
   let die_tree, die_hash, next_die = parse_die_for_cu !debug_info_ptr
 				     ~length:debug_info_len
 				     ~abbrevs ~addr_size:cu_header.address_size
 				     ~string_sec:debug_str_sec in
   debug_info_ptr := next_die;
-  die_tree, die_hash
+  die_tree, die_hash *)
 
 (*let _ =
   let x, h = fetch_die () in
@@ -249,8 +307,8 @@ let dump_blockseq bs =
       Printf.printf "%s\n" (Ir.Ir.string_of_codeseq block.Block.code))
     bs
 
-let mapping_syms = Mapping.get_mapping_symbols elfbits ehdr shdr_arr strtab
-					       symbols ".text"
+(*let mapping_syms = Mapping.get_mapping_symbols elfbits ehdr shdr_arr strtab
+					       symbols ".text"*)
 
 module IrDfs = Dfs.Dfs (Ir.IrCT) (Ir.IrCS) (Ir.IrBS)
 module IrDominator = Dominator.Dominator (Ir.IrBS)
@@ -265,12 +323,14 @@ let add_stackvars_to_entry_block blk_arr entry_pt_ref regset =
     code in
   blk_arr.(entry_pt_ref).Block.code <- code'
 
+let binf = open_file "libGLESv2.so"
+
 let go symname =
-  let sym = Symbols.find_named_symbol symbols strtab symname in
+  let sym = Symbols.find_named_symbol binf.symbols binf.strtab symname in
   let entry_point = sym.Elfreader.st_value in
   let entry_point_ba = Irtypes.BlockAddr entry_point in
-  let code = code_for_sym text mapping_syms sym in
-  let blockseq, ht = bs_of_code_hash symname symbols strtab code
+  let code = code_for_sym binf binf.text binf.mapping_syms sym in
+  let blockseq, ht = bs_of_code_hash symname binf.symbols binf.strtab code
 				     entry_point_ba in
   let entry_point_ref = Hashtbl.find ht entry_point_ba in
   Printf.printf "entry point %lx, ref %d\n" entry_point entry_point_ref;
@@ -294,8 +354,8 @@ let go symname =
   Typedb.gather_info blk_arr inforec;
   Printf.printf "--- minipool resolution ---\n";
   let blk_arr' =
-    Minipool.minipool_resolve elfbits ehdr shdr_arr symbols mapping_syms strtab
-			      blk_arr inforec in
+    Minipool.minipool_resolve binf.elfbits binf.ehdr binf.shdr_arr binf.symbols
+			      binf.mapping_syms binf.strtab blk_arr inforec in
   dump_blockseq blk_arr';
   Printf.printf "--- sp tracking ---\n";
   Sptracking.sp_track blk_arr';
@@ -315,22 +375,22 @@ let go symname =
 
 (*let _ = go "blah"*)
 
-let pubnames = Dwarfreader.parse_all_pubname_data debug_pubnames
+let pubnames = Dwarfreader.parse_all_pubname_data binf.debug_pubnames
 
 let debug_inf =
   List.map
     (fun (hdr, contents) ->
       let debug_inf_for_hdr =
-        offset_section debug_info hdr.pn_debug_info_offset in
+        offset_section binf.debug_info hdr.pn_debug_info_offset in
       let cu_header, after_cu_hdr = parse_comp_unit_header debug_inf_for_hdr in
       let debug_abbr_offset = cu_header.debug_abbrev_offset in
-      let debug_abbr = offset_section debug_abbrev debug_abbr_offset in
+      let debug_abbr = offset_section binf.debug_abbrev debug_abbr_offset in
       let abbrevs = parse_abbrevs debug_abbr in
       let _, die_hash, _ =
         parse_die_for_cu after_cu_hdr
 	  ~length:(Bitstring.bitstring_length debug_inf_for_hdr)
 	  ~abbrevs:abbrevs ~addr_size:cu_header.address_size
-	  ~string_sec:debug_str_sec in
+	  ~string_sec:binf.debug_str_sec in
       List.map
 	(fun (offset, name) ->
 	  (*let die_bits = offset_section debug_inf_for_hdr offset in*)
@@ -351,6 +411,8 @@ let (name, die_bits, abbrevs, die, die_hash) =
 let r, a = Function.function_type name die die_hash
 
 let ft = Ctype.resolve_type (List.hd a) die_hash
+
+let _ = Dwarfreader.parse_all_arange_data binf.debug_aranges
 
 (*let try_all =
   List.map

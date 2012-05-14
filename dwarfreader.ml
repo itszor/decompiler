@@ -947,6 +947,63 @@ let parse_all_pubname_data dwbits =
       build rest ((hdr, pubnames) :: acc) in
   build dwbits []
 
+type aranges_header =
+  {
+    ar_unit_length : int32;
+    ar_version : int;
+    ar_debug_info_offset : int32;
+    ar_address_size : int;
+    ar_segment_size : int
+  }
+
+(* There's some undocumented padding (up to "two times the pointer size") in
+   the debug_aranges header.  *)
+
+let parse_aranges_header dwbits =
+  bitmatch dwbits with
+    { unit_length : 32 : littleendian;
+      version : 16 : littleendian;
+      debug_info_offset : 32 : littleendian;
+      address_size : 8 : littleendian;
+      segment_size : 8 : littleendian;
+      _ (* padding *) : 32;
+      rest : -1 : bitstring } ->
+      Printf.printf "length : %ld\n" unit_length;
+      Printf.printf "version : %d\n" version;
+      Printf.printf "debug_info_offset : %lx\n" debug_info_offset;
+      Printf.printf "address_size : %d\n" address_size;
+      Printf.printf "segment_size : %d\n" segment_size;
+      { ar_unit_length = unit_length;
+        ar_version = version;
+	ar_debug_info_offset = debug_info_offset;
+	ar_address_size = address_size;
+	ar_segment_size = segment_size }, rest
+  | { _ } -> raise (Dwarf_parse_error "parse_aranges_header")
+
+let parse_aranges dwbits =
+  let rec build dwbits' acc =
+    bitmatch dwbits' with
+      { start_address : 32 : littleendian;
+	length : 32 : littleendian;
+	rest : -1 : bitstring } ->
+	Printf.printf "%lx : %lx\n" start_address length;
+	if start_address = 0l && length = 0l then
+          List.rev acc, rest
+	else
+	  build rest ((start_address, length) :: acc)
+    | { _ } -> raise (Dwarf_parse_error "parse_aranges") in
+  build dwbits []
+
+let parse_all_arange_data dwbits =
+  let rec build dwbits' acc =
+    if Bitstring.bitstring_length dwbits' = 0 then
+      List.rev acc
+    else
+      let hdr, contents = parse_aranges_header dwbits' in
+      let aranges_list, rest' = parse_aranges contents in
+      build rest' ((hdr, aranges_list) :: acc) in
+  build dwbits []
+
 exception Type_mismatch of string
 
 let get_attr_string attrs typ =
