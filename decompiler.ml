@@ -17,7 +17,8 @@ type binary_info = {
   strtab : Bitstring.bitstring;
   symtab : Bitstring.bitstring;
   symbols : elf_sym list;
-  mapping_syms : elf_sym list
+  mapping_syms : elf_sym list;
+  cu_hash : (int32, (int, tag_attr_die) Hashtbl.t) Hashtbl.t
 }
 
 (*let elfbits, ehdr = read_file "foo"*)
@@ -75,7 +76,8 @@ let open_file filename =
     strtab = strtab;
     symtab = symtab;
     symbols = symbols;
-    mapping_syms = mapping_syms
+    mapping_syms = mapping_syms;
+    cu_hash = Hashtbl.create 10
   }
 
 (*
@@ -391,6 +393,7 @@ let debug_inf =
 	  ~length:(Bitstring.bitstring_length debug_inf_for_hdr)
 	  ~abbrevs:abbrevs ~addr_size:cu_header.address_size
 	  ~string_sec:binf.debug_str_sec in
+      Hashtbl.add binf.cu_hash hdr.pn_debug_info_offset die_hash;
       List.map
 	(fun (offset, name) ->
 	  (*let die_bits = offset_section debug_inf_for_hdr offset in*)
@@ -408,9 +411,9 @@ let (name, die_bits, abbrevs, die, die_hash) =
   List.nth (List.nth debug_inf 1) 3
   (*Function.function_type name die_bits abbrevs die die_hash*)
 
-let r, a = Function.function_type name die die_hash
+let ft = Function.function_type name die die_hash
 
-let ft = Ctype.resolve_type (List.hd a) die_hash
+(*let ft = Ctype.resolve_type (List.hd a) die_hash*)
 
 let _ = Dwarfreader.parse_all_arange_data binf.debug_aranges
 

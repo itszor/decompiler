@@ -830,6 +830,8 @@ type attr_datum = [
   | `uref of Big_int.big_int
 ]
 
+type tag_attr_die = (dwarf_tag * (dwarf_attribute * attr_datum) list) die
+
 (* Parse a tree of DIE information.  Siblings are represented as a Die_node,
    children as a Die_tree.
    LENGTH should be the full length of the DIE section, including CU header.  *)
@@ -866,8 +868,7 @@ let parse_die_for_cu dwbits ~length ~abbrevs ~addr_size ~string_sec =
     | None -> Die_empty, dwbits in
   let dies, dwbits' = build dwbits 0 in
   dies,
-  (die_hash : (int, (dwarf_tag
-		    * (dwarf_attribute * attr_datum) list) die) Hashtbl.t),
+  (die_hash : (int, tag_attr_die) Hashtbl.t),
   dwbits'
 
 (* This is probably not useful.  *)
@@ -968,11 +969,11 @@ let parse_aranges_header dwbits =
       segment_size : 8 : littleendian;
       _ (* padding *) : 32;
       rest : -1 : bitstring } ->
-      Printf.printf "length : %ld\n" unit_length;
+      (*Printf.printf "length : %ld\n" unit_length;
       Printf.printf "version : %d\n" version;
       Printf.printf "debug_info_offset : %lx\n" debug_info_offset;
       Printf.printf "address_size : %d\n" address_size;
-      Printf.printf "segment_size : %d\n" segment_size;
+      Printf.printf "segment_size : %d\n" segment_size;*)
       { ar_unit_length = unit_length;
         ar_version = version;
 	ar_debug_info_offset = debug_info_offset;
@@ -986,7 +987,7 @@ let parse_aranges dwbits =
       { start_address : 32 : littleendian;
 	length : 32 : littleendian;
 	rest : -1 : bitstring } ->
-	Printf.printf "%lx : %lx\n" start_address length;
+	(*Printf.printf "%lx : %lx\n" start_address length;*)
 	if start_address = 0l && length = 0l then
           List.rev acc, rest
 	else
@@ -1026,10 +1027,16 @@ let get_attr_int attrs typ =
   Int32.to_int (get_attr_int32 attrs typ)
 
 let get_attr_bool attrs typ =
-  match get_attr_int32 attrs typ with
-    0l -> false
-  | 1l -> true
+  match List.assoc typ attrs with
+    `flag x -> x
   | _ -> raise (Type_mismatch "bool")
+
+(* Return value of flag, or false if the flag is not present.  *)
+let get_attr_bool_present attrs typ =
+  try
+    get_attr_bool attrs typ
+  with Not_found ->
+    false
 
 let get_attr_address attrs typ =
   match List.assoc typ attrs with

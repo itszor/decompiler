@@ -73,3 +73,9 @@ let find_symbol_by_addr symbols addr =
   List.find
     (fun sym -> sym.Elfreader.st_value = addr)
     symbols
+
+let find_symbols_for_addr_range symbols addr_lo addr_hi =
+  List.find_all
+    (fun sym -> sym.Elfreader.st_value >= addr_lo
+		&& sym.Elfreader.st_value < addr_hi)
+    symbols
