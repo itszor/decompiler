@@ -37,6 +37,12 @@ let rec resolve_type die die_hash =
   | Die_node ((DW_TAG_pointer_type, attrs), _) ->
       let targ = get_attr_deref attrs DW_AT_type die_hash in
       C_pointer (fun () -> build targ)
+  | Die_node ((DW_TAG_const_type, attrs), _) ->
+      let targ = get_attr_deref attrs DW_AT_type die_hash in
+      C_const (build targ)
+  | Die_node ((DW_TAG_volatile_type, attrs), _) ->
+      let targ = get_attr_deref attrs DW_AT_type die_hash in
+      C_volatile (build targ)
   | Die_tree ((DW_TAG_structure_type, attrs), child, _) ->
       C_struct (resolve_aggregate child die_hash)
   | Die_tree ((DW_TAG_union_type, attrs), child, _) ->
