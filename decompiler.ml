@@ -107,7 +107,7 @@ module CS = Ir.IrCS
 module CT = Ir.IrCT
 module C = Ir.Ir
 
-let eabi_pre_prologue name real_entry_point =
+let eabi_pre_prologue ft real_entry_point =
   let insns =
     [C.Set (C.Reg (CT.Hard_reg 0), C.Nullary Irtypes.Arg_in);
      C.Set (C.Reg (CT.Hard_reg 1), C.Nullary Irtypes.Arg_in);
@@ -129,7 +129,7 @@ let eabi_pre_prologue name real_entry_point =
      C.Set (C.Reg (CT.Status Irtypes.NZFlags), C.Nullary Irtypes.Special);
      C.Set (C.Reg (CT.Status Irtypes.Carry), C.Nullary Irtypes.Special)] in
   let cs = CS.of_list insns in
-  let cs = Insn_to_ir.add_incoming_args name cs in
+  let cs = Insn_to_ir.add_incoming_args ft cs in
   let cs = CS.snoc cs (C.Control (C.Jump real_entry_point)) in
   Block.make_block "entry block" cs
 
@@ -156,7 +156,7 @@ let cons_and_add_to_index blk bseq ht blockref idx =
   incr idx;
   BS.cons blk bseq
 
-let bs_of_code_hash name symbols strtab code_hash entry_pt =
+let bs_of_code_hash ft binf code_hash entry_pt =
   let idx = ref 0 in
   let ht = Hashtbl.create 10 in
   let bseq_cons blk_id blk bseq =
@@ -164,11 +164,11 @@ let bs_of_code_hash name symbols strtab code_hash entry_pt =
   let blockseq = Hashtbl.fold
     (fun addr code bseq ->
       let block_id = Irtypes.BlockAddr addr in
-      Insn_to_ir.convert_block symbols strtab block_id bseq bseq_cons addr code
+      Insn_to_ir.convert_block binf block_id bseq bseq_cons addr code
 			       code_hash)
     code_hash
     BS.empty in
-  let pre_prologue_blk = eabi_pre_prologue name entry_pt
+  let pre_prologue_blk = eabi_pre_prologue ft entry_pt
   and virtual_exit = eabi_post_epilogue () in
   let with_entry_pt
     = bseq_cons Irtypes.Virtual_entry pre_prologue_blk blockseq in
@@ -249,15 +249,18 @@ let add_stackvars_to_entry_block blk_arr entry_pt_ref regset =
   blk_arr.(entry_pt_ref).Block.code <- code'
 
 (*let binf = open_file "libGLESv2.so"*)
-let binf = open_file "tests/const"
+let binf = open_file "foo"
 
 let go symname =
   let sym = Symbols.find_named_symbol binf.symbols binf.strtab symname in
   let entry_point = sym.Elfreader.st_value in
   let entry_point_ba = Irtypes.BlockAddr entry_point in
   let code = code_for_sym binf binf.text binf.mapping_syms sym in
-  let blockseq, ht = bs_of_code_hash symname binf.symbols binf.strtab code
-				     entry_point_ba in
+  let cu_offset_for_sym = cu_offset_for_address binf entry_point in
+  let cu = Hashtbl.find binf.cu_hash cu_offset_for_sym in
+  let die = Hashtbl.find cu.ci_dieaddr entry_point in
+  let ft = Function.function_type symname die cu.ci_dietab in
+  let blockseq, ht = bs_of_code_hash ft binf code entry_point_ba in
   let entry_point_ref = Hashtbl.find ht entry_point_ba in
   Printf.printf "entry point %lx, ref %d\n" entry_point entry_point_ref;
   IrDfs.pred_succ ~whole_program:false blockseq ht Irtypes.Virtual_exit;
@@ -338,66 +341,6 @@ let debug_inf =
 (*let ft = Function.function_type name die die_hash*)
 
 (*let ft = Ctype.resolve_type (List.hd a) die_hash*)
-
-let ar = Dwarfreader.parse_all_arange_data binf.debug_aranges
-
-let index_dies_by_low_pc dieaddr_ht dies =
-  let rec scan = function
-    Die_node ((DW_TAG_compile_unit, _), children) ->
-      scan children
-  | Die_tree ((DW_TAG_subprogram, sp_attrs), children, sibl) as die ->
-      begin try
-        (*let name = get_attr_string sp_attrs DW_AT_name in*)
-        let lowpc = get_attr_address sp_attrs DW_AT_low_pc in
-	(*Printf.printf "name: '%s', low pc: %lx\n" name lowpc;*)
-	Hashtbl.add dieaddr_ht lowpc die
-      with Not_found -> ()
-      end;
-      scan children;
-      scan sibl
-  | Die_tree (_, children, sibl) ->
-      scan children;
-      scan sibl
-  | Die_node (_, sibl) ->
-      scan sibl
-  | Die_empty -> ()
-  in
-  scan dies
-
-let index_debug_data parsed_data =
-  List.iter
-    (fun (ar_hdr, ranges) ->
-      let debug_inf_for_hdr =
-        offset_section binf.debug_info ar_hdr.ar_debug_info_offset in
-	let cu_header, after_cu_hdr =
-	  parse_comp_unit_header debug_inf_for_hdr in
-	  let debug_abbr_offset = cu_header.debug_abbrev_offset in
-	  let debug_abbr = offset_section binf.debug_abbrev debug_abbr_offset in
-	  let abbrevs = parse_abbrevs debug_abbr in
-	  let cu_dies, die_hash, _ =
-	    parse_die_for_cu after_cu_hdr
-	      ~length:(Bitstring.bitstring_length debug_inf_for_hdr)
-	      ~abbrevs:abbrevs ~addr_size:cu_header.address_size
-	      ~string_sec:binf.debug_str_sec in
-	  let cu_inf = {
-	    ci_dietab = die_hash;
-	    ci_symtab = Hashtbl.create 10;
-	    ci_dieaddr = Hashtbl.create 10
-	  } in
-	  List.iter
-	    (fun (start, len) ->
-	      let syms =
-	        Symbols.find_symbols_for_addr_range binf.symbols start
-						    (Int32.add start len) in
-	      List.iter
-	        (fun sym -> Hashtbl.add cu_inf.ci_symtab sym.st_value sym)
-		syms)
-	    ranges;
-	  index_dies_by_low_pc cu_inf.ci_dieaddr cu_dies;
-	  Hashtbl.add binf.cu_hash ar_hdr.ar_debug_info_offset cu_inf)
-    parsed_data
-
-let _ = index_debug_data ar 
 
 (*let try_all =
   List.map

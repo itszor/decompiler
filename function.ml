@@ -9,35 +9,6 @@ type function_info =
     prototyped : bool
   }
 
-let type_for_function name =
-  match name with
-    "foo" ->
-      { args = [| C_int; C_int; C_int; C_int; C_int; C_int |];
-        return = C_int;
-	local = false;
-	prototyped = true }
-  | "blah" ->
-      { args = [| C_int; C_int |];
-        return = C_int;
-	local = false;
-	prototyped = true }
-  | "blah2" ->
-      { args = [| C_pointer (fun () -> C_int) |];
-        return = C_int;
-	local = false;
-	prototyped = true }
-  | "main" ->
-      { args = [| |];
-        return = C_int;
-	local = false;
-	prototyped = true }
-  | "loop" ->
-      { args = [| C_int |];
-        return = C_int;
-	local = false;
-	prototyped = true }
-  | _ -> raise Not_found
-
 let function_args die die_hash =
   let rec makelist die acc argno =
     match die with

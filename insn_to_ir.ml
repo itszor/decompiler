@@ -172,8 +172,7 @@ let find_symbol symbols strtab addr =
   with Not_found ->
     CT.Absolute addr
 
-let fn_args name =
-  let ft = Function.type_for_function name in
+let fn_args ft_args =
   let args_from_ctype = Array.mapi
     (fun i typ ->
       match i with
@@ -181,11 +180,10 @@ let fn_args name =
       | n -> C.Load (Irtypes.Word,
 		     C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
 			       C.Immed (Int32.of_int ((n - 4) * 4)))))
-    ft.Function.args in
+    ft_args in
   C.Nary (Irtypes.Fnargs, Array.to_list args_from_ctype)
 
-let add_incoming_args name code =
-  let ft = Function.type_for_function name in
+let add_incoming_args ft code =
   let (_, code') = Array.fold_left
     (fun (argn, code) arg ->
       match argn with
@@ -200,25 +198,30 @@ let add_incoming_args name code =
     ft.Function.args in
   code'
 
-let fn_ret name =
-  let ft = Function.type_for_function name in
-  match ft.Function.return with
+let fn_ret = function
     Ctype.C_void -> C.Nullary Irtypes.Nop
   | _ -> C.Set (C.Reg (CT.Hard_reg 0), C.Entity CT.Arg_out)
 
-let convert_bl symbols strtab addr insn =
+let convert_bl binf addr insn =
   let dest = insn.read_operands.(0) in
   match dest with
     PC_relative i ->
       let no_arg = C.Nullary Irtypes.Nop in
       let ret_addr = Irtypes.BlockAddr (Int32.add addr 4l) in
       let call_addr = Int32.add addr i in
-      let sym_or_addr = find_symbol symbols strtab call_addr in
+      let cu_for_dest = Binary_info.cu_offset_for_address binf call_addr in
+      let cu_inf = Hashtbl.find binf.Binary_info.cu_hash cu_for_dest in
+      let sym = Hashtbl.find cu_inf.Binary_info.ci_symtab call_addr
+      and die = Hashtbl.find cu_inf.Binary_info.ci_dieaddr call_addr in
+      let symname = Symbols.symbol_name sym binf.Binary_info.strtab in
+      let ct_sym = CT.Symbol (symname, sym) in
+      (*let sym_or_addr = find_symbol binf.Binary_info.symbols
+				    binf.Binary_info.strtab call_addr in*)
+      let fn_inf = Function.function_type symname die
+					  cu_inf.Binary_info.ci_dietab in
       let abi, passes, returns =
-	match sym_or_addr with
-          CT.Symbol (symname, _) -> CT.EABI, fn_args symname, fn_ret symname
-	| _ -> CT.Unknown_abi, no_arg, no_arg in
-      C.Control (C.Call_ext (abi, sym_or_addr, passes, ret_addr, returns))
+	CT.EABI, fn_args fn_inf.Function.args, fn_ret fn_inf.Function.return in
+      C.Control (C.Call_ext (abi, ct_sym, passes, ret_addr, returns))
   | _ -> failwith "unexpected bx operand"
 
 let convert_cmp addr insn =
@@ -283,7 +286,7 @@ let finish_block block_id ?chain insnlist bseq bseq_cons =
   let blk = Block.make_block name insnlist' in
   bseq_cons block_id blk bseq
 
-let rec convert_insn symbols strtab addr insn ilist blk_id bseq bseq_cons =
+let rec convert_insn binf addr insn ilist blk_id bseq bseq_cons =
   let append insn =
     CS.snoc ilist insn, blk_id, bseq
   and same_blk ilist =
@@ -305,16 +308,14 @@ let rec convert_insn symbols strtab addr insn ilist blk_id bseq bseq_cons =
   | Str ainf -> same_blk (convert_store addr ainf insn Irtypes.Word ilist)
   | Strb ainf -> same_blk (convert_store addr ainf insn Irtypes.U8 ilist)
   | Bx -> append (convert_bx addr insn)
-  | Bl -> append (convert_bl symbols strtab addr insn)
+  | Bl -> append (convert_bl binf addr insn)
   | B -> append (convert_branch addr insn)
   | Conditional (cond, B) -> append (convert_cbranch cond addr insn)
   | Conditional (cond, _) ->
-      convert_conditional symbols strtab addr cond insn ilist blk_id bseq
-			  bseq_cons
+      convert_conditional binf addr cond insn ilist blk_id bseq bseq_cons
   | x -> raise (Unsupported_opcode x)
 
-and convert_conditional symbols strtab addr cond insn ilist blk_id bseq
-			bseq_cons =
+and convert_conditional binf addr cond insn ilist blk_id bseq bseq_cons =
   let cond_passed = create_blkref () in
   let after_insn = create_blkref () in
   let cond = C.Control (C.Branch (convert_condition cond, cond_passed,
@@ -324,20 +325,19 @@ and convert_conditional symbols strtab addr cond insn ilist blk_id bseq
   let cond_ilist, cond_blk_id, bseq'' =
     match insn.opcode with
       Conditional (_, op) ->
-        convert_insn symbols strtab addr { insn with opcode = op } CS.empty
-		     cond_passed bseq' bseq_cons
+        convert_insn binf addr { insn with opcode = op } CS.empty cond_passed
+		     bseq' bseq_cons
     | _ -> failwith "not a conditional insn" in
   let cond_ilist' = CS.snoc cond_ilist (C.Control (C.Jump after_insn)) in
   let bseq'3 = finish_block cond_blk_id cond_ilist' bseq'' bseq_cons in
   CS.empty, after_insn, bseq'3
 
-let convert_block symbols strtab block_id bseq bseq_cons addr insn_list
-		  code_hash =
+let convert_block binf block_id bseq bseq_cons addr insn_list code_hash =
   let code_deque, blk_id', bseq', last_offset = Deque.fold_left
     (fun (acc, blk_id, bseq, offset) insn ->
       let ilist', blk_id', bseq'
-        = convert_insn symbols strtab (Int32.add addr offset) insn acc blk_id
-		       bseq bseq_cons in
+        = convert_insn binf (Int32.add addr offset) insn acc blk_id bseq
+		       bseq_cons in
       ilist', blk_id', bseq', Int32.add offset 4l)
     (CS.empty, block_id, bseq, 0l)
     insn_list in
