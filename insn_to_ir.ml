@@ -126,6 +126,44 @@ let convert_store addr ainf insn access ilist =
     CS.snoc ilist (C.Set (w_base, addr))
   end
 
+let convert_ldm addr minf insn ilist =
+  ilist
+
+(* For STM:
+   read operands are: [base reg, first reg in list, ..., last reg in list].
+   write operands are: [] (empty list) or [base reg] for writeback.
+*)
+
+let convert_stm addr minf insn ilist =
+  let offset = ref 0 in
+  begin match minf.before, minf.increment with
+    false, _ -> offset := 0
+  | true, false -> offset := -4
+  | true, true -> offset := 4
+  end;
+  let base_reg = convert_operand addr insn.read_operands.(0) in
+  let ilist_r = ref ilist in
+  for i = 1 to Array.length insn.read_operands - 1 do
+    let addr' = C.Binary (Irtypes.Add, base_reg,
+			  C.Immed (Int32.of_int !offset)) in
+    let store = C.Store (Irtypes.Word, addr',
+			 convert_operand addr insn.read_operands.(i)) in
+    ilist_r := CS.snoc !ilist_r store;
+    if minf.increment then
+      offset := !offset + 4
+    else
+      offset := !offset - 4
+  done;
+  if Array.length insn.write_operands == 1 then begin
+    let stored_regs = Array.length insn.read_operands - 1 in
+    let offset = if minf.increment then stored_regs * 4 else -stored_regs * 4 in
+    let writeback = C.Set (base_reg,
+			   C.Binary (Irtypes.Add, base_reg,
+				     C.Immed (Int32.of_int offset))) in
+    ilist_r := CS.snoc !ilist_r writeback
+  end;
+  !ilist_r
+
 let convert_bx addr insn =
   let dest = insn.read_operands.(0) in
   match dest with
@@ -202,6 +240,8 @@ let fn_ret = function
     Ctype.C_void -> C.Nullary Irtypes.Nop
   | _ -> C.Set (C.Reg (CT.Hard_reg 0), C.Entity CT.Arg_out)
 
+exception Calling of string
+
 let convert_bl binf addr insn =
   let dest = insn.read_operands.(0) in
   match dest with
@@ -209,19 +249,32 @@ let convert_bl binf addr insn =
       let no_arg = C.Nullary Irtypes.Nop in
       let ret_addr = Irtypes.BlockAddr (Int32.add addr 4l) in
       let call_addr = Int32.add addr i in
-      let cu_for_dest = Binary_info.cu_offset_for_address binf call_addr in
-      let cu_inf = Hashtbl.find binf.Binary_info.cu_hash cu_for_dest in
-      let sym = Hashtbl.find cu_inf.Binary_info.ci_symtab call_addr
-      and die = Hashtbl.find cu_inf.Binary_info.ci_dieaddr call_addr in
-      let symname = Symbols.symbol_name sym binf.Binary_info.strtab in
-      let ct_sym = CT.Symbol (symname, sym) in
-      (*let sym_or_addr = find_symbol binf.Binary_info.symbols
-				    binf.Binary_info.strtab call_addr in*)
-      let fn_inf = Function.function_type symname die
-					  cu_inf.Binary_info.ci_dietab in
-      let abi, passes, returns =
-	CT.EABI, fn_args fn_inf.Function.args, fn_ret fn_inf.Function.return in
-      C.Control (C.Call_ext (abi, ct_sym, passes, ret_addr, returns))
+      let targ_sec = Elfreader.get_section_num_by_addr binf.Binary_info.elfbits
+		       binf.Binary_info.ehdr binf.Binary_info.shdr_arr
+		       call_addr in
+      let targ_sec_name = Elfreader.get_section_name binf.Binary_info.elfbits
+			    binf.Binary_info.ehdr binf.Binary_info.shdr_arr
+			    targ_sec in
+      begin match targ_sec_name with
+        ".text" ->
+	  let cu_for_dest = Binary_info.cu_offset_for_address binf call_addr in
+	  let cu_inf = Hashtbl.find binf.Binary_info.cu_hash cu_for_dest in
+	  let sym = Hashtbl.find cu_inf.Binary_info.ci_symtab call_addr
+	  and die = Hashtbl.find cu_inf.Binary_info.ci_dieaddr call_addr in
+	  let symname = Symbols.symbol_name sym binf.Binary_info.strtab in
+	  let ct_sym = CT.Symbol (symname, sym) in
+	  (*let sym_or_addr = find_symbol binf.Binary_info.symbols
+					binf.Binary_info.strtab call_addr in*)
+	  let fn_inf = Function.function_type symname die
+					      cu_inf.Binary_info.ci_dietab in
+	  let abi, passes, returns =
+	    CT.EABI, fn_args fn_inf.Function.args,
+	    fn_ret fn_inf.Function.return in
+	  C.Control (C.Call_ext (abi, ct_sym, passes, ret_addr, returns))
+      | ".plt" -> C.Control (C.Call_ext (CT.Plt_call, CT.Absolute call_addr,
+			     no_arg, ret_addr, no_arg))
+      | x -> raise (Calling x)
+      end
   | _ -> failwith "unexpected bx operand"
 
 let convert_cmp addr insn =
@@ -307,6 +360,8 @@ let rec convert_insn binf addr insn ilist blk_id bseq bseq_cons =
   | Ldrb ainf -> same_blk (convert_load addr ainf insn Irtypes.U8 ilist)
   | Str ainf -> same_blk (convert_store addr ainf insn Irtypes.Word ilist)
   | Strb ainf -> same_blk (convert_store addr ainf insn Irtypes.U8 ilist)
+  | Ldm minf -> same_blk (convert_ldm addr minf insn ilist)
+  | Stm minf -> same_blk (convert_stm addr minf insn ilist)
   | Bx -> append (convert_bx addr insn)
   | Bl -> append (convert_bl binf addr insn)
   | B -> append (convert_branch addr insn)

@@ -27,7 +27,7 @@ let function_args die die_hash =
   makelist die [] 0
 
 let function_type name die die_hash =
-  (*Format.printf "Function '%s'@." name;*)
+  Format.printf "Function '%s'@." name;
   match die with
     Die_tree ((DW_TAG_subprogram, attrs), child, _) ->
       let return_type =

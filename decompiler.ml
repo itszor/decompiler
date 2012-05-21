@@ -226,6 +226,13 @@ let print_blockseq_dfsinfo bseq =
   done
 
 let dump_blockseq bs =
+  BS.iter
+    (fun block ->
+      Printf.printf "block id \"%s\":\n" block.Block.id;
+      Printf.printf "%s\n" (Ir.Ir.string_of_codeseq block.Block.code))
+    bs
+
+let dump_blockarr bs =
   Array.iter
     (fun block ->
       Printf.printf "block id \"%s\":\n" block.Block.id;
@@ -248,8 +255,8 @@ let add_stackvars_to_entry_block blk_arr entry_pt_ref regset =
     code in
   blk_arr.(entry_pt_ref).Block.code <- code'
 
-(*let binf = open_file "libGLESv2.so"*)
-let binf = open_file "foo"
+let binf = open_file "libGLESv2.so"
+(*let binf = open_file "foo"*)
 
 let go symname =
   let sym = Symbols.find_named_symbol binf.symbols binf.strtab symname in
@@ -261,6 +268,8 @@ let go symname =
   let die = Hashtbl.find cu.ci_dieaddr entry_point in
   let ft = Function.function_type symname die cu.ci_dietab in
   let blockseq, ht = bs_of_code_hash ft binf code entry_point_ba in
+  Printf.printf "--- initial blockseq ---\n";
+  dump_blockseq blockseq;
   let entry_point_ref = Hashtbl.find ht entry_point_ba in
   Printf.printf "entry point %lx, ref %d\n" entry_point entry_point_ref;
   IrDfs.pred_succ ~whole_program:false blockseq ht Irtypes.Virtual_exit;
@@ -277,7 +286,7 @@ let go symname =
   let regset = IrPhiPlacement.place blk_arr in
   IrPhiPlacement.rename blk_arr 0 regset;
   Printf.printf "after SSA conversion:\n";
-  dump_blockseq blk_arr;
+  dump_blockarr blk_arr;
   Printf.printf "--- gather info (1) ---\n";
   let inforec = Typedb.create_info () in
   Typedb.gather_info blk_arr inforec;
@@ -285,24 +294,24 @@ let go symname =
   let blk_arr' =
     Minipool.minipool_resolve binf.elfbits binf.ehdr binf.shdr_arr binf.symbols
 			      binf.mapping_syms binf.strtab blk_arr inforec in
-  dump_blockseq blk_arr';
+  dump_blockarr blk_arr';
   Printf.printf "--- sp tracking ---\n";
   Sptracking.sp_track blk_arr';
-  dump_blockseq blk_arr';
+  dump_blockarr blk_arr';
   Printf.printf "--- SSA conversion (2) ---\n";
   let regset2 = IrPhiPlacement.place blk_arr' in
   (*add_stackvars_to_entry_block blk_arr' entry_point_ref regset2;*)
   IrPhiPlacement.rename blk_arr' 0 regset2;
-  dump_blockseq blk_arr';
+  dump_blockarr blk_arr';
   Printf.printf "--- gather info (2) ---\n";
   Typedb.gather_info blk_arr' inforec;
   Typedb.print_info inforec.Typedb.infotag;
   Typedb.print_implied_info inforec.Typedb.implications;
   Printf.printf "--- eliminate phi nodes ---\n";
   IrPhiPlacement.eliminate blk_arr';
-  dump_blockseq blk_arr'
+  dump_blockarr blk_arr'
 
-(*let _ = go "blah"*)
+let _ = go "InitAccumUSECodeBlocks"
 
 let pubnames = Dwarfreader.parse_all_pubname_data binf.debug_pubnames
 

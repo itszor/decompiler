@@ -50,10 +50,81 @@ let parse_ehdr elfbits =
   | { _ } ->
       raise (Elf_read_error "Can't parse Elf Ehdr")
 
+type elf_sht = SHT_NULL
+	     | SHT_PROGBITS
+	     | SHT_SYMTAB
+	     | SHT_STRTAB
+	     | SHT_RELA
+	     | SHT_HASH
+	     | SHT_DYNAMIC
+	     | SHT_NOTE
+	     | SHT_NOBITS
+	     | SHT_REL
+	     | SHT_SHLIB
+	     | SHT_DYNSYM
+	     | SHT_INIT_ARRAY
+	     | SHT_FINI_ARRAY
+	     | SHT_PREINIT_ARRAY
+	     | SHT_GROUP
+	     | SHT_SYMTAB_SHNDX
+	     | SHT_NUM
+	     | SHT_LOOS
+	     | SHT_GNU_ATTRIBUTES
+	     | SHT_GNU_HASH
+	     | SHT_GNU_LIBLIST
+	     | SHT_GNU_CHECKSUM
+	     | SHT_CHECKSUM
+	     | SHT_GNU_verdef
+	     | SHT_GNU_verneed
+	     | SHT_GNU_versym
+	     | SHT_LOPROC
+	     | SHT_ARM_EXIDX
+	     | SHT_ARM_PREEMPTMAP
+	     | SHT_ARM_ATTRIBUTES
+	     | SHT_HIPROC
+	     | SHT_LOUSER
+	     | SHT_HIUSER
+
+let decode_sht = function
+    0l -> SHT_NULL
+  | 1l -> SHT_PROGBITS
+  | 2l -> SHT_SYMTAB
+  | 3l -> SHT_STRTAB
+  | 4l -> SHT_RELA
+  | 5l -> SHT_HASH
+  | 6l -> SHT_DYNAMIC
+  | 7l -> SHT_NOTE
+  | 8l -> SHT_NOBITS
+  | 9l -> SHT_REL
+  | 10l -> SHT_SHLIB
+  | 11l -> SHT_DYNSYM
+  | 14l -> SHT_INIT_ARRAY
+  | 15l -> SHT_FINI_ARRAY
+  | 16l -> SHT_PREINIT_ARRAY
+  | 17l -> SHT_GROUP
+  | 18l -> SHT_SYMTAB_SHNDX
+  | 19l -> SHT_NUM
+  | 0x60000000l -> SHT_LOOS
+  | 0x6ffffff5l -> SHT_GNU_ATTRIBUTES
+  | 0x6ffffff6l -> SHT_GNU_HASH
+  | 0x6ffffff7l -> SHT_GNU_LIBLIST
+  | 0x6ffffff8l -> SHT_CHECKSUM
+  | 0x6ffffffdl -> SHT_GNU_verdef
+  | 0x6ffffffel -> SHT_GNU_verneed
+  | 0x6fffffffl -> SHT_GNU_versym
+  | 0x70000000l -> SHT_LOPROC
+  | 0x70000001l -> SHT_ARM_EXIDX
+  | 0x70000002l -> SHT_ARM_PREEMPTMAP
+  | 0x70000003l -> SHT_ARM_ATTRIBUTES
+  | 0x7fffffffl -> SHT_HIPROC
+  | 0x80000000l -> SHT_LOUSER
+  | 0x8fffffffl -> SHT_HIUSER
+  | _ -> failwith "decode_sht"
+
 type elf_shdr =
 {
   sh_name : int32;
-  sh_type : int32;
+  sh_type : elf_sht;
   sh_flags : int32;
   sh_addr : int32;
   sh_offset : int32;
@@ -80,7 +151,7 @@ let parse_shdr elfbits =
 					(* Entry size if section holds
 					   table.  *)
       { sh_name = sh_name;
-        sh_type = sh_type;
+        sh_type = decode_sht sh_type;
 	sh_flags = sh_flags;
 	sh_addr = sh_addr;
 	sh_offset = sh_offset;
@@ -295,7 +366,8 @@ let get_section_num_by_addr elfbits ehdr shdr_arr addr =
   let found_sec = ref None in
   for i = 1 to Array.length shdr_arr - 1 do
     if addr >= shdr_arr.(i).sh_addr
-       && addr < (Int32.add shdr_arr.(i).sh_addr shdr_arr.(i).sh_size) then
+       && addr < (Int32.add shdr_arr.(i).sh_addr shdr_arr.(i).sh_size)
+       && !found_sec = None && shdr_arr.(i).sh_type = SHT_PROGBITS then
       found_sec := Some i
   done;
   match !found_sec with

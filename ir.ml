@@ -22,6 +22,7 @@ module IrCT =
 		| Caller_restored
     type abi = Branch_exchange
 	     | Unknown_abi
+	     | Plt_call
 	     | EABI
 
     type blockref = int
@@ -97,6 +98,7 @@ module IrCT =
     let string_of_abi = function
       Branch_exchange -> "branch_exchange"
     | Unknown_abi -> "unknown_abi"
+    | Plt_call -> "plt_call"
     | EABI -> "eabi"
     
     let string_of_immed i = Int32.to_string i
