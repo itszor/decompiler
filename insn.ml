@@ -73,7 +73,8 @@ and access_info =
 and multimem_info =
   {
     before : bool;
-    increment : bool
+    increment : bool;
+    mm_writeback : bool
   }
 
 type insn =

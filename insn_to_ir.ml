@@ -126,8 +126,50 @@ let convert_store addr ainf insn access ilist =
     CS.snoc ilist (C.Set (w_base, addr))
   end
 
+(* For LDM:
+   read operand is: [base reg]
+   write operands are: [<optional writeback reg,> reg list...]
+*)
+
 let convert_ldm addr minf insn ilist =
-  ilist
+  let offset = ref 0 in
+  begin match minf.before, minf.increment with
+    false, _ -> offset := 0
+  | true, false -> offset := -4
+  | true, true -> offset := 4
+  end;
+  let base_reg = convert_operand addr insn.read_operands.(0) in
+  let ilist_r = ref ilist in
+  let jump_to_tmp = ref None in
+  let reglist_start = if minf.mm_writeback then 1 else 0 in
+  for i = reglist_start to Array.length insn.write_operands - 1 do
+    let addr' = C.Binary (Irtypes.Add, base_reg,
+			  C.Immed (Int32.of_int !offset)) in
+    let reg, loads_pc = convert_maybe_pc_operand insn.write_operands.(i) in
+    let load = C.Set (reg, C.Load (Irtypes.Word, addr')) in
+    ilist_r := CS.snoc !ilist_r load;
+    if minf.increment then
+      offset := !offset + 4
+    else
+      offset := !offset - 4;
+    if loads_pc then
+      jump_to_tmp := Some reg
+  done;
+  if minf.mm_writeback then begin
+    let stored_regs = Array.length insn.write_operands - 1 in
+    let offset = if minf.increment then stored_regs * 4 else -stored_regs * 4 in
+    let writeback = C.Set (base_reg,
+			   C.Binary (Irtypes.Add, base_reg,
+				     C.Immed (Int32.of_int offset))) in
+    ilist_r := CS.snoc !ilist_r writeback
+  end;
+  begin match !jump_to_tmp with
+    None -> ()
+  | Some tmp ->
+      ilist_r := CS.snoc !ilist_r
+		   (C.Control (C.CompJump_ext (CT.Branch_exchange, tmp)))
+  end;
+  !ilist_r
 
 (* For STM:
    read operands are: [base reg, first reg in list, ..., last reg in list].
@@ -154,7 +196,7 @@ let convert_stm addr minf insn ilist =
     else
       offset := !offset - 4
   done;
-  if Array.length insn.write_operands == 1 then begin
+  if minf.mm_writeback then begin
     let stored_regs = Array.length insn.read_operands - 1 in
     let offset = if minf.increment then stored_regs * 4 else -stored_regs * 4 in
     let writeback = C.Set (base_reg,
@@ -330,7 +372,7 @@ let finish_block block_id ?chain insnlist bseq bseq_cons =
 	end
     end else begin
       match chain with
-	None -> insnlist
+	None -> failwith "empty block and no chain?"
       | Some chain ->
 	  let fallthru = C.Control (C.Jump chain) in
 	  CS.snoc insnlist fallthru

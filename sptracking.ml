@@ -67,6 +67,8 @@ let sp_track blk_arr =
       when sp_derived base ->
       let offset' = derived_offset base offset in
       Hashtbl.add spht (r, rn) (offset' - Int32.to_int imm)
+  | C.Set (C.SSAReg (r, rn), base) when sp_derived base ->
+      Hashtbl.add spht (r, rn) offset
   | x -> Printf.printf "Don't know how to derive SP from '%s'\n"
 	   (C.string_of_code x) in
   let underive_sp insn r rn offset =

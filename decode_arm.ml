@@ -604,7 +604,8 @@ let decode_stm cond bits24_0 =
   bitmatch bits24_0 with
     { before : 1; increment : 1; false : 1; writeback : 1; false : 1;
       basereg : 4; reglist : 16 } ->
-      let info = { before = before; increment = increment } in
+      let info = { before = before; increment = increment;
+		   mm_writeback = writeback } in
       let wr_operands = if writeback then [| hard_reg basereg |] else [| |] in
       let regs = hard_reg_list reglist in
       {
@@ -619,11 +620,12 @@ let decode_ldm cond ~exception_return bits24_0 =
   bitmatch bits24_0 with
     { before : 1; increment : 1; false : 1; writeback : 1; true : 1;
       basereg : 4; reglist : 16 } ->
-      let info = { before = before; increment = increment } in
+      let info = { before = before; increment = increment;
+		   mm_writeback = writeback } in
       let wr_operands = if writeback then [| hard_reg basereg |] else [| |] in
       let regs = hard_reg_list reglist in
       {
-        opcode = conditionalise cond (Stm info);
+        opcode = conditionalise cond (Ldm info);
 	read_operands = [| hard_reg basereg |];
 	write_operands = Array.append wr_operands regs;
 	write_flags = []; read_flags = []; clobber_flags = []
