@@ -186,19 +186,31 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
 	          (* Only interested in uses, not defs.  *)
 	          C.Set (C.Protect lhs, rhs)
 	      | C.Reg ru ->
-		  let runum = Hashtbl.find rnum_htab ru in
-		  let idx = List.hd stack.(runum) in
-		  C.SSAReg (ru, idx)
+		  begin try
+		    let runum = Hashtbl.find rnum_htab ru in
+		    let idx = List.hd stack.(runum) in
+		    C.SSAReg (ru, idx)
+		  with Not_found as e ->
+		    Printf.fprintf stderr "reg %s not in rnum_htab\n"
+		      (CT.string_of_reg ru);
+		    raise e
+		  end
 	      | x -> x)
 	      node in
 	    let node'' = C.map
 	      (function
 	        C.Set (C.Reg rd, rhs) ->
-		    let rdnum = Hashtbl.find rnum_htab rd in
-		    count.(rdnum) <- count.(rdnum) + 1;
-		    let idx = count.(rdnum) in
-		    stack.(rdnum) <- idx :: stack.(rdnum);
-		    C.Protect (C.Set (C.SSAReg (rd, idx), rhs))
+		    begin try
+		      let rdnum = Hashtbl.find rnum_htab rd in
+		      count.(rdnum) <- count.(rdnum) + 1;
+		      let idx = count.(rdnum) in
+		      stack.(rdnum) <- idx :: stack.(rdnum);
+		      C.Protect (C.Set (C.SSAReg (rd, idx), rhs))
+		    with Not_found as e ->
+		      Printf.fprintf stderr "reg %s not in rnum_htab\n"
+		        (CT.string_of_reg rd);
+		      raise e
+		    end
 	      | x -> x)
 	      node' in
 	    CS.snoc codeseq node'')

@@ -206,20 +206,136 @@ let parse_syminfo elfbits =
   | { _ } ->
       raise (Elf_read_error "Can't parse syminfo")
 
+type arm_rel = R_ARM_NONE
+	     | R_ARM_PC24
+	     | R_ARM_ABS32
+	     | R_ARM_REL32
+	     | R_ARM_PC13
+	     | R_ARM_ABS16
+	     | R_ARM_ABS12
+	     | R_ARM_THM_ABS5
+	     | R_ARM_ABS8
+	     | R_ARM_SBREL32
+	     | R_ARM_THM_PC22
+	     | R_ARM_THM_PC8
+	     | R_ARM_AMP_VCALL9
+	     | R_ARM_SWI24
+	     | R_ARM_THM_SWI8
+	     | R_ARM_XPC25
+	     | R_ARM_THM_XPC22
+	     | R_ARM_TLS_DTPMOD32
+	     | R_ARM_TLS_DTPOFF32
+	     | R_ARM_TLS_TPOFF32
+	     | R_ARM_COPY
+	     | R_ARM_GLOB_DAT
+	     | R_ARM_JUMP_SLOT
+	     | R_ARM_RELATIVE
+	     | R_ARM_GOTOFF
+	     | R_ARM_GOTPC
+	     | R_ARM_GOT32
+	     | R_ARM_PLT32
+	     | R_ARM_ALU_PCREL_7_0
+	     | R_ARM_ALU_PCREL_15_8
+	     | R_ARM_ALU_PCREL_23_15
+	     | R_ARM_ALU_SBREL_11_0
+	     | R_ARM_ALU_SBREL_19_12
+	     | R_ARM_ALU_SBREL_27_20
+	     | R_ARM_GNU_VTENTRY
+	     | R_ARM_GNU_VTINHERIT
+	     | R_ARM_THM_PC11
+	     | R_ARM_THM_PC9
+	     | R_ARM_TLS_GD32
+	     | R_ARM_TLS_LDM32
+	     | R_ARM_TLS_LDO32
+	     | R_ARM_TLS_IE32
+	     | R_ARM_TLS_LE32
+	     | R_ARM_RXPC25
+	     | R_ARM_RSBREL32
+	     | R_ARM_THM_RPC22
+	     | R_ARM_RREL32
+	     | R_ARM_RABS22
+	     | R_ARM_RPC24
+	     | R_ARM_RBASE
+
+let decode_arm_rel = function
+    0 -> R_ARM_NONE
+  | 1 -> R_ARM_PC24
+  | 2 -> R_ARM_ABS32
+  | 3 -> R_ARM_REL32
+  | 4 -> R_ARM_PC13
+  | 5 -> R_ARM_ABS16
+  | 6 -> R_ARM_ABS12
+  | 7 -> R_ARM_THM_ABS5
+  | 8 -> R_ARM_ABS8
+  | 9 -> R_ARM_SBREL32
+  | 10 -> R_ARM_THM_PC22
+  | 11 -> R_ARM_THM_PC8
+  | 12 -> R_ARM_AMP_VCALL9
+  | 13 -> R_ARM_SWI24
+  | 14 -> R_ARM_THM_SWI8
+  | 15 -> R_ARM_XPC25
+  | 16 -> R_ARM_THM_XPC22
+  | 17 -> R_ARM_TLS_DTPMOD32
+  | 18 -> R_ARM_TLS_DTPOFF32
+  | 19 -> R_ARM_TLS_TPOFF32
+  | 20 -> R_ARM_COPY
+  | 21 -> R_ARM_GLOB_DAT
+  | 22 -> R_ARM_JUMP_SLOT
+  | 23 -> R_ARM_RELATIVE
+  | 24 -> R_ARM_GOTOFF
+  | 25 -> R_ARM_GOTPC
+  | 26 -> R_ARM_GOT32
+  | 27 -> R_ARM_PLT32
+  | 32 -> R_ARM_ALU_PCREL_7_0
+  | 33 -> R_ARM_ALU_PCREL_15_8
+  | 34 -> R_ARM_ALU_PCREL_23_15
+  | 35 -> R_ARM_ALU_SBREL_11_0
+  | 36 -> R_ARM_ALU_SBREL_19_12
+  | 37 -> R_ARM_ALU_SBREL_27_20
+  | 100 -> R_ARM_GNU_VTENTRY
+  | 101 -> R_ARM_GNU_VTINHERIT
+  | 102 -> R_ARM_THM_PC11
+  | 103 -> R_ARM_THM_PC9
+  | 104 -> R_ARM_TLS_GD32
+  | 105 -> R_ARM_TLS_LDM32
+  | 106 -> R_ARM_TLS_LDO32
+  | 107 -> R_ARM_TLS_IE32
+  | 108 -> R_ARM_TLS_LE32
+  | 249 -> R_ARM_RXPC25
+  | 250 -> R_ARM_RSBREL32
+  | 251 -> R_ARM_THM_RPC22
+  | 252 -> R_ARM_RREL32
+  | 253 -> R_ARM_RABS22
+  | 254 -> R_ARM_RPC24
+  | 255 -> R_ARM_RBASE
+
 type elf_rel =
 {
   rel_offset : int32;
-  rel_info : int32
+  rel_type : arm_rel;
+  rel_sym_index : int
 }
 
 let parse_rel elfbits =
   bitmatch elfbits with
     { r_offset : 32 : littleendian;	(* Address.  *)
-      r_info : 32 : littleendian } ->	(* Relocation type and symbol index.  *)
+      r_info : 32 : littleendian;
+      rest : -1 : bitstring } ->	(* Relocation type and symbol index.  *)
       { rel_offset = r_offset;
-        rel_info = r_info }
+        rel_type = decode_arm_rel ((Int32.to_int r_info) land 255);
+	rel_sym_index = (Int32.to_int (Int32.shift_right_logical r_info 8))},
+      rest
   | { _ } ->
       raise (Elf_read_error "Can't parse rel")
+
+let parse_rel_sec elfbits =
+  let rec scan acc bits =
+    let rel, more = parse_rel bits in
+    if Bitstring.bitstring_length more = 0 then
+      Array.of_list (List.rev acc)
+    else
+      scan (rel::acc) more in
+  scan [] elfbits
 
 type elf_rela =
 {

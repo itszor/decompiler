@@ -311,7 +311,7 @@ let go symname =
   IrPhiPlacement.eliminate blk_arr';
   dump_blockarr blk_arr'
 
-let _ = go "InitAccumUSECodeBlocks"
+(*let _ = go "InitAccumUSECodeBlocks"*)
 
 let pubnames = Dwarfreader.parse_all_pubname_data binf.debug_pubnames
 
