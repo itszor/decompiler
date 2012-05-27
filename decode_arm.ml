@@ -496,7 +496,7 @@ let decode_mem ?(unprivileged=false) ?(byte=false) ~load ~reg cond bits25_0 =
 	    | false, false -> [| |]
 	    | true, true -> [| hard_reg rt; hard_reg rn |]
 	    | true, false -> [| hard_reg rt |] in
-	  let simm = sign_extend (Int32.of_int imm) 11 in
+	  let simm = sign_extend (Int32.of_int imm) 12 in
 	  let immval =
 	    if u then Immediate simm
 	    else Immediate (Int32.neg simm) in
@@ -580,7 +580,7 @@ let decode_media cond ibits =
 let decode_branch cond ~link bits23_0 =
   bitmatch bits23_0 with
     { bits : 24 } ->
-      let offset = sign_extend (Int32.of_int (bits * 4)) 23 in
+      let offset = sign_extend (Int32.of_int (bits * 4)) 24 in
       (* Do the pipelining offset here!  *)
       let offset = Int32.add offset 8l in
       let opcode = if link then Bl else B in

@@ -21,7 +21,7 @@ let read_symbols symbits =
     | _ ->
       let sym, more = Elfreader.parse_sym symbits in
       scan (sym::symbol_list) more in
-  scan [] symbits
+  List.rev (scan [] symbits)
 
 let symbol_name symbol strtab =
   Elfreader.get_string strtab (Int32.to_int symbol.Elfreader.st_name)

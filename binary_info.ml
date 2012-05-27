@@ -24,8 +24,12 @@ type binary_info = {
   text : Bitstring.bitstring;
   strtab : Bitstring.bitstring;
   symtab : Bitstring.bitstring;
+  plt : Bitstring.bitstring;
   rel_plt : Bitstring.bitstring;
+  dynsym : Bitstring.bitstring;
+  dynstr : Bitstring.bitstring;
   symbols : elf_sym list;
+  dyn_symbols : elf_sym list;
   mapping_syms : elf_sym list;
   (* Parsed arange data.  *)
   parsed_aranges : (aranges_header * (int32 * int32) list) list;
@@ -111,8 +115,12 @@ let open_file filename =
   let text = get_section_by_name elfbits ehdr shdr_arr ".text" in
   let strtab = get_section_by_name elfbits ehdr shdr_arr ".strtab" in
   let symtab = get_section_by_name elfbits ehdr shdr_arr ".symtab" in
+  let plt = get_section_by_name elfbits ehdr shdr_arr ".plt" in
   let rel_plt = get_section_by_name elfbits ehdr shdr_arr ".rel.plt" in
+  let dynsym = get_section_by_name elfbits ehdr shdr_arr ".dynsym" in
+  let dynstr = get_section_by_name elfbits ehdr shdr_arr ".dynstr" in
   let symbols = Symbols.read_symbols symtab in
+  let dyn_symbols = Symbols.read_symbols dynsym in
   let mapping_syms = Mapping.get_mapping_symbols elfbits ehdr shdr_arr strtab
 		     symbols ".text" in
   let ar = parse_all_arange_data debug_aranges in
@@ -131,8 +139,12 @@ let open_file filename =
     text = text;
     strtab = strtab;
     symtab = symtab;
+    plt = plt;
     rel_plt = rel_plt;
+    dynsym = dynsym;
+    dynstr = dynstr;
     symbols = symbols;
+    dyn_symbols = dyn_symbols;
     mapping_syms = mapping_syms;
     parsed_aranges = ar;
     parsed_rel_plt = plt_rels;
