@@ -284,6 +284,9 @@ let fn_ret = function
 
 exception Calling of string
 
+(* This is awful: a circular dependency!  Find a nicer solution...  *)
+let symbol_for_plt_entry = ref (fun _ _ -> failwith "binding")
+
 let convert_bl binf addr insn =
   let dest = insn.read_operands.(0) in
   match dest with
@@ -313,8 +316,18 @@ let convert_bl binf addr insn =
 	    CT.EABI, fn_args fn_inf.Function.args,
 	    fn_ret fn_inf.Function.return in
 	  C.Control (C.Call_ext (abi, ct_sym, passes, ret_addr, returns))
-      | ".plt" -> C.Control (C.Call_ext (CT.Plt_call, CT.Absolute call_addr,
-			     no_arg, ret_addr, no_arg))
+      | ".plt" ->
+          let sym = (!symbol_for_plt_entry) binf call_addr in
+	  let sym_name = Symbols.symbol_name sym binf.Binary_info.dynstr in
+	  begin try
+	    let fn_inf = Builtin.builtin_function_type sym_name in
+            C.Control (C.Call_ext (CT.Plt_call, CT.Symbol (sym_name, sym),
+				   fn_args fn_inf.Function.args, ret_addr,
+				   fn_ret fn_inf.Function.return))
+	  with Not_found ->
+            C.Control (C.Call_ext (CT.Plt_call, CT.Symbol (sym_name, sym),
+				   no_arg, ret_addr, no_arg))
+	  end
       | x -> raise (Calling x)
       end
   | _ -> failwith "unexpected bx operand"
@@ -429,13 +442,35 @@ and convert_conditional binf addr cond insn ilist blk_id bseq bseq_cons =
   let bseq'3 = finish_block cond_blk_id cond_ilist' bseq'' bseq_cons in
   CS.empty, after_insn, bseq'3
 
-let convert_block binf block_id bseq bseq_cons addr insn_list code_hash =
+let framebase_for_addr framebase_loc addr =
+  match framebase_loc with
+    Dwarfreader.Loc_expr loc -> loc
+  | Dwarfreader.Loc_list lst ->
+      let _, _, loc =
+        List.find (fun (lo, hi, loc) -> addr >= lo && addr < hi) lst in
+      loc
+
+let convert_block binf block_id bseq bseq_cons addr insn_list code_hash
+		  framebase_loc =
+  let frame_base = ref None in
+  let add_framebase_update addr ilist =
+    try
+      let loc = framebase_for_addr framebase_loc addr in
+      match !frame_base with
+        Some old_loc when loc == old_loc -> ilist
+      | _ ->
+        frame_base := Some loc;
+	CS.snoc ilist (C.Entity (CT.Frame_base_update loc))
+    with Not_found ->
+      ilist in
   let code_deque, blk_id', bseq', last_offset = Deque.fold_left
-    (fun (acc, blk_id, bseq, offset) insn ->
-      let ilist', blk_id', bseq'
-        = convert_insn binf (Int32.add addr offset) insn acc blk_id bseq
+    (fun (ilist, blk_id, bseq, offset) insn ->
+      let insn_addr = Int32.add addr offset in
+      let ilist' = add_framebase_update insn_addr ilist in
+      let ilist'', blk_id', bseq'
+        = convert_insn binf insn_addr insn ilist' blk_id bseq
 		       bseq_cons in
-      ilist', blk_id', bseq', Int32.add offset 4l)
+      ilist'', blk_id', bseq', Int32.add offset 4l)
     (CS.empty, block_id, bseq, 0l)
     insn_list in
   let next_addr = Int32.add addr last_offset in
@@ -444,3 +479,37 @@ let convert_block binf block_id bseq bseq_cons addr insn_list code_hash =
 		 bseq' bseq_cons
   else
     finish_block blk_id' code_deque bseq' bseq_cons
+
+exception Out_of_range
+
+let base_type_p = function
+    Ctype.C_struct _
+  | Ctype.C_union _
+  | Ctype.C_array _ -> false
+  | _ -> true
+
+(* Return aggr_member_id, type of member.  FIXME: We don't necessarily always
+   want the innermost member.  If we know the type of the context (e.g. a
+   function argument), we might be able to do better.  *)
+
+let rec resolve_aggregate_access typ offset =
+  match typ with
+    Ctype.C_struct agmem
+  | Ctype.C_union agmem ->
+      let found_mem =
+        List.find
+	  (fun mem -> offset >= mem.Ctype.offset
+		      && offset < mem.Ctype.offset + mem.Ctype.size)
+	  agmem in
+      if base_type_p found_mem.Ctype.typ then
+        Irtypes.Aggr_leaf found_mem.Ctype.name, found_mem.Ctype.typ
+      else
+        let sub, inner_type =
+	  resolve_aggregate_access found_mem.Ctype.typ
+	    (offset - found_mem.Ctype.offset) in
+	Irtypes.Aggr_sub (found_mem.Ctype.name, sub), inner_type
+  | Ctype.C_typedef (typename, targ_fn) ->
+      let targ = targ_fn () in
+      resolve_aggregate_access targ offset
+  | _ ->
+      failwith "non-aggregate"

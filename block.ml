@@ -42,3 +42,5 @@ let make_block id code =
     end_sp_offset = None
   }
 
+let clear_visited blk_arr =
+  Array.iter (fun blk -> blk.visited <- false) blk_arr

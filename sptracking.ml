@@ -28,8 +28,83 @@ let sp_reg = function
   | C.Reg (CT.Hard_reg 13) -> true
   | _ -> false
 
-let sp_track blk_arr =
-  let spht = Hashtbl.create 10 in
+let offset_from_current_sp loc =
+  match loc with
+    `DW_OP_reg 13 -> 0
+  | `DW_OP_breg (13, offs) -> Big_int.int_of_big_int offs
+  | _ -> failwith "offset_from_current_sp"
+
+(* We can sometimes tell the names and proper types of registers too -- that's
+   not handled at present, and probably won't be handled here anyway.  *)
+
+let fb_relative_var_loc loc =
+  match loc with
+    Dwarfreader.Loc_expr (`DW_OP_fbreg offs) -> offs
+  | _ -> raise Not_found
+
+let known_var vars sp_offset =
+  let fv, ofs =
+    List.fold_left
+      (fun ((found_var, offset) as prev) var ->
+	match var.Function.var_location with
+          None -> prev
+	| Some loc ->
+            try
+	      let var_offset = fb_relative_var_loc loc in
+	      if sp_offset >= var_offset
+		 && sp_offset < (var_offset + var.Function.var_size) then begin
+		Printf.printf "sp offset:%d var_offset:%d var_size:%d\n"
+		  sp_offset var_offset var.Function.var_size;
+		Some var, sp_offset - var_offset
+	      end else
+		prev
+	    with Not_found -> prev)
+      (None, 0)
+      vars in
+  match fv with
+    Some f -> f, ofs
+  | None -> raise Not_found
+
+module IrPhiPlacement = Phi.PhiPlacement (Ir.IrCT) (Ir.IrCS) (Ir.IrBS)
+
+let try_rewrite_var vars offset stack_vars insn rewrite_as =
+  try
+    let kvar, var_ofs = known_var vars offset in
+    Printf.printf "Offset %d looks like variable %s (+%d)\n"
+      offset kvar.Function.var_name var_ofs;
+    let sv = CT.Stack_var kvar.Function.var_name in
+    stack_vars := IrPhiPlacement.R.add sv !stack_vars;
+    let aggr_access, _ =
+      Insn_to_ir.resolve_aggregate_access kvar.Function.var_type var_ofs in
+    (*let blk = {
+      Irtypes.ctype = kvar.Function.var_type;
+      block_size = kvar.Function.var_size;
+      access_size = Irtypes.Word
+    } in*)
+    match rewrite_as with
+      `load dst ->
+	C.Protect (C.Set (dst,
+		     C.Load (Irtypes.Word,
+		       C.Unary (Irtypes.Aggr_member (kvar.Function.var_type,
+		        			     aggr_access),
+			 C.Unary (Irtypes.Address_of, C.Reg sv)))))
+    | `store src ->
+        C.Protect (C.Store (Irtypes.Word,
+		     C.Unary (Irtypes.Aggr_member (kvar.Function.var_type,
+						   aggr_access),
+		       C.Unary (Irtypes.Address_of, C.Reg sv)),
+		     src))
+    | `ssa_reg ->
+        C.Protect (C.Unary (Irtypes.Aggr_member (kvar.Function.var_type,
+						 aggr_access),
+		     C.Unary (Irtypes.Address_of, C.Reg sv)))
+  with Not_found ->
+    insn
+
+let sp_track blk_arr vars =
+  let spht = Hashtbl.create 10
+  and framebase_loc = ref None
+  and stack_vars = ref IrPhiPlacement.R.empty in
   let sp_derived = function
     C.SSAReg (r, rn) -> Hashtbl.mem spht (r, rn)
   | _ -> false in
@@ -44,21 +119,27 @@ let sp_track blk_arr =
       code
       false in
   let derived_offset base offset =
-    if sp_derived base then
+    if sp_reg base then
+      offset
+    else
       match base with
 	C.SSAReg (r, rn) -> Hashtbl.find spht (r, rn)
-      | _ -> raise Not_found
-    else
-      offset in
+      | _ -> raise Not_found in
   let derive_sp offset = function
+    (* Copy stack pointer to another register.  *)
     C.Set (C.SSAReg (r, rn), src) when sp_reg src ->
       Hashtbl.add spht (r, rn) offset
-  | C.Set (C.SSAReg (r, rn), C.Binary (Irtypes.Add, base, C.Immed imm))
+    (* Copy stack pointer to another register, with +/- offset.  *)
+  | C.Set (C.SSAReg (r, rn) as dst, C.Binary (Irtypes.Add, base, C.Immed imm))
       when sp_reg base ->
+      Printf.printf "adding offset %d for %s\n" (offset + Int32.to_int imm)
+        (C.string_of_code dst);
       Hashtbl.add spht (r, rn) (offset + Int32.to_int imm)
   | C.Set (C.SSAReg (r, rn), C.Binary (Irtypes.Sub, base, C.Immed imm))
       when sp_reg base ->
       Hashtbl.add spht (r, rn) (offset - Int32.to_int imm)
+    (* Copy register derived from stack pointer to another register, with an
+       additional offset.  *)
   | C.Set (C.SSAReg (r, rn), C.Binary (Irtypes.Add, base, C.Immed imm))
       when sp_derived base ->
       let offset' = derived_offset base offset in
@@ -67,8 +148,10 @@ let sp_track blk_arr =
       when sp_derived base ->
       let offset' = derived_offset base offset in
       Hashtbl.add spht (r, rn) (offset' - Int32.to_int imm)
+    (* ...or without additional offset.  *)
   | C.Set (C.SSAReg (r, rn), base) when sp_derived base ->
-      Hashtbl.add spht (r, rn) offset
+      let offset' = derived_offset base offset in
+      Hashtbl.add spht (r, rn) offset'
   | x -> Printf.printf "Don't know how to derive SP from '%s'\n"
 	   (C.string_of_code x) in
   let underive_sp insn r rn offset =
@@ -81,9 +164,65 @@ let sp_track blk_arr =
       offset in
     Printf.printf "Offset now %d\n" offset';
     offset' in
+  let rewrite_sp_from_dwarf_frame insn offset framebase_loc_opt =
+    (* Try to find a variable in the stack frame which we might be trying
+       to access.  This won't always work because the Dwarf info doesn't tend
+       to be complete.  *)
+      (*begin match framebase_loc_opt with
+        Some framebase_loc ->
+	  let fb_offset = offset_from_current_sp framebase_loc in
+	  Printf.printf
+	    "Frame base offset according to Dwarf info: %d, tracking says %d\n"
+	    fb_offset (-offset)
+      | None ->
+          Printf.printf
+	    "Dwarf info says nothing about frame base here, tracking says %d\n"
+	    (-offset)
+      end;*)
+      C.map
+        (fun x -> match x with
+          (* Loads.  *)
+	  C.Set (dst, C.Load (Irtypes.Word,
+			      C.Binary (Irtypes.Add, base, C.Immed imm)))
+	    when sp_reg base || sp_derived base ->
+	    let offset' = derived_offset base offset in
+	    let real_stack_offset = offset' + Int32.to_int imm in
+	    try_rewrite_var vars real_stack_offset stack_vars x (`load dst)
+	| C.Set (dst, C.Load (Irtypes.Word,
+			      C.Binary (Irtypes.Sub, base, C.Immed imm)))
+	    when sp_reg base || sp_derived base ->
+	    let offset' = derived_offset base offset in
+	    let real_stack_offset = offset' - Int32.to_int imm in
+            try_rewrite_var vars real_stack_offset stack_vars x (`load dst)
+	| C.Set (dst, C.Load (Irtypes.Word, base))
+	    when sp_reg base || sp_derived base ->
+	    let offset' = derived_offset base offset in
+	    try_rewrite_var vars offset' stack_vars x (`load dst)
+	  (* Stores.  *)
+	 | C.Store (Irtypes.Word, C.Binary (Irtypes.Add, base, C.Immed imm),
+		    src) when sp_reg base || sp_derived base ->
+	     let offset' = derived_offset base offset in
+	     let real_stack_offset = offset' + Int32.to_int imm in
+	     try_rewrite_var vars real_stack_offset stack_vars x (`store src)
+	 | C.Store (Irtypes.Word, C.Binary (Irtypes.Sub, base, C.Immed imm),
+		    src) when sp_reg base || sp_derived base ->
+	     let offset' = derived_offset base offset in
+	     let real_stack_offset = offset' - Int32.to_int imm in
+	     try_rewrite_var vars real_stack_offset stack_vars x (`store src)
+	 | C.Store (Irtypes.Word, base, src)
+	     when sp_reg base || sp_derived base ->
+	     let offset' = derived_offset base offset in
+	     try_rewrite_var vars offset' stack_vars x (`store src)
+	  (* Other.  *)
+	| C.SSAReg _ when sp_derived x ->
+	    let offset' = derived_offset x offset in
+	    try_rewrite_var vars offset' stack_vars x `ssa_reg
+	| x -> x)
+	insn in
   let rewrite_sp insn offset =
     C.map
       (function
+        (* Loads.  *)
 	C.Set (dst, C.Load (Irtypes.Word,
 			    C.Binary (Irtypes.Add, base, C.Immed imm)))
 	  when sp_reg base || sp_derived base ->
@@ -98,6 +237,7 @@ let sp_track blk_arr =
 	  when sp_reg base || sp_derived base ->
 	  let offset' = derived_offset base offset in
 	  C.Protect (C.Set (dst, C.Reg (CT.Stack offset')))
+	(* Stores.  *)
       | C.Store (Irtypes.Word, C.Binary (Irtypes.Add, base, C.Immed imm), src)
 	  when sp_reg base || sp_derived base ->
 	  let offset' = derived_offset base offset in
@@ -109,6 +249,7 @@ let sp_track blk_arr =
       | C.Store (Irtypes.Word, base, src) when sp_reg base || sp_derived base ->
 	  let offset' = derived_offset base offset in
 	  C.Protect (C.Set (C.Reg (CT.Stack offset'), src))
+	(* Function arguments, etc.  *)
       | C.Load (Irtypes.Word, C.Binary (Irtypes.Add, base, C.Immed imm))
           when sp_reg base || sp_derived base ->
 	  let offset' = derived_offset base offset in
@@ -119,14 +260,18 @@ let sp_track blk_arr =
           C.Protect (C.Unary (Irtypes.Address_of, C.Reg (CT.Stack offset')))
       | x -> x)
       insn in
-  Array.iter (fun blk -> blk.Block.visited <- false) blk_arr;
+  Block.clear_visited blk_arr;
   let rec scan blk sp_offset =
     blk.Block.start_sp_offset
       <- set_or_ensure_equal blk "start" blk.Block.start_sp_offset sp_offset;
     let code', sp_offset' = CS.fold_left
       (fun (code, off) insn ->
         match insn with
-	  C.Set (dst, C.Binary (Irtypes.Add, src, C.Immed imm))
+	  C.Entity (CT.Frame_base_update loc) ->
+	    framebase_loc := Some loc;
+	    code, off
+	  (* Add/subtract the real stack pointer. *)
+	| C.Set (dst, C.Binary (Irtypes.Add, src, C.Immed imm))
 	    when sp_reg dst && sp_reg src ->
 	    code, off + (Int32.to_int imm)
 	| C.Set (dst, C.Binary (Irtypes.Sub, src, C.Immed imm))
@@ -135,6 +280,7 @@ let sp_track blk_arr =
 	| C.Set (dst, C.Nullary Irtypes.Special) ->
 	    (* Ignore this pseudo-insn.  *)
 	    CS.snoc code insn, off
+	  (* Copy another register to the stack pointer.  *)
 	| C.Set (dst, C.SSAReg (r, rn)) when sp_reg dst ->
 	    code, underive_sp insn r rn off
 	| C.Set (dst, C.Binary (Irtypes.Add, C.SSAReg (r, rn), C.Immed i))
@@ -143,17 +289,24 @@ let sp_track blk_arr =
 	| C.Set (dst, C.Binary (Irtypes.Sub, C.SSAReg (r, rn), C.Immed i))
 	    when sp_reg dst ->
 	    code, underive_sp insn r rn (off - Int32.to_int i)
+	  (* Copy something else to the stack pointer.  *)
 	| C.Set (dst, _) when sp_reg dst ->
 	    Printf.printf "Unexpected write to sp in '%s'\n"
 	      (C.string_of_code insn);
 	    CS.snoc code insn, off
+	  (* Copy value derived from the stack pointer to a different
+	     register.  *)
 	| C.Set (dst, src) when sp_used src ->
 	    Printf.printf
 	      "SP derived var '%s' in '%s' (initial sp offset %d)\n"
 	      (C.string_of_code dst) (C.string_of_code insn) off;
 	    derive_sp off insn;
 	    code, off
-	| _ -> CS.snoc code (rewrite_sp insn off), off)
+	  (* Other uses of the stack pointer, or stack-pointer-derived
+	     registers.  *)
+	| _ ->
+	  let insn' = rewrite_sp_from_dwarf_frame insn off !framebase_loc in
+	  CS.snoc code (rewrite_sp insn' off), off)
       (CS.empty, sp_offset)
       blk.Block.code in
     blk.Block.code <- code';
@@ -167,4 +320,5 @@ let sp_track blk_arr =
         if not nextblk.Block.visited then
 	  scan nextblk sp_offset')
       blk.Block.idomchild in
-  scan blk_arr.(0) 0
+  scan blk_arr.(0) 0;
+  !stack_vars

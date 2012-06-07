@@ -15,11 +15,13 @@ module IrCT =
              | Stack of int
 	     | Temp of int
 	     | Status of ir_statusbits
+	     | Stack_var of string
     type mem = ir_mem
     type entity = PC of int32
 		| Symbol_addr of string * Elfreader.elf_sym
 		| Arg_out
 		| Caller_restored
+		| Frame_base_update of Dwarfreader.dwarf_op
     type abi = Branch_exchange
 	     | Unknown_abi
 	     | Plt_call
@@ -36,6 +38,7 @@ module IrCT =
     | Arg_in -> "arg_in"
     | Caller_saved -> "caller_saved"
     | Special -> "special"
+    | Declaration -> "declaration"
     
     let string_of_unop = function
       Not -> "not"
@@ -54,6 +57,7 @@ module IrCT =
     | Status_vc -> "status_vc"
     | Status_vs -> "status_vs"
     | Address_of -> "address_of"
+    | Aggr_member _ -> "aggregate_member"
 
     let string_of_binop = function
       Add -> "add"
@@ -81,19 +85,24 @@ module IrCT =
     | Stack s -> Printf.sprintf "stack%s%d" (if s < 0 then "" else "+") s
     | Temp t -> Printf.sprintf "tmp%d" t
     | Status sb -> Printf.sprintf "status(%s)" (string_of_status sb)
+    | Stack_var nm -> nm
     
-    let string_of_mem = function
+    let rec string_of_mem = function
       U8 -> "u8"
     | S8 -> "s8"
     | U16 -> "u16"
     | S16 -> "s16"
     | Word -> "word"
+    (*| Block blk ->
+        Printf.sprintf "block(%d,%s)" blk.block_size
+		       (string_of_mem blk.access_size)*)
     
     let string_of_entity = function
       PC loc -> Printf.sprintf "pc(0x%lx)" loc
     | Symbol_addr (name, _) -> Printf.sprintf "&%s" name
     | Arg_out -> "arg_out"
     | Caller_restored -> "caller_restored"
+    | Frame_base_update _ -> "frame_base_update"
 
     let string_of_abi = function
       Branch_exchange -> "branch_exchange"

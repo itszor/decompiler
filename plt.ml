@@ -6,6 +6,8 @@ module CT = Ir.IrCT
 module BS = Ir.IrBS
 module C = Ir.Ir
 
+let dummy_loc = Dwarfreader.Loc_expr (`DW_OP_reg 13)
+
 let decode_stub binf addr =
   let plt_sec_num = get_section_number binf.elfbits binf.ehdr binf.shdr_arr
 				       ".plt" in
@@ -21,7 +23,7 @@ let decode_stub binf addr =
   done;
   Insn_to_ir.convert_block binf (Irtypes.BlockAddr addr) BS.empty
 			   (fun _ blk bseq -> BS.cons blk bseq) addr
-			   !stub_insns (Hashtbl.create 0)
+			   !stub_insns (Hashtbl.create 0) dummy_loc
 
 (* A decoded PLT stub looks like this:
 
@@ -45,6 +47,7 @@ let evaluate_insn r12_val = function
       Int32.add r12_val imm
   | C.Set (_, C.Load _) -> r12_val
   | C.Control _ -> r12_val
+  | C.Entity _ -> r12_val
   | _ -> failwith "Unexpected insn in PLT stub"
 
 let evaluate_stub stub_bs =
@@ -75,3 +78,7 @@ let symbol_for_plt_entry binf addr =
   let r12_val = evaluate_stub (decode_stub binf addr) in
   let reloc = find_reloc binf r12_val in
   symbol_for_reloc binf reloc
+
+(* Hack around circular dependency.  *)
+let _ =
+  Insn_to_ir.symbol_for_plt_entry := symbol_for_plt_entry

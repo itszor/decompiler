@@ -4,6 +4,7 @@ type ir_nulop =
   | Caller_saved
   | Arg_in
   | Special
+  | Declaration (* of Ctype.ctype? *)
 
 type ir_unop =
     Not
@@ -22,6 +23,18 @@ type ir_unop =
   | Status_vc
   | Status_vs
   | Address_of
+  | Aggr_member of Ctype.ctype * aggr_member_id
+
+(* Code will look like:
+
+   Set (dst, Load (Word, Unop (Aggr_member (Aggr_leaf "x"), SSAReg foo)))
+   
+   Store (Word, Unop (Aggr_member (Aggr_leaf "y"), SSAReg foo), src)
+*)
+
+and aggr_member_id =
+    Aggr_leaf of string
+  | Aggr_sub of string * aggr_member_id
 
 type ir_binop =
     Add
@@ -45,6 +58,14 @@ type ir_mem =
   | U16
   | S16
   | Word
+  (*| Block of block_info
+
+and block_info =
+  {
+    ctype : Ctype.ctype;
+    block_size : int;
+    access_size : ir_mem
+  }*)
 
 type ir_statusbits =
     Carry      (* Just the carry flag.  *)

@@ -47,3 +47,48 @@ let function_type name die die_hash =
 	prototyped = prototyped }
   | _ -> raise Unknown_type
 
+let function_frame_base die die_hash locbits ~compunit_baseaddr =
+  match die with
+    Die_tree ((DW_TAG_subprogram, attrs), _, _) ->
+      let framebase = get_attr_loc attrs DW_AT_frame_base locbits
+				   ~addr_size:4 ~compunit_baseaddr in
+      framebase
+  | _ -> failwith "not subprogram die"
+
+type var =
+  {
+    var_name : string;
+    var_type : Ctype.ctype;
+    var_size : int;
+    var_location : Dwarfreader.location option
+  }
+
+let function_vars die die_hash locbits ~compunit_baseaddr =
+  let rec makelist die acc =
+    match die with
+      Die_node ((DW_TAG_formal_parameter, _), sibl) ->
+        (* Skip over formal parameters...  *)
+        makelist sibl acc
+    | Die_node ((DW_TAG_variable, attrs), sibl) ->
+        let var_name = get_attr_string attrs DW_AT_name
+	and type_offset = get_attr_ref attrs DW_AT_type in
+	let var_loc =
+	  try
+	    Some (get_attr_loc attrs DW_AT_location locbits ~addr_size:4
+					 ~compunit_baseaddr)
+	  with Not_found -> None in
+	let type_die = Hashtbl.find die_hash (Int32.to_int type_offset) in
+	let var_type = Ctype.resolve_type type_die die_hash in
+	let type_size = Ctype.dwarf_type_size type_die die_hash in
+	let var = {
+	  var_name = var_name;
+	  var_type = var_type;
+	  var_size = type_size;
+	  var_location = var_loc
+	} in
+	makelist sibl (var :: acc)
+    | _ -> acc in
+  match die with
+    Die_tree ((DW_TAG_subprogram, attrs), child, _) ->
+      makelist child []
+  | _ -> []

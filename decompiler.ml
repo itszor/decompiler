@@ -156,7 +156,7 @@ let cons_and_add_to_index blk bseq ht blockref idx =
   incr idx;
   BS.cons blk bseq
 
-let bs_of_code_hash ft binf code_hash entry_pt =
+let bs_of_code_hash ft binf code_hash entry_pt framebase =
   let idx = ref 0 in
   let ht = Hashtbl.create 10 in
   let bseq_cons blk_id blk bseq =
@@ -165,7 +165,7 @@ let bs_of_code_hash ft binf code_hash entry_pt =
     (fun addr code bseq ->
       let block_id = Irtypes.BlockAddr addr in
       Insn_to_ir.convert_block binf block_id bseq bseq_cons addr code
-			       code_hash)
+			       code_hash framebase)
     code_hash
     BS.empty in
   let pre_prologue_blk = eabi_pre_prologue ft entry_pt
@@ -250,7 +250,7 @@ let add_stackvars_to_entry_block blk_arr entry_pt_ref regset =
   let code = blk_arr.(entry_pt_ref).Block.code in
   let code' = IrPhiPlacement.R.fold
     (fun stackvar code ->
-      CS.cons (C.Set (C.Reg stackvar, C.Nullary Irtypes.Arg_in)) code)
+      CS.cons (C.Set (C.Reg stackvar, C.Nullary Irtypes.Declaration)) code)
     regset
     code in
   blk_arr.(entry_pt_ref).Block.code <- code'
@@ -265,9 +265,15 @@ let go symname =
   let code = code_for_sym binf binf.text binf.mapping_syms sym in
   let cu_offset_for_sym = cu_offset_for_address binf entry_point in
   let cu = Hashtbl.find binf.cu_hash cu_offset_for_sym in
+  let base_addr_for_cu = base_addr_for_comp_unit cu.ci_dies in
   let die = Hashtbl.find cu.ci_dieaddr entry_point in
   let ft = Function.function_type symname die cu.ci_dietab in
-  let blockseq, ht = bs_of_code_hash ft binf code entry_point_ba in
+  let framebase =
+    Function.function_frame_base die cu.ci_dietab binf.debug_loc
+      ~compunit_baseaddr:base_addr_for_cu in
+  let vars = Function.function_vars die cu.ci_dietab binf.debug_loc
+	       ~compunit_baseaddr:base_addr_for_cu in
+  let blockseq, ht = bs_of_code_hash ft binf code entry_point_ba framebase in
   Printf.printf "--- initial blockseq ---\n";
   dump_blockseq blockseq;
   let entry_point_ref = Hashtbl.find ht entry_point_ba in
@@ -296,11 +302,11 @@ let go symname =
 			      binf.mapping_syms binf.strtab blk_arr inforec in
   dump_blockarr blk_arr';
   Printf.printf "--- sp tracking ---\n";
-  Sptracking.sp_track blk_arr';
+  let sp_var_set = Sptracking.sp_track blk_arr' vars in
+  add_stackvars_to_entry_block blk_arr' 0 sp_var_set;
   dump_blockarr blk_arr';
   Printf.printf "--- SSA conversion (2) ---\n";
   let regset2 = IrPhiPlacement.place blk_arr' in
-  (*add_stackvars_to_entry_block blk_arr' entry_point_ref regset2;*)
   IrPhiPlacement.rename blk_arr' 0 regset2;
   dump_blockarr blk_arr';
   Printf.printf "--- gather info (2) ---\n";
@@ -311,7 +317,7 @@ let go symname =
   IrPhiPlacement.eliminate blk_arr';
   dump_blockarr blk_arr'
 
-(*let _ = go "InitAccumUSECodeBlocks"*)
+let _ = go "InitAccumUSECodeBlocks"
 
 let pubnames = Dwarfreader.parse_all_pubname_data binf.debug_pubnames
 

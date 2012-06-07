@@ -3,8 +3,8 @@ exception Dwarf_parse_error of string
 (* Ocaml 3.11.x doesn't have shift_left_big_int!  *)
 
 let lshift_7 big_int =
-  (* Big_int.shift_left_big_int big_int 7 *)
-  Big_int.mult_int_big_int 128 big_int
+  Big_int.shift_left_big_int big_int 7
+  (*Big_int.mult_int_big_int 128 big_int*)
 
 (* Parse ULEB128 value in DWBITS to a Big_int.  *)
 
@@ -23,26 +23,31 @@ let parse_uleb128 dwbits =
     | { _ } -> raise (Dwarf_parse_error "uleb128") in
   build dwbits
 
-let signed_value x =
-  if x < 64 then x else x - 128
+let test_bigint_bit bigint bitno =
+  not (Big_int.eq_big_int (Big_int.extract_big_int bigint bitno 1)
+			  Big_int.zero_big_int)
 
 (* Parse SLEB128 value in DWBITS to a Big_int.  *)
 
 let parse_sleb128 dwbits =
-  let rec build bits =
+  let rec build bits shift =
     bitmatch bits with
       { false : 1 : littleendian;
         chunk : 7 : littleendian;
 	rest : -1 : bitstring } ->
-	  Big_int.big_int_of_int (signed_value chunk), rest
+	  Big_int.big_int_of_int chunk, shift + 7, rest
     | { true : 1 : littleendian;
 	chunk : 7 : littleendian;
 	rest : -1 : bitstring } ->
-	  let higher_bits, rest' = build rest in
-	  Big_int.add_int_big_int (signed_value chunk)
-	    (lshift_7 higher_bits), rest'
+	  let higher_bits, shift', rest' = build rest (shift + 7) in
+	  Big_int.add_int_big_int chunk (lshift_7 higher_bits), shift', rest'
     | { _ } -> raise (Dwarf_parse_error "sleb128") in
-  build dwbits
+  let res, shift, rest = build dwbits 0 in
+  if test_bigint_bit res (shift - 1) then
+    let sign_val = Big_int.shift_left_big_int Big_int.unit_big_int shift in
+    (Big_int.sub_big_int res sign_val), rest
+  else
+    res, rest
 
 let parse_uleb128_int dwbits =
   let x, dwbits = parse_uleb128 dwbits in
@@ -53,7 +58,7 @@ let parse_uleb128_int dwbits =
 let parse_sleb128_int dwbits =
   let x, dwbits = parse_sleb128 dwbits in
   if not (Big_int.is_int_big_int x) then
-    failwith "uleb128 value too big";
+    failwith "sleb128 value too big";
   Big_int.int_of_big_int x, dwbits
 
 type dwarf_tag =
@@ -508,6 +513,70 @@ let parse_abbrevs dwbits =
     end in
   List.rev (build [] dwbits)*)
 
+type dwarf_op = [
+    `DW_OP_abs
+  | `DW_OP_addr of int64
+  | `DW_OP_and
+  | `DW_OP_bit_piece of Big_int.big_int * Big_int.big_int
+  | `DW_OP_bra of int
+  | `DW_OP_breg of int * Big_int.big_int
+  | `DW_OP_bregx of Big_int.big_int * Big_int.big_int
+  | `DW_OP_call2 of int
+  | `DW_OP_call4 of int32
+  | `DW_OP_call_frame_cfa
+  | `DW_OP_call_ref of int32
+  | `DW_OP_const1s of int
+  | `DW_OP_const1u of int
+  | `DW_OP_const2s of int
+  | `DW_OP_const2u of int
+  | `DW_OP_const4s of int32
+  | `DW_OP_const4u of int32
+  | `DW_OP_const8s of int64
+  | `DW_OP_const8u of int64
+  | `DW_OP_consts of Big_int.big_int
+  | `DW_OP_constu of Big_int.big_int
+  | `DW_OP_deref
+  | `DW_OP_deref_size of int
+  | `DW_OP_div
+  | `DW_OP_drop
+  | `DW_OP_dup
+  | `DW_OP_eq
+  | `DW_OP_fbreg of int
+  | `DW_OP_form_tls_address
+  | `DW_OP_ge
+  | `DW_OP_gt
+  | `DW_OP_hi_user
+  | `DW_OP_le
+  | `DW_OP_lit of int
+  | `DW_OP_lo_user
+  | `DW_OP_lt
+  | `DW_OP_minus
+  | `DW_OP_mod
+  | `DW_OP_mul
+  | `DW_OP_ne
+  | `DW_OP_neg
+  | `DW_OP_nop
+  | `DW_OP_not
+  | `DW_OP_or
+  | `DW_OP_over
+  | `DW_OP_pick of int
+  | `DW_OP_piece of int
+  | `DW_OP_plus
+  | `DW_OP_plus_uconst of Big_int.big_int
+  | `DW_OP_push_object_address
+  | `DW_OP_reg of int
+  | `DW_OP_regx of int
+  | `DW_OP_rot
+  | `DW_OP_shl
+  | `DW_OP_shr
+  | `DW_OP_shra
+  | `DW_OP_skip of int
+  | `DW_OP_swap
+  | `DW_OP_xderef
+  | `DW_OP_xderef_size of int
+  | `DW_OP_xor
+]
+
 let sign_extend x bit =
   let signbit = 1 lsl bit in
   if x < (signbit lsr 1) then x else x - signbit
@@ -593,10 +662,12 @@ let parse_operation dwbits ~addr_size =
   | { lit : 8 : littleendian } when lit >= 0x30 && lit <= 0x4f ->
       `DW_OP_lit (lit - 0x30), next_byte
   | { regno : 8 : littleendian } when regno >= 0x50 && regno <= 0x6f ->
+      Printf.fprintf stderr "found reg.\n";
       `DW_OP_reg (regno - 0x50), next_byte
   | { bregno : 8 : littleendian;
       cst_rest : -1 : bitstring } when bregno >= 0x70 && bregno <= 0x8f ->
         let cst, rest = parse_sleb128 cst_rest in
+	Printf.printf "parsed sleb128, value %d\n" (Big_int.int_of_big_int cst);
 	`DW_OP_breg (bregno - 0x70, cst), rest
   | { 0x90 : 8 : littleendian;
       regno_rest : -1 : bitstring } ->
@@ -646,6 +717,9 @@ let parse_operation dwbits ~addr_size =
         `DW_OP_bit_piece (st, en), rest
   | { 0xe0 : 8 : littleendian } -> `DW_OP_lo_user, next_byte
   | { 0xff : 8 : littleendian } -> `DW_OP_hi_user, next_byte
+  | { x : 8 : littleendian } ->
+      Printf.fprintf stderr "unknown byte: %d\n" x;
+      exit 1
 
 type comp_unit_header =
   {
@@ -1005,6 +1079,26 @@ let parse_all_arange_data dwbits =
       build rest' ((hdr, aranges_list) :: acc) in
   build dwbits []
 
+let parse_loc_list dwbits ~addr_size ~compunit_baseaddr =
+  let rec build dwbits' acc =
+    bitmatch dwbits' with
+      { start_address : 32 : littleendian;
+        end_address : 32 : littleendian;
+	loc_length : 16 : littleendian; (* Undocumented!  *)
+	loc_expr : -1 : bitstring } ->
+      let start_address' = Int32.add start_address compunit_baseaddr
+      and end_address' = Int32.add end_address compunit_baseaddr in
+      Printf.fprintf stderr "loc list: start %lx, end %lx\n" start_address'
+        end_address';
+      if start_address = 0l && end_address = 0l then
+        List.rev acc
+      else if start_address = 0xffffffffl then
+        failwith "base address selection"
+      else
+        let dw_op, rest = parse_operation loc_expr ~addr_size in
+	build rest ((start_address', end_address', dw_op) :: acc) in
+  build dwbits []
+
 exception Type_mismatch of string
 
 let get_attr_string attrs typ =
@@ -1059,6 +1153,37 @@ let get_attr_deref attrs typ hash =
     lookup_die die_ref hash
   with Not_found ->
     failwith "dereferenced type not in hash table"
+
+type location =
+    Loc_expr of dwarf_op
+  | Loc_list of (int32 * int32 * dwarf_op) list
+
+(* Return bitstring of inline block (for DW_AT_location), or bitstring of
+   indirected block.  *)
+
+let get_attr_loc attrs typ destbits ~addr_size ~compunit_baseaddr =
+  match List.assoc typ attrs with
+    `block b ->
+      let op, _ = parse_operation b ~addr_size in Loc_expr op
+  | `data4 r ->
+      Printf.fprintf stderr "offset: %lx\n" r;
+      let locbits = Elfreader.offset_section destbits r in
+      Loc_list (parse_loc_list locbits ~addr_size ~compunit_baseaddr)
+  (*| `data8 r -> Bitstring.dropbits ((Int64.to_int r) * 8) destbits*)
+  | _ -> raise (Type_mismatch "loc")
+
+(* We're only expecting DW_OP_plus_uconst here: we want the offset, rather
+   than an evaluated address.  *)
+
+let get_attr_member_loc attrs typ ~addr_size =
+  match List.assoc typ attrs with
+    `block b ->
+      let op, _ = parse_operation b ~addr_size in
+      begin match op with
+        `DW_OP_plus_uconst cst -> Big_int.int_of_big_int cst
+      | _ -> raise (Type_mismatch "member_loc operation")
+      end
+  | _ -> raise (Type_mismatch "member_loc")
 
 let attr_present attrs typ =
   List.mem_assoc typ attrs

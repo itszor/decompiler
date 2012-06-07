@@ -11,18 +11,31 @@ type ctype =
   | C_double
   | C_signed of ctype
   | C_unsigned of ctype
-  | C_pointer of (unit -> ctype)
+  | C_pointer of ctype
   | C_const of ctype
   | C_volatile of ctype
   | C_struct of aggregate_member list
   | C_union of aggregate_member list
   | C_array of int * ctype
   | C_enum (* of ... *)
+  | C_typedef of string * (unit -> ctype)
 
 and aggregate_member = {
   name : string;
-  typ : ctype
+  typ : ctype;
+  offset : int;
+  size : int
 }
+
+let rec dwarf_type_size die die_hash =
+  match die with
+    Die_node ((DW_TAG_typedef, attrs), _) ->
+      let targ = get_attr_deref attrs DW_AT_type die_hash in
+      dwarf_type_size targ die_hash
+  | Die_node ((_, attrs), _)
+  | Die_tree ((_, attrs), _, _) ->
+      get_attr_int attrs DW_AT_byte_size
+  | Die_empty -> raise Not_found
 
 exception Unknown_type
 
@@ -33,10 +46,11 @@ let rec resolve_type die die_hash =
   let rec build = function
     Die_node ((DW_TAG_typedef, attrs), _) ->
       let targ = get_attr_deref attrs DW_AT_type die_hash in
-      build targ
+      let typename = get_attr_string attrs DW_AT_name in
+      C_typedef (typename, fun () -> build targ)
   | Die_node ((DW_TAG_pointer_type, attrs), _) ->
       let targ = get_attr_deref attrs DW_AT_type die_hash in
-      C_pointer (fun () -> build targ)
+      C_pointer (build targ)
   | Die_node ((DW_TAG_const_type, attrs), _) ->
       let targ = get_attr_deref attrs DW_AT_type die_hash in
       C_const (build targ)
@@ -80,9 +94,13 @@ and resolve_aggregate die die_hash =
     Die_empty -> []
   | Die_node ((DW_TAG_member, mem_attrs), next) ->
       let mem_name = get_attr_string mem_attrs DW_AT_name
-      and mem_type = get_attr_deref mem_attrs DW_AT_type die_hash in
+      and mem_type = get_attr_deref mem_attrs DW_AT_type die_hash
+      and mem_offset = get_attr_member_loc mem_attrs
+			 DW_AT_data_member_location ~addr_size:4 in
+      let mem_size = dwarf_type_size mem_type die_hash in
       let resolved_type = resolve_type mem_type die_hash in
-      { name = mem_name; typ = resolved_type } :: build next
+      { name = mem_name; typ = resolved_type; offset = mem_offset;
+	size = mem_size } :: build next
   | _ -> raise Unknown_type in
   build die
 

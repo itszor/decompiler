@@ -7,7 +7,9 @@ type cu_info = {
   (* Symbols defined in CU, indexed by symbol address.  *)
   ci_symtab : (int32, elf_sym) Hashtbl.t;
   (* Debug info entries for symbol address, indexed by "low PC".  *)
-  ci_dieaddr : (int32, tag_attr_die) Hashtbl.t
+  ci_dieaddr : (int32, tag_attr_die) Hashtbl.t;
+  (* Just the parsed dies.  *)
+  ci_dies : tag_attr_die
 }
 
 type binary_info = {
@@ -20,6 +22,7 @@ type binary_info = {
   debug_line : Bitstring.bitstring;
   debug_pubnames : Bitstring.bitstring;
   debug_aranges : Bitstring.bitstring;
+  debug_loc : Bitstring.bitstring;
   lines : Line.line_prog_hdr;
   text : Bitstring.bitstring;
   strtab : Bitstring.bitstring;
@@ -80,7 +83,8 @@ let index_debug_data binf parsed_data =
 	  let cu_inf = {
 	    ci_dietab = die_hash;
 	    ci_symtab = Hashtbl.create 10;
-	    ci_dieaddr = Hashtbl.create 10
+	    ci_dieaddr = Hashtbl.create 10;
+	    ci_dies = cu_dies
 	  } in
 	  List.iter
 	    (fun (start, len) ->
@@ -111,6 +115,7 @@ let open_file filename =
 					   ".debug_pubnames" in
   let debug_aranges = get_section_by_name elfbits ehdr shdr_arr
 					  ".debug_aranges" in
+  let debug_loc = get_section_by_name elfbits ehdr shdr_arr ".debug_loc" in
   let lines, _ = Line.parse_lines debug_line in
   let text = get_section_by_name elfbits ehdr shdr_arr ".text" in
   let strtab = get_section_by_name elfbits ehdr shdr_arr ".strtab" in
@@ -135,6 +140,7 @@ let open_file filename =
     debug_line = debug_line;
     debug_pubnames = debug_pubnames;
     debug_aranges = debug_aranges;
+    debug_loc = debug_loc;
     lines = lines;
     text = text;
     strtab = strtab;
@@ -163,3 +169,11 @@ let cu_offset_for_address binf addr =
 		  ranges)
     binf.parsed_aranges in
   ar_hdr.ar_debug_info_offset
+
+(* Assumes DW_TAG_compile_unit comes first... hm.  *)
+
+let base_addr_for_comp_unit cu_die =
+  match cu_die with
+    Die_node ((DW_TAG_compile_unit, attrs), _) ->
+      get_attr_address attrs DW_AT_low_pc
+  | _ -> raise Not_found

@@ -75,12 +75,13 @@ let record_impl ht reg info =
   if not (Hashtbl.mem ht reg) then
     Hashtbl.add ht reg info
 
-let info_of_mem_type ~load = function
+let rec info_of_mem_type ~load = function
     Irtypes.Word -> if load then Word_loads else Word_stores
   | Irtypes.U8 -> if load then Byte_loads else Byte_stores
   | Irtypes.U16 -> if load then Halfword_loads else Halfword_stores
   | Irtypes.S8 -> if load then Signed_byte_loads else Byte_stores
   | Irtypes.S16 -> if load then Signed_halfword_loads else Halfword_stores
+  (*| Irtypes.Block { Irtypes.access_size = k } -> info_of_mem_type ~load k*)
 
 let basic_type impl_ht regid =
   let datas = Hashtbl.find_all impl_ht regid in
