@@ -662,12 +662,10 @@ let parse_operation dwbits ~addr_size =
   | { lit : 8 : littleendian } when lit >= 0x30 && lit <= 0x4f ->
       `DW_OP_lit (lit - 0x30), next_byte
   | { regno : 8 : littleendian } when regno >= 0x50 && regno <= 0x6f ->
-      Printf.fprintf stderr "found reg.\n";
       `DW_OP_reg (regno - 0x50), next_byte
   | { bregno : 8 : littleendian;
       cst_rest : -1 : bitstring } when bregno >= 0x70 && bregno <= 0x8f ->
         let cst, rest = parse_sleb128 cst_rest in
-	Printf.printf "parsed sleb128, value %d\n" (Big_int.int_of_big_int cst);
 	`DW_OP_breg (bregno - 0x70, cst), rest
   | { 0x90 : 8 : littleendian;
       regno_rest : -1 : bitstring } ->
@@ -717,9 +715,7 @@ let parse_operation dwbits ~addr_size =
         `DW_OP_bit_piece (st, en), rest
   | { 0xe0 : 8 : littleendian } -> `DW_OP_lo_user, next_byte
   | { 0xff : 8 : littleendian } -> `DW_OP_hi_user, next_byte
-  | { x : 8 : littleendian } ->
-      Printf.fprintf stderr "unknown byte: %d\n" x;
-      exit 1
+  | { x : 8 : littleendian } -> raise (Dwarf_parse_error "parse_operation")
 
 type comp_unit_header =
   {
@@ -915,7 +911,7 @@ let parse_die_for_cu dwbits ~length ~abbrevs ~addr_size ~string_sec =
   let rec build dwbits depth =
     let offset_bits = length - (Bitstring.bitstring_length dwbits) in
     let offset = offset_bits / 8 in
-    (* Printf.printf "parsing die, offset %d\n" offset; *)
+    (* Log.printf 3 "parsing die, offset %d\n" offset; *)
     let things, dwbits = parse_one_die dwbits ~abbrevs ~addr_size ~string_sec in
     match things with
       Some (tag, attr_vals, has_children) ->
@@ -936,7 +932,7 @@ let parse_die_for_cu dwbits ~length ~abbrevs ~addr_size ~string_sec =
 	    end
 	  end else
 	    Die_node (data, child_or_sibling), dwbits' in
-	(*Printf.printf "insert offset: %d\n" offset;*)
+	(*Log.printf 3 "insert offset: %d\n" offset;*)
 	Hashtbl.add die_hash offset this_node;
 	this_node, dwbits'
     | None -> Die_empty, dwbits in
@@ -949,7 +945,7 @@ let parse_die_for_cu dwbits ~length ~abbrevs ~addr_size ~string_sec =
 
 let parse_die_and_children dwbits ~abbrevs ~addr_size ~string_sec =
   let rec build dwbits depth =
-    (* Printf.printf "parsing die, offset %d\n" offset; *)
+    (* Log.printf 3 "parsing die, offset %d\n" offset; *)
     let things, dwbits = parse_one_die dwbits ~abbrevs ~addr_size ~string_sec in
     match things with
       Some (tag, attr_vals, has_children) ->
@@ -1043,11 +1039,11 @@ let parse_aranges_header dwbits =
       segment_size : 8 : littleendian;
       _ (* padding *) : 32;
       rest : -1 : bitstring } ->
-      (*Printf.printf "length : %ld\n" unit_length;
-      Printf.printf "version : %d\n" version;
-      Printf.printf "debug_info_offset : %lx\n" debug_info_offset;
-      Printf.printf "address_size : %d\n" address_size;
-      Printf.printf "segment_size : %d\n" segment_size;*)
+      (*Log.printf 3 "length : %ld\n" unit_length;
+      Log.printf 3 "version : %d\n" version;
+      Log.printf 3 "debug_info_offset : %lx\n" debug_info_offset;
+      Log.printf 3 "address_size : %d\n" address_size;
+      Log.printf 3 "segment_size : %d\n" segment_size;*)
       { ar_unit_length = unit_length;
         ar_version = version;
 	ar_debug_info_offset = debug_info_offset;
@@ -1061,7 +1057,7 @@ let parse_aranges dwbits =
       { start_address : 32 : littleendian;
 	length : 32 : littleendian;
 	rest : -1 : bitstring } ->
-	(*Printf.printf "%lx : %lx\n" start_address length;*)
+	(*Log.printf 3 "%lx : %lx\n" start_address length;*)
 	if start_address = 0l && length = 0l then
           List.rev acc, rest
 	else
@@ -1088,8 +1084,6 @@ let parse_loc_list dwbits ~addr_size ~compunit_baseaddr =
 	loc_expr : -1 : bitstring } ->
       let start_address' = Int32.add start_address compunit_baseaddr
       and end_address' = Int32.add end_address compunit_baseaddr in
-      Printf.fprintf stderr "loc list: start %lx, end %lx\n" start_address'
-        end_address';
       if start_address = 0l && end_address = 0l then
         List.rev acc
       else if start_address = 0xffffffffl then
@@ -1166,7 +1160,6 @@ let get_attr_loc attrs typ destbits ~addr_size ~compunit_baseaddr =
     `block b ->
       let op, _ = parse_operation b ~addr_size in Loc_expr op
   | `data4 r ->
-      Printf.fprintf stderr "offset: %lx\n" r;
       let locbits = Elfreader.offset_section destbits r in
       Loc_list (parse_loc_list locbits ~addr_size ~compunit_baseaddr)
   (*| `data8 r -> Bitstring.dropbits ((Int64.to_int r) * 8) destbits*)

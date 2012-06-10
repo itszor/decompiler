@@ -28,6 +28,7 @@ let convert_operand addr op =
     Hard_reg 15 -> C.Entity (CT.PC (Int32.add addr 8l))
   | Hard_reg r -> C.Reg (CT.Hard_reg r)
   | Immediate i -> C.Immed i
+  | Converted already -> already
   | _ -> failwith "convert_operand"
 
 let convert_maybe_pc_operand op =
@@ -52,6 +53,15 @@ let convert_binop addr opcode insn =
     and op1 = convert_operand insn.read_operands.(0)
     and op2 = convert_operand insn.read_operands.(1) in
     C.Set (dst, C.Binary (opcode, op1, op2))
+  end else
+    C.Nullary (Irtypes.Untranslated)
+
+let convert_bic addr insn =
+  if insn.write_flags = [] && insn.read_flags = [] then begin
+    let op2 = convert_operand addr insn.read_operands.(1) in
+    let new_reads = Array.copy insn.read_operands in
+    new_reads.(1) <- Converted (C.Unary (Irtypes.Not, op2));
+    convert_binop addr Irtypes.And { insn with read_operands = new_reads }
   end else
     C.Nullary (Irtypes.Untranslated)
 
@@ -311,7 +321,8 @@ let convert_bl binf addr insn =
 	  (*let sym_or_addr = find_symbol binf.Binary_info.symbols
 					binf.Binary_info.strtab call_addr in*)
 	  let fn_inf = Function.function_type symname die
-					      cu_inf.Binary_info.ci_dietab in
+					      cu_inf.Binary_info.ci_dietab
+					      cu_inf.Binary_info.ci_ctypes in
 	  let abi, passes, returns =
 	    CT.EABI, fn_args fn_inf.Function.args,
 	    fn_ret fn_inf.Function.return in
@@ -406,6 +417,7 @@ let rec convert_insn binf addr insn ilist blk_id bseq bseq_cons =
   | And -> append (convert_binop addr Irtypes.And insn)
   | Eor -> append (convert_binop addr Irtypes.Eor insn)
   | Orr -> append (convert_binop addr Irtypes.Or insn)
+  | Bic -> append (convert_bic addr insn)
   | Mul -> append (convert_binop addr Irtypes.Mul insn)
   | Rsb -> append (convert_rsb addr insn)
   | Adc -> append (convert_carry_in_op addr Irtypes.Adc insn)
@@ -423,6 +435,8 @@ let rec convert_insn binf addr insn ilist blk_id bseq bseq_cons =
   | Conditional (cond, B) -> append (convert_cbranch cond addr insn)
   | Conditional (cond, _) ->
       convert_conditional binf addr cond insn ilist blk_id bseq bseq_cons
+  | Shifted (opc, shift) ->
+      convert_shift binf addr insn ilist opc shift blk_id bseq bseq_cons
   | x -> raise (Unsupported_opcode x)
 
 and convert_conditional binf addr cond insn ilist blk_id bseq bseq_cons =
@@ -441,6 +455,31 @@ and convert_conditional binf addr cond insn ilist blk_id bseq bseq_cons =
   let cond_ilist' = CS.snoc cond_ilist (C.Control (C.Jump after_insn)) in
   let bseq'3 = finish_block cond_blk_id cond_ilist' bseq'' bseq_cons in
   CS.empty, after_insn, bseq'3
+
+and convert_shift binf addr insn ilist opc shift blk_id bseq bseq_cons =
+  if insn.write_flags = [] && insn.read_flags == [] then begin
+    let num_reads = Array.length insn.read_operands in
+    let amount = convert_operand addr (insn.read_operands.(num_reads - 1))
+    and operand = convert_operand addr (insn.read_operands.(num_reads - 2)) in
+    let new_reads = Array.sub insn.read_operands 0 (num_reads - 1) in
+    let num_reads' = Array.length new_reads in
+    let shift_code =
+      match shift with
+	Lsl ->
+          C.Binary (Irtypes.Lsl, operand, amount)
+      | Lsr ->
+          C.Binary (Irtypes.Lsr, operand, amount)
+      | Asr ->
+          C.Binary (Irtypes.Asr, operand, amount)
+      | Ror ->
+          C.Binary (Irtypes.Ror, operand, amount)
+      | Rrx ->
+          C.Binary (Irtypes.Rrx, operand, amount) in
+    new_reads.(num_reads' - 1) <- Converted shift_code;
+    convert_insn binf addr { insn with opcode = opc;
+      read_operands = new_reads } ilist blk_id bseq bseq_cons
+  end else
+    CS.snoc ilist (C.Nullary (Irtypes.Untranslated)), blk_id, bseq
 
 let framebase_for_addr framebase_loc addr =
   match framebase_loc with
@@ -492,13 +531,19 @@ let base_type_p = function
    want the innermost member.  If we know the type of the context (e.g. a
    function argument), we might be able to do better.  *)
 
-let rec resolve_aggregate_access typ offset =
+let rec resolve_aggregate_access typ offset ctypes_for_cu =
+  Log.printf 4 "resolve_aggregate_access, type %s, offset %d\n"
+    (Ctype.string_of_ctype typ) offset;
   match typ with
     Ctype.C_struct agmem
   | Ctype.C_union agmem ->
       let found_mem =
         List.find
-	  (fun mem -> offset >= mem.Ctype.offset
+	  (fun mem ->
+	    Log.printf 4
+	      "checking member for %d: name %s, offset %d, size %d\n" offset
+	      mem.Ctype.name mem.Ctype.offset mem.Ctype.size;
+	    offset >= mem.Ctype.offset
 		      && offset < mem.Ctype.offset + mem.Ctype.size)
 	  agmem in
       if base_type_p found_mem.Ctype.typ then
@@ -506,10 +551,10 @@ let rec resolve_aggregate_access typ offset =
       else
         let sub, inner_type =
 	  resolve_aggregate_access found_mem.Ctype.typ
-	    (offset - found_mem.Ctype.offset) in
+	    (offset - found_mem.Ctype.offset) ctypes_for_cu in
 	Irtypes.Aggr_sub (found_mem.Ctype.name, sub), inner_type
-  | Ctype.C_typedef (typename, targ_fn) ->
-      let targ = targ_fn () in
-      resolve_aggregate_access targ offset
+  | Ctype.C_typedef typename ->
+      let targ = Hashtbl.find ctypes_for_cu.Ctype.ct_typedefs typename in
+      resolve_aggregate_access targ offset ctypes_for_cu
   | _ ->
       failwith "non-aggregate"

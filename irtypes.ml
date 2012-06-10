@@ -4,7 +4,7 @@ type ir_nulop =
   | Caller_saved
   | Arg_in
   | Special
-  | Declaration (* of Ctype.ctype? *)
+  | Declaration of Ctype.ctype
 
 type ir_unop =
     Not
@@ -44,6 +44,11 @@ type ir_binop =
   | Or
   | Mul
   | Cmp
+  | Lsl
+  | Lsr
+  | Asr
+  | Ror
+  | Rrx
 
 type ir_triop =
     Adc

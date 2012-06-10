@@ -20,7 +20,7 @@ SYNTAX := -syntax camlp4o
 PACKAGES := -package camlp4.macro,bitstring,bitstring.syntax,num,unix
 
 # Source plus generated files.
-OCAMLSRC := elfreader.ml dwarfreader.ml dwarfprint.ml line.ml \
+OCAMLSRC := log.ml elfreader.ml dwarfreader.ml dwarfprint.ml line.ml \
 	    decode_arm.ml insn.ml symbols.ml mapping.ml emit.ml deque.ml \
 	    ranlist.ml boolset.ml getoption.ml code.ml block.ml ctype.ml \
 	    irtypes.ml ir.ml function.ml builtin.ml binary_info.ml \

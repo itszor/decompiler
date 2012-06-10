@@ -9,7 +9,9 @@ type cu_info = {
   (* Debug info entries for symbol address, indexed by "low PC".  *)
   ci_dieaddr : (int32, tag_attr_die) Hashtbl.t;
   (* Just the parsed dies.  *)
-  ci_dies : tag_attr_die
+  ci_dies : tag_attr_die;
+  (* Table mapping type names (strings) to C types for this CU.  *)
+  ci_ctypes : Ctype.ctype_info
 }
 
 type binary_info = {
@@ -84,7 +86,11 @@ let index_debug_data binf parsed_data =
 	    ci_dietab = die_hash;
 	    ci_symtab = Hashtbl.create 10;
 	    ci_dieaddr = Hashtbl.create 10;
-	    ci_dies = cu_dies
+	    ci_dies = cu_dies;
+	    ci_ctypes = {
+	      Ctype.ct_typedefs = Hashtbl.create 10;
+	      ct_typetags = Hashtbl.create 10
+	    }
 	  } in
 	  List.iter
 	    (fun (start, len) ->

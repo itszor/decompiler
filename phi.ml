@@ -68,7 +68,7 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
 	  let in_blk = regs_assigned_in_block blk R.empty in
 	  R.iter
 	    (fun reg ->
-	      Printf.printf "reg %s defined in %d\n"
+	      Log.printf 3 "reg %s defined in %d\n"
 	        (CT.string_of_reg reg) blk.dfnum;
 	      add_blk_for_reg defsites reg blk.dfnum)
 	    in_blk;
@@ -95,7 +95,7 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
 	  let rec scan = function
 	    [] -> ()
 	  | n::defs ->
-	      Printf.printf "reg %s, blk %d.\n" (CT.string_of_reg reg) n;
+	      Log.printf 3 "reg %s, blk %d.\n" (CT.string_of_reg reg) n;
 	      let defs_remaining = ref defs in
 	      List.iter
 	        (fun blk_in_df ->
@@ -107,7 +107,7 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
 						  (fun _ -> C.Reg reg))) in
 		    let prepended_code
 		      = CS.cons new_phi blk_arr.(blk_in_df).code in
-		    Printf.printf "*** inserting phi in blk %d\n" blk_in_df;
+		    Log.printf 3 "*** inserting phi in blk %d\n" blk_in_df;
 		    blk_arr.(blk_in_df).code <- prepended_code;
 		    mark_phi_node_for_reg_in_blk reg blk_in_df;
 		    if not (reg_defined_in_blk reg blk_in_df) then
@@ -263,7 +263,7 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
 	          let rdnum = Hashtbl.find rnum_htab rd in
 		  stack.(rdnum) <- List.tl stack.(rdnum)
 		with Not_found ->
-		  Printf.printf "Ignoring SSA reg %s (already converted)\n"
+		  Log.printf 3 "Ignoring SSA reg %s (already converted)\n"
 		    (C.string_of_code c);
 		  ()
 		end
@@ -281,7 +281,7 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
 	    (fun code insn ->
 	      match insn with
 	        C.Set (dst, C.Phi phi_args) ->
-		  Printf.printf "eliminating phi '%s'\n"
+		  Log.printf 3 "eliminating phi '%s'\n"
 		    (C.string_of_code insn);
 		  Array.iteri
 		    (fun i arg ->

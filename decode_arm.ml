@@ -42,7 +42,16 @@ let decode_nv_space ibits =
   bad_insn
 
 let decode_movw cond ibits =
-  bad_insn
+  bitmatch ibits with
+    { imm4 : 4; rd : 4; imm12 : 12 } ->
+      let imm = imm12 lor (imm4 lsl 12) in
+      {
+        opcode = conditionalise cond Mov;
+	read_operands = [| Immediate (Int32.of_int imm) |];
+	write_operands = [| hard_reg rd |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ } -> bad_insn
 
 let decode_movt cond ibits =
   bad_insn

@@ -1,9 +1,10 @@
-type operand =
+type 'a operand =
     Hard_reg of int
   | Immediate of int32
   | Address of int32
   | PC_relative of int32
   | Stack of int
+  | Converted of 'a
 
 and cc_bits = C | V | N | Z
 	    | C_zero | C_one | C_from_shift
@@ -77,11 +78,11 @@ and multimem_info =
     mm_writeback : bool
   }
 
-type insn =
+type 'a insn =
   {
     opcode : opcode;
-    write_operands : operand array;
-    read_operands : operand array;
+    write_operands : 'a operand array;
+    read_operands : 'a operand array;
     write_flags : cc_bits list;
     (* READ_FLAGS does *not* count flags required by insn
        conditionalisation!  *)

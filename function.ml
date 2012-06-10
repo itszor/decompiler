@@ -9,16 +9,16 @@ type function_info =
     prototyped : bool
   }
 
-let function_args die die_hash =
+let function_args die die_hash ctypes_for_cu =
   let rec makelist die acc argno =
     match die with
       Die_node ((DW_TAG_formal_parameter, attrs), sibl) ->
 	let argname = get_attr_string attrs DW_AT_name in
-	Format.printf "Arg %d, '%s':@." argno argname;
+	Log.printf 3 "Arg %d, '%s':\n" argno argname;
 	let typeoffset = get_attr_ref attrs DW_AT_type in
 	(*let die_bits' = offset_section die_bits typeoffset in*)
 	let die = Hashtbl.find die_hash (Int32.to_int typeoffset) in
-	let ctype = Ctype.resolve_type die die_hash in
+	let ctype = Ctype.resolve_type die die_hash ctypes_for_cu in
 	(* parse_die_and_children die_bits' ~abbrevs:abbrevs
           ~addr_size:cu_header.address_size ~string_sec:debug_str_sec in *)
 	(*Dwarfprint.print_die die die_hash;*)
@@ -26,23 +26,23 @@ let function_args die die_hash =
     | _ -> Array.of_list acc in
   makelist die [] 0
 
-let function_type name die die_hash =
-  Format.printf "Function '%s'@." name;
+let function_type name die die_hash ctypes_for_cu =
+  Log.printf 3 "Function '%s'\n" name;
   match die with
     Die_tree ((DW_TAG_subprogram, attrs), child, _) ->
       let return_type =
         try
 	  let typeoffset = get_attr_ref attrs DW_AT_type in
-	  (*Format.printf "It's a subprogram (type=%ld).@."
+	  (*Log.printf 3 "It's a subprogram (type=%ld).\n"
 	    typeoffset;*)
 	  Ctype.resolve_type (Hashtbl.find die_hash (Int32.to_int typeoffset))
-			     die_hash
+			     die_hash ctypes_for_cu
 	with Not_found ->
 	  C_void
       and external_p = get_attr_bool_present attrs DW_AT_external
       and prototyped = get_attr_bool_present attrs DW_AT_prototyped in
       { return = return_type;
-        args = function_args child die_hash;
+        args = function_args child die_hash ctypes_for_cu;
 	local = not external_p;
 	prototyped = prototyped }
   | _ -> raise Unknown_type
@@ -63,7 +63,7 @@ type var =
     var_location : Dwarfreader.location option
   }
 
-let function_vars die die_hash locbits ~compunit_baseaddr =
+let function_vars die die_hash locbits ~compunit_baseaddr ctypes_for_cu =
   let rec makelist die acc =
     match die with
       Die_node ((DW_TAG_formal_parameter, _), sibl) ->
@@ -78,7 +78,7 @@ let function_vars die die_hash locbits ~compunit_baseaddr =
 					 ~compunit_baseaddr)
 	  with Not_found -> None in
 	let type_die = Hashtbl.find die_hash (Int32.to_int type_offset) in
-	let var_type = Ctype.resolve_type type_die die_hash in
+	let var_type = Ctype.resolve_type type_die die_hash ctypes_for_cu in
 	let type_size = Ctype.dwarf_type_size type_die die_hash in
 	let var = {
 	  var_name = var_name;

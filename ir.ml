@@ -38,7 +38,12 @@ module IrCT =
     | Arg_in -> "arg_in"
     | Caller_saved -> "caller_saved"
     | Special -> "special"
-    | Declaration -> "declaration"
+    | Declaration ct -> Printf.sprintf "declaration(%s)"
+	(Ctype.string_of_ctype ct)
+    
+    let rec string_of_member_id = function
+      Aggr_leaf x -> x
+    | Aggr_sub (x, subid) -> x ^ "." ^ (string_of_member_id subid)
     
     let string_of_unop = function
       Not -> "not"
@@ -57,7 +62,9 @@ module IrCT =
     | Status_vc -> "status_vc"
     | Status_vs -> "status_vs"
     | Address_of -> "address_of"
-    | Aggr_member _ -> "aggregate_member"
+    | Aggr_member (typ, agr) ->
+	Printf.sprintf "aggregate_member.%s (%s)" (string_of_member_id agr)
+	  (Ctype.string_of_ctype typ)
 
     let string_of_binop = function
       Add -> "add"
@@ -67,7 +74,12 @@ module IrCT =
     | Or -> "or"
     | Mul -> "mul"
     | Cmp -> "cmp"
-    
+    | Lsl -> "lsl"
+    | Lsr -> "lsr"
+    | Asr -> "asr"
+    | Ror -> "ror"
+    | Rrx -> "rrx"
+
     let string_of_triop = function
       Adc -> "adc"
     | Sbc -> "sbc"

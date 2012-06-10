@@ -143,7 +143,7 @@ let simplify_implications impl_ht =
           (Int | Pointer), None -> Hashtbl.add impl_ht regid impl
 	| (Int | Pointer) as newtype, Some othertype
 	    when newtype <> othertype ->
-	    Printf.printf "types don't match for '%s'\n"
+	    Log.printf 3 "types don't match for '%s'\n"
 	      (string_of_ssa_reg (fst regid) (snd regid))
 	| (Int | Pointer) as newtype, _ ->
             Hashtbl.replace impl_ht regid newtype
@@ -228,7 +228,7 @@ let gather_info blk_arr inforec =
 	  | C.Control (C.CompJump_ext (_, C.SSAReg (rc, rcn))) ->
 	      record_info ht (rc, rcn) Code_pointer
 	  | _ ->
-	      Printf.printf "gathered no info for '%s'\n"
+	      Log.printf 3 "gathered no info for '%s'\n"
 			    (C.string_of_code insn);
 	      ())
 	blk.Block.code)
@@ -268,15 +268,15 @@ let print_info ht =
     (fun (reg, regn) infolist ->
       List.iter
         (fun info ->
-	  Printf.printf "%s : %s\n" (string_of_ssa_reg reg regn)
-				    (string_of_info info))
+	  Log.printf 3 "%s : %s\n" (string_of_ssa_reg reg regn)
+				   (string_of_info info))
 	infolist)
     ht
 
 let print_implied_info ht =
   Hashtbl.iter
     (fun (reg, regn) impl ->
-      Printf.printf "%s : %s\n" (string_of_ssa_reg reg regn)
-				(string_of_implied_info impl))
+      Log.printf 3 "%s : %s\n" (string_of_ssa_reg reg regn)
+			       (string_of_implied_info impl))
     ht
 
