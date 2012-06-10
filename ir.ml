@@ -62,6 +62,10 @@ module IrCT =
     | Status_vc -> "status_vc"
     | Status_vs -> "status_vs"
     | Address_of -> "address_of"
+    | Sxth -> "sxth"
+    | Uxth -> "uxth"
+    | Sxtb -> "sxtb"
+    | Uxtb -> "uxtb"
     | Aggr_member (typ, agr) ->
 	Printf.sprintf "aggregate_member.%s (%s)" (string_of_member_id agr)
 	  (Ctype.string_of_ctype typ)
@@ -74,6 +78,7 @@ module IrCT =
     | Or -> "or"
     | Mul -> "mul"
     | Cmp -> "cmp"
+    | Tst -> "tst"
     | Lsl -> "lsl"
     | Lsr -> "lsr"
     | Asr -> "asr"
@@ -105,6 +110,7 @@ module IrCT =
     | U16 -> "u16"
     | S16 -> "s16"
     | Word -> "word"
+    | Dword -> "dword"
     (*| Block blk ->
         Printf.sprintf "block(%d,%s)" blk.block_size
 		       (string_of_mem blk.access_size)*)

@@ -86,30 +86,54 @@ let convert_carry_in_op addr opcode insn =
   end else
     C.Nullary (Irtypes.Untranslated)
 
-let convert_address ainf insn base index =
+let make_shifted_operand shift operand amount =
+  let op =
+    match shift with
+      Lsl ->
+	C.Binary (Irtypes.Lsl, operand, amount)
+    | Lsr ->
+	C.Binary (Irtypes.Lsr, operand, amount)
+    | Asr ->
+	C.Binary (Irtypes.Asr, operand, amount)
+    | Ror ->
+	C.Binary (Irtypes.Ror, operand, amount)
+    | Rrx ->
+	C.Binary (Irtypes.Rrx, operand, amount) in
+  Converted op
+
+let convert_address addr ainf insn base index =
   match ainf.addr_mode with
     Base_plus_imm
   | Base_plus_reg -> C.Binary (Irtypes.Add, base, index)
   | Base_minus_reg -> C.Binary (Irtypes.Sub, base, index)
+  | Base_plus_shifted_reg shift ->
+      let num_reads = Array.length insn.read_operands in
+      let shift_amt = convert_operand addr insn.read_operands.(num_reads - 1) in
+      let shifted_index = make_shifted_operand shift index shift_amt in
+      C.Binary (Irtypes.Add, base, convert_operand addr shifted_index)
+  | Base_minus_shifted_reg shift ->
+      let num_reads = Array.length insn.read_operands in
+      let shift_amt = convert_operand addr insn.read_operands.(num_reads - 1) in
+      let shifted_index = make_shifted_operand shift index shift_amt in
+      C.Binary (Irtypes.Sub, base, convert_operand addr shifted_index)
 
 let convert_load addr ainf insn access ilist =
-  let convert_operand = convert_operand addr in
-  let base = convert_operand insn.read_operands.(0)
-  and index = convert_operand insn.read_operands.(1) in
-  let addr = convert_address ainf insn base index
+  let base = convert_operand addr insn.read_operands.(0)
+  and index = convert_operand addr insn.read_operands.(1) in
+  let conv_addr = convert_address addr ainf insn base index
   and dst, loads_pc = convert_maybe_pc_operand insn.write_operands.(0) in
   let ilist' = if ainf.pre_modify then begin
-    let ilist = CS.snoc ilist (C.Set (dst, C.Load (access, addr))) in
+    let ilist = CS.snoc ilist (C.Set (dst, C.Load (access, conv_addr))) in
     if ainf.writeback then
-      let w_base = convert_operand insn.write_operands.(1) in
-      CS.snoc ilist (C.Set (w_base, addr))
+      let w_base = convert_operand addr insn.write_operands.(1) in
+      CS.snoc ilist (C.Set (w_base, conv_addr))
     else
       ilist
   end else begin
     assert ainf.writeback;
-    let w_base = convert_operand insn.write_operands.(1) in
+    let w_base = convert_operand addr insn.write_operands.(1) in
     let ilist = CS.snoc ilist (C.Set (dst, C.Load (access, base))) in
-    CS.snoc ilist (C.Set (w_base, addr))
+    CS.snoc ilist (C.Set (w_base, conv_addr))
   end in
   if loads_pc then
     CS.snoc ilist' (C.Control (C.CompJump_ext (CT.Branch_exchange, dst)))
@@ -117,23 +141,22 @@ let convert_load addr ainf insn access ilist =
     ilist'
 
 let convert_store addr ainf insn access ilist =
-  let convert_operand = convert_operand addr in
-  let base = convert_operand insn.read_operands.(1)
-  and index = convert_operand insn.read_operands.(2) in
-  let addr = convert_address ainf insn base index
-  and src = convert_operand insn.read_operands.(0) in
+  let base = convert_operand addr insn.read_operands.(1)
+  and index = convert_operand addr insn.read_operands.(2) in
+  let conv_addr = convert_address addr ainf insn base index
+  and src = convert_operand addr insn.read_operands.(0) in
   if ainf.pre_modify then begin
-    let ilist = CS.snoc ilist (C.Store (access, addr, src)) in
+    let ilist = CS.snoc ilist (C.Store (access, conv_addr, src)) in
     if ainf.writeback then
-      let w_base = convert_operand insn.write_operands.(0) in
-      CS.snoc ilist (C.Set (w_base, addr))
+      let w_base = convert_operand addr insn.write_operands.(0) in
+      CS.snoc ilist (C.Set (w_base, conv_addr))
     else
       ilist
   end else begin
     assert ainf.writeback;
-    let w_base = convert_operand insn.write_operands.(0) in
+    let w_base = convert_operand addr insn.write_operands.(0) in
     let ilist = CS.snoc ilist (C.Store (access, base, src)) in
-    CS.snoc ilist (C.Set (w_base, addr))
+    CS.snoc ilist (C.Set (w_base, conv_addr))
   end
 
 (* For LDM:
@@ -353,6 +376,16 @@ let convert_cmp addr insn =
   end else
     C.Nullary (Irtypes.Untranslated)
 
+let convert_tst addr insn =
+  let convert_operand = convert_operand addr in
+  if insn.read_flags = [] && flags_match insn.write_flags [N;Z] then begin
+    let op1 = convert_operand insn.read_operands.(0)
+    and op2 = convert_operand insn.read_operands.(1) in
+    C.Set (C.Reg (CT.Status Irtypes.CondFlags),
+	   C.Binary (Irtypes.Tst, op1, op2))
+  end else
+    C.Nullary (Irtypes.Untranslated)
+
 let convert_cbranch cond addr insn =
   let dest = insn.read_operands.(0) in
   match dest with
@@ -423,10 +456,17 @@ let rec convert_insn binf addr insn ilist blk_id bseq bseq_cons =
   | Adc -> append (convert_carry_in_op addr Irtypes.Adc insn)
   | Sbc -> append (convert_carry_in_op addr Irtypes.Sbc insn)
   | Cmp -> append (convert_cmp addr insn)
+  | Tst -> append (convert_tst addr insn)
   | Ldr ainf -> same_blk (convert_load addr ainf insn Irtypes.Word ilist)
   | Ldrb ainf -> same_blk (convert_load addr ainf insn Irtypes.U8 ilist)
   | Str ainf -> same_blk (convert_store addr ainf insn Irtypes.Word ilist)
   | Strb ainf -> same_blk (convert_store addr ainf insn Irtypes.U8 ilist)
+  | Ldrh ainf -> same_blk (convert_load addr ainf insn Irtypes.U16 ilist)
+  | Strh ainf -> same_blk (convert_store addr ainf insn Irtypes.U16 ilist)
+  | Ldrsh ainf -> same_blk (convert_load addr ainf insn Irtypes.S16 ilist)
+  | Ldrsb ainf -> same_blk (convert_load addr ainf insn Irtypes.S8 ilist)
+  | Strd ainf -> same_blk (convert_store addr ainf insn Irtypes.Dword ilist)
+  | Ldrd ainf -> same_blk (convert_load addr ainf insn Irtypes.Dword ilist)
   | Ldm minf -> same_blk (convert_ldm addr minf insn ilist)
   | Stm minf -> same_blk (convert_stm addr minf insn ilist)
   | Bx -> append (convert_bx addr insn)
@@ -463,19 +503,8 @@ and convert_shift binf addr insn ilist opc shift blk_id bseq bseq_cons =
     and operand = convert_operand addr (insn.read_operands.(num_reads - 2)) in
     let new_reads = Array.sub insn.read_operands 0 (num_reads - 1) in
     let num_reads' = Array.length new_reads in
-    let shift_code =
-      match shift with
-	Lsl ->
-          C.Binary (Irtypes.Lsl, operand, amount)
-      | Lsr ->
-          C.Binary (Irtypes.Lsr, operand, amount)
-      | Asr ->
-          C.Binary (Irtypes.Asr, operand, amount)
-      | Ror ->
-          C.Binary (Irtypes.Ror, operand, amount)
-      | Rrx ->
-          C.Binary (Irtypes.Rrx, operand, amount) in
-    new_reads.(num_reads' - 1) <- Converted shift_code;
+    let shifted_operand = make_shifted_operand shift operand amount in
+    new_reads.(num_reads' - 1) <- shifted_operand;
     convert_insn binf addr { insn with opcode = opc;
       read_operands = new_reads } ilist blk_id bseq bseq_cons
   end else

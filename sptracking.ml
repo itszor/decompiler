@@ -102,6 +102,8 @@ let try_rewrite_var vars offset stack_vars insn rewrite_as ctypes_for_cu =
   with Not_found ->
     insn
 
+exception Sp_tracking_failed
+
 let sp_track blk_arr vars ctypes_for_cu =
   let spht = Hashtbl.create 10
   and framebase_loc = ref None
@@ -153,8 +155,10 @@ let sp_track blk_arr vars ctypes_for_cu =
   | C.Set (C.SSAReg (r, rn), base) when sp_derived base ->
       let offset' = derived_offset base offset in
       Hashtbl.add spht (r, rn) offset'
-  | x -> Log.printf 3 "Don't know how to derive SP from '%s'\n"
-	   (C.string_of_code x) in
+  | x ->
+      Log.printf 3 "Don't know how to derive SP from '%s'\n"
+	(C.string_of_code x);
+      raise Sp_tracking_failed in
   let underive_sp insn r rn offset =
     Log.printf 3 "Copying sp-derived var back to SP in '%s'\n"
       (C.string_of_code insn);

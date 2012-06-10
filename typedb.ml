@@ -17,6 +17,8 @@ type infotag =
   | Halfword_stores
   | Word_loads
   | Word_stores
+  | Doubleword_loads
+  | Doubleword_stores
   | Code_pointer
 
 (* This is a really basic kind of type information, derived by scanning
@@ -81,6 +83,7 @@ let rec info_of_mem_type ~load = function
   | Irtypes.U16 -> if load then Halfword_loads else Halfword_stores
   | Irtypes.S8 -> if load then Signed_byte_loads else Byte_stores
   | Irtypes.S16 -> if load then Signed_halfword_loads else Halfword_stores
+  | Irtypes.Dword -> if load then Doubleword_loads else Doubleword_stores
   (*| Irtypes.Block { Irtypes.access_size = k } -> info_of_mem_type ~load k*)
 
 let basic_type impl_ht regid =
@@ -248,6 +251,8 @@ let string_of_info = function
   | Halfword_stores -> "stored as halfword"
   | Word_loads -> "loaded as word"
   | Word_stores -> "stored as word"
+  | Doubleword_loads -> "loaded as doubleword"
+  | Doubleword_stores -> "stored as doubleword"
   | Code_pointer -> "used as code pointer"
 
 let rec string_of_implied_info = function

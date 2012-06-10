@@ -203,8 +203,121 @@ let decode_mul_mac cond op1 bits19_8 bits3_0 =
 let decode_sync cond op1 bits19_8 bits3_0 =
   bad_insn
 
-let decode_extra_ld_st ~unpriv cond op1 bits19_8 bits3_0 =
-  bad_insn
+let decode_extra_mem cond ~size ~load ~reg op1 bits19_8 bits3_0 =
+  let extra_mem_opc size load ai =
+    match size, load with
+      `half, false -> Strh ai
+    | `half, true -> Ldrh ai
+    | `signed_half, true -> Ldrsh ai
+    | `signed_byte, true -> Ldrsb ai
+    | `dual, false -> Strd ai
+    | `dual, true -> Ldrd ai
+    | _ -> failwith "decode_extra_mem/extra_mem_opc" in
+  if reg then
+    (bitmatch op1 with
+      { p : 1; u : 1; _ : 1; w : 1; _ : 1 } ->
+        let rn, rt = bitmatch bits19_8 with
+	  { rn : 4; rt : 4 } -> rn, rt in
+	let rm = bitmatch bits3_0 with
+	  { rm : 4 } -> rm in
+        let writeback = (not p) || w in
+	let wr_operands =
+	  match load, writeback with
+	    false, true -> [| hard_reg rn |]
+	  | false, false -> [| |]
+	  | true, true -> [| hard_reg rt; hard_reg rn |]
+	  | true, false -> [| hard_reg rt |] in
+	let rd_operands =
+	  if load then [| hard_reg rn; hard_reg rm |]
+	  else [| hard_reg rt; hard_reg rn; hard_reg rm |] in
+	  let am = if u then Base_plus_reg else Base_minus_reg in
+	  let ai = { addr_mode = am; writeback = writeback; pre_modify = p } in
+	  let opc = extra_mem_opc size load ai in
+	  {
+	    opcode = conditionalise cond opc;
+	    write_operands = wr_operands;
+	    read_operands = rd_operands;
+	    write_flags = []; read_flags = []; clobber_flags = []
+	  })
+  else
+    (bitmatch op1 with
+      { p : 1; u : 1; _ : 1; w : 1; _ : 1 } ->
+        let rn, rt, imm4h = bitmatch bits19_8 with
+	  { rn : 4; rt : 4; imm4h : 4 } -> rn, rt, imm4h in
+	let imm4l = bitmatch bits3_0 with
+	  { imm4l : 4 } -> imm4l in
+	let writeback = (not p) || w in
+	let wr_operands =
+	  match load, writeback with
+	    false, true -> [| hard_reg rn |]
+	  | false, false -> [| |]
+	  | true, true -> [| hard_reg rt; hard_reg rn |]
+	  | true, false -> [| hard_reg rt |] in
+	let imm = Int32.of_int ((imm4h lsl 4) lor imm4l) in
+	let immval = if u then Immediate imm else Immediate (Int32.neg imm) in
+	let rd_operands =
+	  if load then [| hard_reg rn; immval |]
+	  else [| hard_reg rt; hard_reg rn; immval |] in
+	let ai = { addr_mode = Base_plus_imm; writeback = writeback;
+		   pre_modify = p } in
+	let opc = extra_mem_opc size load ai in
+	{
+	  opcode = conditionalise cond opc;
+	  write_operands = wr_operands;
+	  read_operands = rd_operands;
+	  write_flags = []; read_flags = []; clobber_flags = []
+	})
+
+(* OP2 is bits 7...4.  *)
+
+let decode_extra_ld_st ~unpriv cond op1 bits19_8 op2 bits3_0 =
+  bitmatch op2 with
+    { true : 1; 0b01 : 2; true : 1 } ->
+      (bitmatch op1 with
+        { _ : 2; false : 1; _ : 1; false : 1 } ->
+	  decode_extra_mem cond ~size:`half ~load:false ~reg:true op1 bits19_8
+			   bits3_0
+      | { _ : 2; false : 1; _ : 1; true : 1 } ->
+          decode_extra_mem cond ~size:`half ~load:true ~reg:true op1 bits19_8
+			   bits3_0
+      | { _ : 2; true : 1; _ : 1; false : 1 } ->
+          decode_extra_mem cond ~size:`half ~load:false ~reg:false op1 bits19_8
+			   bits3_0
+      | { _ : 2; true : 1; _ : 1; true : 1 } ->
+          decode_extra_mem cond ~size:`half ~load:true ~reg:false op1 bits19_8
+			   bits3_0
+      | { _ } -> bad_insn)
+  | { true : 1; 0b10 : 2; true : 1 } ->
+      (bitmatch op1 with
+        { _ : 2; false : 1; _ : 1; false : 1 } ->
+	  decode_extra_mem cond ~size:`dual ~load:true ~reg:true op1 bits19_8
+			   bits3_0
+      | { _ : 2; false : 1; _ : 1; true : 1 } ->
+          decode_extra_mem cond ~size:`signed_byte ~load:true ~reg:true op1
+			   bits19_8 bits3_0
+      | { _ : 2; true : 1; _ : 1; false : 1 } ->
+	  decode_extra_mem cond ~size:`dual ~load:true ~reg:false op1 bits19_8
+			   bits3_0
+      | { _ : 2; true : 1; _ : 1; true : 1 } ->
+	  decode_extra_mem cond ~size:`signed_byte ~load:true ~reg:false op1
+			   bits19_8 bits3_0
+      | { _ } -> bad_insn)
+  | { true : 1; 0b11 : 2; true : 1 } ->
+      (bitmatch op1 with
+        { _ : 2; false : 1; _ : 1; false : 1 } ->
+	  decode_extra_mem cond ~size:`dual ~load:false ~reg:true op1 bits19_8
+			   bits3_0
+      | { _ : 2; false : 1; _ : 1; true : 1 } ->
+          decode_extra_mem cond ~size:`signed_half ~load:true ~reg:true op1
+			   bits19_8 bits3_0
+      | { _ : 2; true : 1; _ : 1; false : 1 } ->
+          decode_extra_mem cond ~size:`dual ~load:false ~reg:false op1 bits19_8
+			   bits3_0
+      | { _ : 2; true : 1; _ : 1; true : 1 } ->
+          decode_extra_mem cond ~size:`signed_half ~load:true ~reg:false op1
+			   bits19_8 bits3_0
+      | { _ } -> bad_insn)
+  | { _ } -> bad_insn
 
 let union_flags a b =
   a @ b
@@ -441,10 +554,10 @@ let decode_dp_misc cond ibits =
 	    0b1001 : 4 } -> decode_sync cond op1 bits19_8 bits3_0
 	| { false : 1; _ : 2; true : 1; _ : 1;
 	    (0b1011 | 0b1101 | 0b1111) : 4 } ->
-	    decode_extra_ld_st ~unpriv:true cond op1 bits19_8 bits3_0
+	    decode_extra_ld_st ~unpriv:true cond op1 bits19_8 op2 bits3_0
 	| { _ : 5;
 	    (0b1011 | 0b1101 | 0b1111) : 4 } ->
-	    decode_extra_ld_st ~unpriv:false cond op1 bits19_8 bits3_0
+	    decode_extra_ld_st ~unpriv:false cond op1 bits19_8 op2 bits3_0
 	| { _ : 5;
 	    _ : 3; false : 1 } -> decode_dp_reg_or_imm cond bits24_0 ~reg:true
 	| { _ : 5;
@@ -583,8 +696,168 @@ let decode_ldr_str_ldrb_strb cond ibits =
     decode_ldrb ~reg:true cond bits25_0
   | { _ } -> bad_insn
 
-let decode_media cond ibits =
+let decode_parallel_add_sub cond ~signed bits21_0 =
   bad_insn
+
+let decode_pkh cond bits22_0 =
+  bad_insn
+
+let decode_ssat cond bits22_0 =
+  bad_insn
+
+let decode_usat cond bits22_0 =
+  bad_insn
+
+let decode_sxtb16 cond bits22_0 =
+  bad_insn
+
+let decode_sxtab16 cond bits22_0 =
+  bad_insn
+
+let decode_sel cond bits22_0 =
+  bad_insn
+
+let decode_ssat16 cond bits22_0 =
+  bad_insn
+
+let decode_extract cond ~signed ~size bits22_0 =
+  bitmatch bits22_0 with
+    { _ : 7; rd : 4; rot : 2; _ : 6; rm : 4 } ->
+    if rot = 0b00 then begin
+      let opc =
+        match signed, size with
+	  false, `byte -> Uxtb
+	| false, `half -> Uxth
+	| true, `byte -> Sxtb
+	| true, `half -> Sxth in
+      {
+        opcode = conditionalise cond opc;
+	write_operands = [| hard_reg rd |];
+	read_operands = [| hard_reg rm |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      } 
+    end else
+      bad_insn
+  | { _ } -> bad_insn
+
+let decode_sxtab cond bits22_0 =
+  bad_insn
+
+let decode_rev cond bits22_0 =
+  bad_insn
+
+let decode_sxtah cond bits22_0 =
+  bad_insn
+
+let decode_rev16 cond bits22_0 =
+  bad_insn
+
+let decode_uxtb16 cond bits22_0 =
+  bad_insn
+
+let decode_uxtab16 cond bits22_0 =
+  bad_insn
+
+let decode_usat16 cond bits22_0 =
+  bad_insn
+
+let decode_uxtab cond bits22_0 =
+  bad_insn
+
+let decode_rbit cond bits22_0 =
+  bad_insn
+
+let decode_uxtah cond bits22_0 =
+  bad_insn
+
+let decode_revsh cond bits22_0 =
+  bad_insn
+
+let decode_pack_unpack_sat_rev cond bits22_0 =
+  bitmatch bits22_0 with
+    { 0b000 : 3; _ : 14; false : 1 } ->
+    decode_pkh cond bits22_0
+  | { 0b01 : 2; _ : 15; false : 1 } ->
+    decode_ssat cond bits22_0
+  | { 0b11 : 2; _ : 15; false : 1 } ->
+    decode_usat cond bits22_0
+  | { 0b000 : 3; 0b1111 : 4; _ : 8; 0b011 : 3 } ->
+    decode_sxtb16 cond bits22_0
+  | { 0b000 : 3; _ : 12; 0b011 : 3 } ->
+    decode_sxtab16 cond bits22_0
+  | { 0b000 : 3; _ : 12; 0b101 : 3 } ->
+    decode_sel cond bits22_0
+  | { 0b010 : 3; _ : 12; 0b001 : 3 } ->
+    decode_ssat16 cond bits22_0
+  | { 0b010 : 3; 0b1111 : 4; _ : 8; 0b011 : 3 } ->
+    decode_extract cond ~signed:true ~size:`byte bits22_0
+  | { 0b010 : 3; _ : 12; 0b011 : 3 } ->
+    decode_sxtab cond bits22_0
+  | { 0b011 : 3; _ : 12; 0b001 : 3 } ->
+    decode_rev cond bits22_0
+  | { 0b011 : 3; 0b1111 : 4; _ : 8; 0b011 : 3 } ->
+    decode_extract cond ~signed:true ~size:`half bits22_0
+  | { 0b011 : 3; _ : 12; 0b011 : 3 } ->
+    decode_sxtah cond bits22_0
+  | { 0b011 : 3; _ : 12; 0b101 : 3 } ->
+    decode_rev16 cond bits22_0
+  | { 0b100 : 3; 0b1111 : 4; _ : 8; 0b011 : 3 } ->
+    decode_uxtb16 cond bits22_0
+  | { 0b100 : 3; _ : 12; 0b011 : 3 } ->
+    decode_uxtab16 cond bits22_0
+  | { 0b110 : 3; _ : 12; 0b001 : 3 } ->
+    decode_usat16 cond bits22_0
+  | { 0b110 : 3; 0b1111 : 4; _ : 8; 0b011 : 3 } ->
+    decode_extract cond ~signed:false ~size:`byte bits22_0
+  | { 0b110 : 3; _ : 12; 0b011 : 3 } ->
+    decode_uxtab cond bits22_0
+  | { 0b111 : 3; _ : 12; 0b001 : 3 } ->
+    decode_rbit cond bits22_0
+  | { 0b111 : 3; 0b1111 : 4; _ : 8; 0b011 : 3 } ->
+    decode_extract cond ~signed:false ~size:`half bits22_0
+  | { 0b111 : 3; _ : 12; 0b011 : 3 } ->
+    decode_uxtah cond bits22_0
+  | { 0b111 : 3; _ : 12; 0b101 : 3 } ->
+    decode_revsh cond bits22_0
+
+let decode_signed_multiply cond bits22_0 =
+  bad_insn
+
+let decode_usad8 cond ~accumulate ibits =
+  bad_insn
+
+let decode_bfx cond ~signed ibits =
+  bad_insn
+
+let decode_bfc cond ibits =
+  bad_insn
+
+let decode_bfi cond ibits =
+  bad_insn
+
+let decode_media cond ibits =
+  bitmatch ibits with
+    { _ : 7; 0b000 : 3; bits21_0 : 22 : bitstring } ->
+      decode_parallel_add_sub cond ~signed:true bits21_0
+  | { _ : 7; 0b001 : 3; bits21_0 : 22 : bitstring } ->
+      decode_parallel_add_sub cond ~signed:false bits21_0
+  | { _ : 7; 0b01 : 2; bits22_0 : 23 : bitstring } ->
+      decode_pack_unpack_sat_rev cond bits22_0
+  | { _ : 7; 0b10 : 2; bits22_0 : 23 : bitstring } ->
+      decode_signed_multiply cond bits22_0
+  | { _ : 7; 0b11000 : 5; _ : 4; 0b1111 : 4; _ : 4; 0b000 : 3 } ->
+      decode_usad8 cond ~accumulate:false ibits
+  | { _ : 7; 0b11000 : 5; _ : 12; 0b000 : 3 } ->
+      decode_usad8 cond ~accumulate:true ibits
+  | { _ : 7; 0b1101 : 4; _ : 13; _ : 1; 0b10 : 2 } ->
+      decode_bfx cond ~signed:true ibits
+  | { _ : 7; 0b1110 : 4; _ : 5; 0b1111 : 4; _ : 5; 0b00 : 2 } ->
+      decode_bfc cond ibits
+  | { _ : 7; 0b1110 : 4; _ : 14; 0b00 : 2 } ->
+      decode_bfi cond ibits
+  | { _ : 7; 0b1111 : 4; _ : 14; 0b10 : 2 } ->
+      decode_bfx cond ~signed:false ibits
+  | { _ } -> bad_insn
 
 let decode_branch cond ~link bits23_0 =
   bitmatch bits23_0 with
@@ -706,4 +979,4 @@ let decode_insns ibits num_insns =
 
 let decode_immediate imm_insn =
   let insn_bits = BITSTRING { imm_insn : 32 } in
-  decode_insn insn_bits
+  decode_insn_byterev insn_bits

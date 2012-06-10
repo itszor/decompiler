@@ -24,6 +24,10 @@ type ir_unop =
   | Status_vs
   | Address_of
   | Aggr_member of Ctype.ctype * aggr_member_id
+  | Uxtb
+  | Sxtb
+  | Uxth
+  | Sxth
 
 (* Code will look like:
 
@@ -44,6 +48,7 @@ type ir_binop =
   | Or
   | Mul
   | Cmp
+  | Tst
   | Lsl
   | Lsr
   | Asr
@@ -63,14 +68,7 @@ type ir_mem =
   | U16
   | S16
   | Word
-  (*| Block of block_info
-
-and block_info =
-  {
-    ctype : Ctype.ctype;
-    block_size : int;
-    access_size : ir_mem
-  }*)
+  | Dword
 
 type ir_statusbits =
     Carry      (* Just the carry flag.  *)

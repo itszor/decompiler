@@ -256,12 +256,13 @@ let add_stackvars_to_entry_block blk_arr entry_pt_ref regset =
     code in
   blk_arr.(entry_pt_ref).Block.code <- code'
 
-let binf = open_file "libGLESv2.so"
+(*let binf = open_file "libGLESv2.so"*)
 (*let binf = open_file "foo"*)
+let binf = open_file "libglslcompiler.so"
 
 let go symname =
-  Log.printf 1 "*** decompiling '%s' ***\n" symname;
   let sym = Symbols.find_named_symbol binf.symbols binf.strtab symname in
+  Log.printf 1 "*** decompiling '%s' ***\n" symname;
   let entry_point = sym.Elfreader.st_value in
   let entry_point_ba = Irtypes.BlockAddr entry_point in
   let code = code_for_sym binf binf.text binf.mapping_syms sym in
@@ -319,8 +320,10 @@ let go symname =
   dump_blockarr blk_arr'
 
 let _ =
-  Log.loglevel := 2;
-  go "InitAccumUSECodeBlocks"
+  Log.loglevel := 4;
+  (*go "InitAccumUSECodeBlocks"*)
+  (*;go "AddComparisonToUFCode"*)
+  go "ProcessICInstIFNOT"
 
 let pubnames = Dwarfreader.parse_all_pubname_data binf.debug_pubnames
 

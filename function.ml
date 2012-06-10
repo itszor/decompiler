@@ -87,6 +87,11 @@ let function_vars die die_hash locbits ~compunit_baseaddr ctypes_for_cu =
 	  var_location = var_loc
 	} in
 	makelist sibl (var :: acc)
+    | Die_tree ((DW_TAG_lexical_block, attrs), child, _) ->
+        (* FIXME: this is sketchy! Match up genuine lexical blocks to basic
+	   blocks, and handle nested declarations properly.  *)
+        Log.printf 3 "lexical block within function\n";
+	makelist child acc
     | _ -> acc in
   match die with
     Die_tree ((DW_TAG_subprogram, attrs), child, _) ->

@@ -17,6 +17,12 @@ type opcode =
   | Str of access_info
   | Ldrb of access_info
   | Strb of access_info
+  | Ldrh of access_info
+  | Strh of access_info
+  | Ldrsh of access_info
+  | Ldrsb of access_info
+  | Strd of access_info
+  | Ldrd of access_info
   | And
   | Eor
   | Sub
@@ -46,6 +52,10 @@ type opcode =
   | Umlal
   | Smull
   | Smlal
+  | Uxtb
+  | Uxth
+  | Sxtb
+  | Sxth
   | Shifted of opcode * shift_opcode
   | Conditional of condition * opcode
   | BAD

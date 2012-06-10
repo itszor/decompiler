@@ -79,7 +79,7 @@ let rec dwarf_type_size die die_hash =
 	  let upper_bound = get_attr_int attrs DW_AT_upper_bound in
 	  let elem_type = get_attr_deref attrs DW_AT_type die_hash in
 	  let elsize = dwarf_type_size elem_type die_hash in
-	  elsize * upper_bound
+	  elsize * (upper_bound + 1)
       | _ -> failwith "can't find array size"
       end
   | Die_node (((DW_TAG_volatile_type | DW_TAG_const_type), attrs), _) ->
@@ -187,7 +187,7 @@ let rec resolve_type die die_hash ctypes_for_cu =
 	  let upper_bound = get_attr_int attrs DW_AT_upper_bound in
 	  let elem_type = get_attr_deref attrs DW_AT_type die_hash in
 	  let typ = resolve_type elem_type die_hash ctypes_for_cu in
-	  C_array (upper_bound, typ)
+	  C_array (upper_bound + 1, typ)
       | _ -> raise (Unresolved_type die')
       end
   | Die_tree ((DW_TAG_subroutine_type, _), _, _) ->
