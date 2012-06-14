@@ -351,8 +351,14 @@ let convert_bl binf addr insn =
 	    fn_ret fn_inf.Function.return in
 	  C.Control (C.Call_ext (abi, ct_sym, passes, ret_addr, returns))
       | ".plt" ->
-          let sym = (!symbol_for_plt_entry) binf call_addr in
-	  let sym_name = Symbols.symbol_name sym binf.Binary_info.dynstr in
+          let sym, sym_name =
+	    try
+	      let sym = (!symbol_for_plt_entry) binf call_addr in
+	      let sym_name = Symbols.symbol_name sym binf.Binary_info.dynstr in
+	      sym, sym_name
+	    with Not_found ->
+	      List.hd binf.Binary_info.symbols,
+	      Printf.sprintf "<plt@%lx>" call_addr in
 	  begin try
 	    let fn_inf = Builtin.builtin_function_type sym_name in
             C.Control (C.Call_ext (CT.Plt_call, CT.Symbol (sym_name, sym),

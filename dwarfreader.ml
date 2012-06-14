@@ -1082,15 +1082,16 @@ let parse_loc_list dwbits ~addr_size ~compunit_baseaddr =
         end_address : 32 : littleendian;
 	loc_length : 16 : littleendian; (* Undocumented!  *)
 	loc_expr : -1 : bitstring } ->
-      let start_address' = Int32.add start_address compunit_baseaddr
-      and end_address' = Int32.add end_address compunit_baseaddr in
-      if start_address = 0l && end_address = 0l then
-        List.rev acc
-      else if start_address = 0xffffffffl then
-        failwith "base address selection"
-      else
-        let dw_op, rest = parse_operation loc_expr ~addr_size in
-	build rest ((start_address', end_address', dw_op) :: acc) in
+	let start_address' = Int32.add start_address compunit_baseaddr
+	and end_address' = Int32.add end_address compunit_baseaddr in
+	if start_address = 0l && end_address = 0l then
+          List.rev acc
+	else if start_address = 0xffffffffl then
+          failwith "base address selection"
+	else
+          let dw_op, rest = parse_operation loc_expr ~addr_size in
+	  build rest ((start_address', end_address', dw_op) :: acc)
+    | { _ } -> List.rev acc in
   build dwbits []
 
 exception Type_mismatch of string

@@ -258,24 +258,28 @@ let add_stackvars_to_entry_block blk_arr entry_pt_ref regset =
 
 (*let binf = open_file "libGLESv2.so"*)
 (*let binf = open_file "foo"*)
-let binf = open_file "libglslcompiler.so"
+(*let binf = open_file "libglslcompiler.so"*)
+let binf = open_file "tests/hello"
 
 let go symname =
   let sym = Symbols.find_named_symbol binf.symbols binf.strtab symname in
   Log.printf 1 "*** decompiling '%s' ***\n" symname;
   let entry_point = sym.Elfreader.st_value in
+  Log.printf 2 "entry point: %lx\n" entry_point;
   let entry_point_ba = Irtypes.BlockAddr entry_point in
   let code = code_for_sym binf binf.text binf.mapping_syms sym in
   let cu_offset_for_sym = cu_offset_for_address binf entry_point in
-  let cu = Hashtbl.find binf.cu_hash cu_offset_for_sym in
-  let base_addr_for_cu = base_addr_for_comp_unit cu.ci_dies in
-  let die = Hashtbl.find cu.ci_dieaddr entry_point in
-  let ft = Function.function_type symname die cu.ci_dietab cu.ci_ctypes in
+  let cu_inf = Hashtbl.find binf.cu_hash cu_offset_for_sym in
+  let base_addr_for_cu = base_addr_for_comp_unit cu_inf.ci_dies in
+  Log.printf 2 "comp unit base addr: %lx\n" base_addr_for_cu;
+  let die = Hashtbl.find cu_inf.ci_dieaddr entry_point in
+  let ft = Function.function_type symname die cu_inf.ci_dietab
+				  cu_inf.ci_ctypes in
   let framebase =
-    Function.function_frame_base die cu.ci_dietab binf.debug_loc
+    Function.function_frame_base die cu_inf.ci_dietab binf.debug_loc
       ~compunit_baseaddr:base_addr_for_cu in
-  let vars = Function.function_vars die cu.ci_dietab binf.debug_loc
-	       ~compunit_baseaddr:base_addr_for_cu cu.ci_ctypes in
+  let vars = Function.function_vars die cu_inf.ci_dietab binf.debug_loc
+	       ~compunit_baseaddr:base_addr_for_cu cu_inf.ci_ctypes in
   let blockseq, ht = bs_of_code_hash ft binf code entry_point_ba framebase in
   Log.printf 1 "--- initial blockseq ---\n";
   dump_blockseq blockseq;
@@ -304,7 +308,7 @@ let go symname =
 			      binf.mapping_syms binf.strtab blk_arr inforec in
   dump_blockarr blk_arr';
   Log.printf 1 "--- sp tracking ---\n";
-  let sp_var_set = Sptracking.sp_track blk_arr' vars cu.ci_ctypes in
+  let sp_var_set = Sptracking.sp_track blk_arr' vars cu_inf.ci_ctypes in
   add_stackvars_to_entry_block blk_arr' 0 sp_var_set;
   dump_blockarr blk_arr';
   Log.printf 1 "--- SSA conversion (2) ---\n";
@@ -323,7 +327,8 @@ let _ =
   Log.loglevel := 4;
   (*go "InitAccumUSECodeBlocks"*)
   (*;go "AddComparisonToUFCode"*)
-  go "ProcessICInstIFNOT"
+  (*go "ProcessICInstIFNOT"*)
+  go "main2"
 
 let pubnames = Dwarfreader.parse_all_pubname_data binf.debug_pubnames
 

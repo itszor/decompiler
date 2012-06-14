@@ -45,23 +45,39 @@ type binary_info = {
 }
 
 let index_dies_by_low_pc dieaddr_ht dies =
+  Log.printf 3 "index_dies_by_low_pc\n";
   let rec scan = function
-    Die_node ((DW_TAG_compile_unit, _), children) ->
+    Die_node ((DW_TAG_compile_unit, attrs), children) ->
       scan children
   | Die_tree ((DW_TAG_subprogram, sp_attrs), children, sibl) as die ->
       begin try
-        (*let name = get_attr_string sp_attrs DW_AT_name in*)
+        let name = get_attr_string sp_attrs DW_AT_name in
         let lowpc = get_attr_address sp_attrs DW_AT_low_pc in
-	(*Printf.printf "name: '%s', low pc: %lx\n" name lowpc;*)
+	Log.printf 3 "name: '%s', low pc: %lx\n" name lowpc;
 	Hashtbl.add dieaddr_ht lowpc die
       with Not_found -> ()
       end;
       scan children;
       scan sibl
-  | Die_tree (_, children, sibl) ->
+  | Die_node ((DW_TAG_subprogram, sp_attrs), sibl) as die ->
+      begin try
+        let name = get_attr_string sp_attrs DW_AT_name in
+        let lowpc = get_attr_address sp_attrs DW_AT_low_pc in
+	Log.printf 3 "name: '%s', low pc: %lx\n" name lowpc;
+	Hashtbl.add dieaddr_ht lowpc die
+      with Not_found -> ()
+      end;
+      scan sibl
+  | Die_tree ((_, attrs), children, sibl) ->
+      let name = try get_attr_string attrs DW_AT_name
+      with Not_found -> "unknown name" in
+      Log.printf 4 "tree (%s)\n" name;
       scan children;
       scan sibl
-  | Die_node (_, sibl) ->
+  | Die_node ((_, attrs), sibl) ->
+      let name = try get_attr_string attrs DW_AT_name
+      with Not_found -> "unknown name" in
+      Log.printf 4 "node (%s)\n" name;
       scan sibl
   | Die_empty -> ()
   in

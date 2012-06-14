@@ -155,6 +155,8 @@ let sp_track blk_arr vars ctypes_for_cu =
   | C.Set (C.SSAReg (r, rn), base) when sp_derived base ->
       let offset' = derived_offset base offset in
       Hashtbl.add spht (r, rn) offset'
+    (* Maybe we can handle Phi nodes here -- if all the inputs correspond to
+       the same thing.  Dunno how likely that is.  *)
   | x ->
       Log.printf 3 "Don't know how to derive SP from '%s'\n"
 	(C.string_of_code x);

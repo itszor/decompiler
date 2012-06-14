@@ -308,6 +308,7 @@ let decode_arm_rel = function
   | 253 -> R_ARM_RABS22
   | 254 -> R_ARM_RPC24
   | 255 -> R_ARM_RBASE
+  | _ -> raise (Elf_read_error "decode_arm_rel")
 
 type elf_rel =
 {
@@ -331,10 +332,12 @@ let parse_rel elfbits =
 let parse_rel_sec elfbits =
   let rec scan acc bits =
     let rel, more = parse_rel bits in
-    if Bitstring.bitstring_length more = 0 then
-      Array.of_list (List.rev acc)
-    else
-      scan (rel::acc) more in
+    let acc' = rel::acc in
+    if Bitstring.bitstring_length more = 0 then begin
+      Log.printf 3 "Parsed %d relocations\n" (List.length acc');
+      Array.of_list (List.rev acc')
+    end else
+      scan acc' more in
   scan [] elfbits
 
 type elf_rela =

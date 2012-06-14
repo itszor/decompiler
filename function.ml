@@ -33,8 +33,6 @@ let function_type name die die_hash ctypes_for_cu =
       let return_type =
         try
 	  let typeoffset = get_attr_ref attrs DW_AT_type in
-	  (*Log.printf 3 "It's a subprogram (type=%ld).\n"
-	    typeoffset;*)
 	  Ctype.resolve_type (Hashtbl.find die_hash (Int32.to_int typeoffset))
 			     die_hash ctypes_for_cu
 	with Not_found ->
@@ -45,11 +43,26 @@ let function_type name die die_hash ctypes_for_cu =
         args = function_args child die_hash ctypes_for_cu;
 	local = not external_p;
 	prototyped = prototyped }
+  | Die_node ((DW_TAG_subprogram, attrs), _) ->
+      let return_type =
+        try
+	  let typeoffset = get_attr_ref attrs DW_AT_type in
+	  Ctype.resolve_type (Hashtbl.find die_hash (Int32.to_int typeoffset))
+			     die_hash ctypes_for_cu
+	with Not_found ->
+	  C_void
+      and external_p = get_attr_bool_present attrs DW_AT_external
+      and prototyped = get_attr_bool_present attrs DW_AT_prototyped in
+      { return = return_type;
+        args = [| |];
+	local = not external_p;
+	prototyped = prototyped }
   | _ -> raise Unknown_type
 
 let function_frame_base die die_hash locbits ~compunit_baseaddr =
   match die with
-    Die_tree ((DW_TAG_subprogram, attrs), _, _) ->
+    Die_tree ((DW_TAG_subprogram, attrs), _, _)
+  | Die_node ((DW_TAG_subprogram, attrs), _) ->
       let framebase = get_attr_loc attrs DW_AT_frame_base locbits
 				   ~addr_size:4 ~compunit_baseaddr in
       framebase
