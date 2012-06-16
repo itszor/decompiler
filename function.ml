@@ -4,29 +4,38 @@ open Dwarfreader
 type function_info =
   {
     args : ctype array;
+    arg_locs : location option array;
+    arg_names : string array;
     return : ctype;
     local : bool;
     prototyped : bool
   }
 
-let function_args die die_hash ctypes_for_cu =
+let function_args binf die die_hash ctypes_for_cu ~compunit_baseaddr =
   let rec makelist die acc argno =
     match die with
       Die_node ((DW_TAG_formal_parameter, attrs), sibl) ->
 	let argname = get_attr_string attrs DW_AT_name in
 	Log.printf 3 "Arg %d, '%s':\n" argno argname;
 	let typeoffset = get_attr_ref attrs DW_AT_type in
+	let loc = try
+	  Some (get_attr_loc attrs DW_AT_location binf.Binary_info.debug_loc
+			     ~addr_size:4 ~compunit_baseaddr)
+	with Not_found -> None in
 	(*let die_bits' = offset_section die_bits typeoffset in*)
 	let die = Hashtbl.find die_hash (Int32.to_int typeoffset) in
 	let ctype = Ctype.resolve_type die die_hash ctypes_for_cu in
 	(* parse_die_and_children die_bits' ~abbrevs:abbrevs
           ~addr_size:cu_header.address_size ~string_sec:debug_str_sec in *)
 	(*Dwarfprint.print_die die die_hash;*)
-	makelist sibl (ctype :: acc) (succ argno)
-    | _ -> Array.of_list acc in
+	makelist sibl ((argname, ctype, loc) :: acc) (succ argno)
+    | _ ->
+	Array.of_list (List.map (fun (n, _, _) -> n) acc),
+	Array.of_list (List.map (fun (_, t, _) -> t) acc),
+	Array.of_list (List.map (fun (_, _, l) -> l) acc) in
   makelist die [] 0
 
-let function_type name die die_hash ctypes_for_cu =
+let function_type binf name die die_hash ctypes_for_cu ~compunit_baseaddr =
   Log.printf 3 "Function '%s'\n" name;
   match die with
     Die_tree ((DW_TAG_subprogram, attrs), child, _) ->
@@ -39,8 +48,12 @@ let function_type name die die_hash ctypes_for_cu =
 	  C_void
       and external_p = get_attr_bool_present attrs DW_AT_external
       and prototyped = get_attr_bool_present attrs DW_AT_prototyped in
+      let argnames, args, arglocs =
+        function_args binf child die_hash ctypes_for_cu ~compunit_baseaddr in
       { return = return_type;
-        args = function_args child die_hash ctypes_for_cu;
+        args = args;
+	arg_locs = arglocs;
+	arg_names = argnames;
 	local = not external_p;
 	prototyped = prototyped }
   | Die_node ((DW_TAG_subprogram, attrs), _) ->
@@ -55,6 +68,8 @@ let function_type name die die_hash ctypes_for_cu =
       and prototyped = get_attr_bool_present attrs DW_AT_prototyped in
       { return = return_type;
         args = [| |];
+	arg_locs = [| |];
+	arg_names = [| |];
 	local = not external_p;
 	prototyped = prototyped }
   | _ -> raise Unknown_type

@@ -1179,5 +1179,16 @@ let get_attr_member_loc attrs typ ~addr_size =
       end
   | _ -> raise (Type_mismatch "member_loc")
 
+let rec loc_for_addr addr loc =
+  match loc with
+    Loc_expr d -> d
+  | Loc_list ll ->
+      let _, _, op =
+        List.find
+	  (fun (range_start, range_end, _) ->
+	    addr >= range_start && addr < range_end)
+	  ll in
+      op
+
 let attr_present attrs typ =
   List.mem_assoc typ attrs

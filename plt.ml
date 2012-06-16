@@ -9,6 +9,8 @@ module C = Ir.Ir
 let dummy_loc = Dwarfreader.Loc_expr (`DW_OP_reg 13)
 
 let decode_stub binf addr =
+  (* We're not interested in gathering info for stubs.  *)
+  let inforec = Typedb.create_info () in
   let plt_sec_num = get_section_number binf.elfbits binf.ehdr binf.shdr_arr
 				       ".plt" in
   let plt_start_addr = binf.shdr_arr.(plt_sec_num).sh_addr in
@@ -21,7 +23,7 @@ let decode_stub binf addr =
       Decode_arm.decode_insn (Bitstring.dropbits (i * 32) stub_bits) in
     stub_insns := Deque.snoc !stub_insns decoded
   done;
-  Insn_to_ir.convert_block binf (Irtypes.BlockAddr addr) BS.empty
+  Insn_to_ir.convert_block binf inforec (Irtypes.BlockAddr addr) BS.empty
 			   (fun _ blk bseq -> BS.cons blk bseq) addr
 			   !stub_insns (Hashtbl.create 0) dummy_loc
 

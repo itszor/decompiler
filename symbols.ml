@@ -69,9 +69,15 @@ let find_named_symbol symbols strtab name =
     (fun sym -> symbol_name sym strtab = name)
     symbols
 
-let find_symbol_by_addr symbols addr =
+let find_symbol_by_addr ?filter symbols addr =
   List.find
-    (fun sym -> sym.Elfreader.st_value = addr)
+    (fun sym ->
+      if sym.Elfreader.st_value = addr then
+	match filter with
+          None -> true
+	| Some filter_fn -> filter_fn sym
+      else
+        false)
     symbols
 
 let find_symbols_for_addr_range symbols addr_lo addr_hi =

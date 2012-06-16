@@ -2,6 +2,10 @@ open Elfreader
 open Dwarfreader
 
 type cu_info = {
+  (* Base address of this compilation unit in the binary.  *)
+  ci_baseaddr : int32;
+  (* Address size for CU.  *)
+  ci_addrsize : int;
   (* Debug info entries for compilation unit, indexed by offset into table.  *)
   ci_dietab : (int, tag_attr_die) Hashtbl.t;
   (* Symbols defined in CU, indexed by symbol address.  *)
@@ -83,6 +87,14 @@ let index_dies_by_low_pc dieaddr_ht dies =
   in
   scan dies
 
+(* Assumes DW_TAG_compile_unit comes first... hm.  *)
+
+let base_addr_for_comp_unit cu_die =
+  match cu_die with
+    Die_node ((DW_TAG_compile_unit, attrs), _) ->
+      get_attr_address attrs DW_AT_low_pc
+  | _ -> raise Not_found
+
 let index_debug_data binf parsed_data =
   List.iter
     (fun (ar_hdr, ranges) ->
@@ -99,6 +111,8 @@ let index_debug_data binf parsed_data =
 	      ~abbrevs:abbrevs ~addr_size:cu_header.address_size
 	      ~string_sec:binf.debug_str_sec in
 	  let cu_inf = {
+	    ci_baseaddr = base_addr_for_comp_unit cu_dies;
+	    ci_addrsize = cu_header.address_size;
 	    ci_dietab = die_hash;
 	    ci_symtab = Hashtbl.create 10;
 	    ci_dieaddr = Hashtbl.create 10;
@@ -192,10 +206,3 @@ let cu_offset_for_address binf addr =
     binf.parsed_aranges in
   ar_hdr.ar_debug_info_offset
 
-(* Assumes DW_TAG_compile_unit comes first... hm.  *)
-
-let base_addr_for_comp_unit cu_die =
-  match cu_die with
-    Die_node ((DW_TAG_compile_unit, attrs), _) ->
-      get_attr_address attrs DW_AT_low_pc
-  | _ -> raise Not_found

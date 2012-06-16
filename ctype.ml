@@ -33,6 +33,14 @@ type ctype_info = {
   ct_typetags : (string, ctype) Hashtbl.t
 }
 
+let rec pointer_type ctyp = 
+  match ctyp with
+    C_pointer _ -> true
+  | C_const c | C_volatile c -> pointer_type c
+  | C_typedef _
+  | C_typetag _ -> failwith "unknown if pointer, fixme"
+  | _ -> false
+
 let string_of_ctype ctyp =
   let rec scan = function
     C_void -> "void"

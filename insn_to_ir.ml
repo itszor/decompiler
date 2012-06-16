@@ -285,14 +285,35 @@ let find_symbol symbols strtab addr =
   with Not_found ->
     CT.Absolute addr
 
-let fn_args ft_args =
+let fn_args inforec callee_addr bl_addr ft_args arglocs =
   let args_from_ctype = Array.mapi
     (fun i typ ->
-      match i with
-        (0 | 1 | 2 | 3) as r -> C.Reg (CT.Hard_reg r)
-      | n -> C.Load (Irtypes.Word,
-		     C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
-			       C.Immed (Int32.of_int ((n - 4) * 4)))))
+      match arglocs.(i) with
+        Some loc ->
+	  begin match Dwarfreader.loc_for_addr callee_addr loc with
+	    `DW_OP_reg r ->
+	      let reg = CT.Hard_reg r in
+	      let id = C.create_id () in
+	      Typedb.record_reg_info_for_id inforec reg id
+	        (Typedb.Used_as_type ft_args.(i));
+	      C.With_id (id, C.Reg reg)
+	  | `DW_OP_fbreg o ->
+	      let stackreg = CT.Stack o in
+	      let id = C.create_id () in
+	      Typedb.record_reg_info_for_id inforec stackreg id
+		(Typedb.Used_as_type ft_args.(i));
+	      C.With_id (id, C.Load (Irtypes.Word,
+			       C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
+					 C.Immed (Int32.of_int o))))
+	  | x -> failwith "fn_args/location"
+	  end
+      | None ->
+	  begin match i with
+            (0 | 1 | 2 | 3) as r -> C.Reg (CT.Hard_reg r)
+	  | n -> C.Load (Irtypes.Word,
+			 C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
+				   C.Immed (Int32.of_int ((n - 4) * 4))))
+	  end)
     ft_args in
   C.Nary (Irtypes.Fnargs, Array.to_list args_from_ctype)
 
@@ -320,7 +341,7 @@ exception Calling of string
 (* This is awful: a circular dependency!  Find a nicer solution...  *)
 let symbol_for_plt_entry = ref (fun _ _ -> failwith "binding")
 
-let convert_bl binf addr insn =
+let convert_bl binf inforec addr insn =
   let dest = insn.read_operands.(0) in
   match dest with
     PC_relative i ->
@@ -343,13 +364,14 @@ let convert_bl binf addr insn =
 	  let ct_sym = CT.Symbol (symname, sym) in
 	  (*let sym_or_addr = find_symbol binf.Binary_info.symbols
 					binf.Binary_info.strtab call_addr in*)
-	  let fn_inf = Function.function_type symname die
-					      cu_inf.Binary_info.ci_dietab
-					      cu_inf.Binary_info.ci_ctypes in
-	  let abi, passes, returns =
-	    CT.EABI, fn_args fn_inf.Function.args,
-	    fn_ret fn_inf.Function.return in
-	  C.Control (C.Call_ext (abi, ct_sym, passes, ret_addr, returns))
+	  let fn_inf =
+	    Function.function_type binf symname die
+	      cu_inf.Binary_info.ci_dietab cu_inf.Binary_info.ci_ctypes
+	      ~compunit_baseaddr:cu_inf.Binary_info.ci_baseaddr in
+	  let passes = fn_args inforec call_addr addr fn_inf.Function.args
+			       fn_inf.Function.arg_locs
+	  and returns = fn_ret fn_inf.Function.return in
+	  C.Control (C.Call_ext (CT.EABI, ct_sym, passes, ret_addr, returns))
       | ".plt" ->
           let sym, sym_name =
 	    try
@@ -362,7 +384,9 @@ let convert_bl binf addr insn =
 	  begin try
 	    let fn_inf = Builtin.builtin_function_type sym_name in
             C.Control (C.Call_ext (CT.Plt_call, CT.Symbol (sym_name, sym),
-				   fn_args fn_inf.Function.args, ret_addr,
+				   fn_args inforec call_addr addr
+				     fn_inf.Function.args
+				     fn_inf.Function.arg_locs, ret_addr,
 				   fn_ret fn_inf.Function.return))
 	  with Not_found ->
             C.Control (C.Call_ext (CT.Plt_call, CT.Symbol (sym_name, sym),
@@ -444,7 +468,7 @@ let finish_block block_id ?chain insnlist bseq bseq_cons =
   let blk = Block.make_block name insnlist' in
   bseq_cons block_id blk bseq
 
-let rec convert_insn binf addr insn ilist blk_id bseq bseq_cons =
+let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =
   let append insn =
     CS.snoc ilist insn, blk_id, bseq
   and same_blk ilist =
@@ -476,16 +500,17 @@ let rec convert_insn binf addr insn ilist blk_id bseq bseq_cons =
   | Ldm minf -> same_blk (convert_ldm addr minf insn ilist)
   | Stm minf -> same_blk (convert_stm addr minf insn ilist)
   | Bx -> append (convert_bx addr insn)
-  | Bl -> append (convert_bl binf addr insn)
+  | Bl -> append (convert_bl binf inforec addr insn)
   | B -> append (convert_branch addr insn)
   | Conditional (cond, B) -> append (convert_cbranch cond addr insn)
   | Conditional (cond, _) ->
-      convert_conditional binf addr cond insn ilist blk_id bseq bseq_cons
+      convert_conditional binf inforec addr cond insn ilist blk_id bseq
+			  bseq_cons
   | Shifted (opc, shift) ->
-      convert_shift binf addr insn ilist opc shift blk_id bseq bseq_cons
+      convert_shift binf inforec addr insn ilist opc shift blk_id bseq bseq_cons
   | x -> raise (Unsupported_opcode x)
 
-and convert_conditional binf addr cond insn ilist blk_id bseq bseq_cons =
+and convert_conditional binf inforec addr cond insn ilist blk_id bseq bseq_cons =
   let cond_passed = create_blkref () in
   let after_insn = create_blkref () in
   let cond = C.Control (C.Branch (convert_condition cond, cond_passed,
@@ -495,14 +520,14 @@ and convert_conditional binf addr cond insn ilist blk_id bseq bseq_cons =
   let cond_ilist, cond_blk_id, bseq'' =
     match insn.opcode with
       Conditional (_, op) ->
-        convert_insn binf addr { insn with opcode = op } CS.empty cond_passed
-		     bseq' bseq_cons
+        convert_insn binf inforec addr { insn with opcode = op } CS.empty
+		     cond_passed bseq' bseq_cons
     | _ -> failwith "not a conditional insn" in
   let cond_ilist' = CS.snoc cond_ilist (C.Control (C.Jump after_insn)) in
   let bseq'3 = finish_block cond_blk_id cond_ilist' bseq'' bseq_cons in
   CS.empty, after_insn, bseq'3
 
-and convert_shift binf addr insn ilist opc shift blk_id bseq bseq_cons =
+and convert_shift binf inforec addr insn ilist opc shift blk_id bseq bseq_cons =
   if insn.write_flags = [] && insn.read_flags == [] then begin
     let num_reads = Array.length insn.read_operands in
     let amount = convert_operand addr (insn.read_operands.(num_reads - 1))
@@ -511,7 +536,7 @@ and convert_shift binf addr insn ilist opc shift blk_id bseq bseq_cons =
     let num_reads' = Array.length new_reads in
     let shifted_operand = make_shifted_operand shift operand amount in
     new_reads.(num_reads' - 1) <- shifted_operand;
-    convert_insn binf addr { insn with opcode = opc;
+    convert_insn binf inforec addr { insn with opcode = opc;
       read_operands = new_reads } ilist blk_id bseq bseq_cons
   end else
     CS.snoc ilist (C.Nullary (Irtypes.Untranslated)), blk_id, bseq
@@ -524,7 +549,7 @@ let framebase_for_addr framebase_loc addr =
         List.find (fun (lo, hi, loc) -> addr >= lo && addr < hi) lst in
       loc
 
-let convert_block binf block_id bseq bseq_cons addr insn_list code_hash
+let convert_block binf inforec block_id bseq bseq_cons addr insn_list code_hash
 		  framebase_loc =
   let frame_base = ref None in
   let add_framebase_update addr ilist =
@@ -542,7 +567,7 @@ let convert_block binf block_id bseq bseq_cons addr insn_list code_hash
       let insn_addr = Int32.add addr offset in
       let ilist' = add_framebase_update insn_addr ilist in
       let ilist'', blk_id', bseq'
-        = convert_insn binf insn_addr insn ilist' blk_id bseq
+        = convert_insn binf inforec insn_addr insn ilist' blk_id bseq
 		       bseq_cons in
       ilist'', blk_id', bseq', Int32.add offset 4l)
     (CS.empty, block_id, bseq, 0l)

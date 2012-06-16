@@ -8,6 +8,10 @@ let builtin_function_type = function
     "memset" ->
       {
 	args = [| C_pointer C_char; C_int; C_int |];
+	arg_locs = [| Some (Dwarfreader.Loc_expr (`DW_OP_reg 0));
+		      Some (Dwarfreader.Loc_expr (`DW_OP_reg 1));
+		      Some (Dwarfreader.Loc_expr (`DW_OP_reg 2)) |];
+	arg_names = [| "x"; "y"; "z" |];
 	return = C_void;
 	local = false;
 	prototyped = true
@@ -15,6 +19,8 @@ let builtin_function_type = function
   | "puts" ->
       {
         args = [| C_pointer C_char |];
+	arg_locs = [| Some (Dwarfreader.Loc_expr (`DW_OP_reg 0)) |];
+	arg_names = [| "x" |];
 	return = C_int;
 	local = false;
 	prototyped = true

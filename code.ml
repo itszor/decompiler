@@ -102,6 +102,8 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
       (* Just for iterating over code sequences.  Don't process "protected"
          child nodes.  *)
       | Protect of code
+      (* Tag a bit of code with an ID.  *)
+      | With_id of int * code
 
     (* FIXME: Seems like these need sanitizing a bit.  *)
     and control =
@@ -190,6 +192,7 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
 	  (Array.map string_of_code carr)))
     | Entity e -> CT.string_of_entity e
     | Protect x -> str "*protect* (%s)" (string_of_code x)
+    | With_id (id, x) -> str "%s[with-id %d]" (string_of_code x) id
   
     let string_of_codeseq cs =
       let buf = CS.fold_left
@@ -249,9 +252,11 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
 	| Control c ->
             scan_ctl c acc'
 	| Phi parr ->
-            Array.fold_right scan parr acc
+            Array.fold_right scan parr acc'
 	| Protect child ->
 	    acc'
+	| With_id (_, node) ->
+	    scan node acc'
       and scan_ctl ctl acc =
 	let ctl', acc' = ctl_fn ctl acc in
 	match ctl' with
@@ -291,7 +296,10 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
 	    Control (scan_ctl c)
 	| Phi parr ->
 	    Phi (Array.map scan parr)
-	| Protect child -> child
+	| Protect child ->
+	    child
+	| With_id (id, node) ->
+	    With_id (id, scan node)
       and scan_ctl e =
 	match ctl_fn e with
 	  TailCall (br, code) ->
@@ -318,6 +326,14 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
 	    CompJump_ext (abi, scan dst)
 	| Virtual_exit -> Virtual_exit in
       scan code
-	
+    
+    let id = ref 0
+    
+    let create_id () =
+      incr id;
+      !id
+    
+    let reset_id () =
+      id := 0
   end
 

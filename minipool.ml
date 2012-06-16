@@ -19,10 +19,10 @@ let minipool_resolve elfbits ehdr shdr_arr symbols mapping_syms strtab
 	    let mapping = Mapping.mapping_for_addr mapping_syms strtab addr in
 	    Log.printf 3 "mapping for addr 0x%lx is %s\n" addr
 	      (Mapping.string_of_mapping mapping);
-	    let section_num
-	      = Elfreader.get_section_num_by_addr elfbits ehdr shdr_arr addr in
-	    let section_name
-	      = Elfreader.get_section_name elfbits ehdr shdr_arr section_num in
+	    let section_num =
+	      Elfreader.get_section_num_by_addr elfbits ehdr shdr_arr addr in
+	    let section_name =
+	      Elfreader.get_section_name elfbits ehdr shdr_arr section_num in
 	    Log.printf 3 "address is in section %s " section_name;
 	    let writable = Elfreader.section_writable shdr_arr.(section_num) in
 	    if writable then
@@ -38,13 +38,31 @@ let minipool_resolve elfbits ehdr shdr_arr symbols mapping_syms strtab
 	      if pointer_p then begin
 		Log.printf 3 "register loaded is used as pointer\n";
 		try
-		  let sym = Symbols.find_symbol_by_addr symbols word in
+		  let sym =
+		    Symbols.find_symbol_by_addr
+		      ~filter:(fun symbol ->
+			Symbols.symbol_type symbol <> Symbols.STT_NOTYPE
+			|| Symbols.symbol_binding symbol <> Symbols.STB_LOCAL)
+		      symbols word in
 		  let symname = Symbols.symbol_name sym strtab in
 		  Log.printf 3 "looks like symbol '%s'\n" symname;
 		  C.Entity (CT.Symbol_addr (symname, sym))
 		with Not_found ->
-	          Log.printf 3
-		    "pointer but no symbol for address, using immediate\n";
+		  let pointed_to_sec_num =
+		    Elfreader.get_section_num_by_addr elfbits ehdr shdr_arr
+						      word in
+		  let pointed_to_sec_name =
+		    Elfreader.get_section_name elfbits ehdr shdr_arr
+					       pointed_to_sec_num in
+	          Log.printf 3 "pointer but no symbol for address\n";
+		  Log.printf 3 "section name is %s\n" pointed_to_sec_name;
+		  let sec_base =
+		    shdr_arr.(pointed_to_sec_num).Elfreader.sh_addr in
+		  Log.printf 3 "section base: %lx\n" sec_base;
+		  Log.printf 3 "offset into section %ld\n"
+		    (Int32.sub word sec_base);
+		  (* FIXME: Special section+offset, then print section as
+		     char array?  *)
 		  C.Immed word
 	      end else begin
 		Log.printf 3 "register loaded is not used as pointer\n";

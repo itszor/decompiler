@@ -9,6 +9,7 @@ type infotag =
     Used_as_addr of CT.mem
   | Loaded_pc_rel
   | Type_known of ctype
+  | Used_as_type of ctype (* E.g. for outgoing function args.  *)
   | Byte_loads
   | Signed_byte_loads
   | Byte_stores
@@ -42,7 +43,10 @@ and ssa_reg_id = CT.reg * int
 type info_record =
   {
     infotag : (ssa_reg_id, infotag list) Hashtbl.t;
-    implications : (ssa_reg_id, implication) Hashtbl.t
+    implications : (ssa_reg_id, implication) Hashtbl.t;
+    (* We want to record some information (from Dwarf) before we've converted
+       the program into SSA form.  Keep it in this table.  *)
+    reg_info_for_id : (CT.reg * int, infotag) Hashtbl.t
   }
 
 let string_of_ssa_reg reg num =
@@ -61,9 +65,21 @@ let implied_pointer regid hti =
     | _ -> false
   with Not_found -> false
 
+let used_as_pointer regid ht =
+  try
+    let features = Hashtbl.find ht regid in
+    List.exists
+      (function
+        Type_known k -> Ctype.pointer_type k
+      | Used_as_type k -> Ctype.pointer_type k
+      | _ -> false)
+      features
+  with Not_found -> false
+
 let probably_pointer regid inforec =
   used_as_addr regid inforec.infotag
   || implied_pointer regid inforec.implications
+  || used_as_pointer regid inforec.infotag
 
 let record_info ht reg info =
   try
@@ -76,6 +92,9 @@ let record_info ht reg info =
 let record_impl ht reg info =
   if not (Hashtbl.mem ht reg) then
     Hashtbl.add ht reg info
+
+let record_reg_info_for_id inforec reg addr info =
+  Hashtbl.replace inforec.reg_info_for_id (reg, addr) info
 
 let rec info_of_mem_type ~load = function
     Irtypes.Word -> if load then Word_loads else Word_stores
@@ -161,12 +180,14 @@ let simplify_implications impl_ht =
 let create_info () =
   {
     infotag = Hashtbl.create 10;
-    implications = Hashtbl.create 10
+    implications = Hashtbl.create 10;
+    reg_info_for_id = Hashtbl.create 10
   }
 
 let gather_info blk_arr inforec =
   let ht = inforec.infotag
-  and impl_ht = inforec.implications in
+  and impl_ht = inforec.implications
+  and known_reg_types = inforec.reg_info_for_id in
   Array.iter
     (fun blk ->
       CS.iter
@@ -230,9 +251,27 @@ let gather_info blk_arr inforec =
 	      record_impl impl_ht (rb, rbn) Int
 	  | C.Control (C.CompJump_ext (_, C.SSAReg (rc, rcn))) ->
 	      record_info ht (rc, rcn) Code_pointer
-	  | _ ->
-	      Log.printf 3 "gathered no info for '%s'\n"
-			    (C.string_of_code insn);
+	  | x ->
+	      let got_something = ref false in
+	      ignore (C.map
+	        (fun r ->
+		  match r with
+		    C.With_id (id, C.SSAReg (reg, regn)) ->
+		      begin try
+			let info = Hashtbl.find known_reg_types (reg, id) in
+			Log.printf 3
+		          "transferring known type info for reg %s (id %d)\n"
+			  (CT.string_of_reg reg) id;
+			record_info ht (reg, regn) info;
+			got_something := true
+		      with Not_found -> ()
+		      end;
+		      r
+		  | _ -> r)
+		x);
+	      if not !got_something then
+		Log.printf 3 "gathered no info for '%s'\n"
+			      (C.string_of_code insn);
 	      ())
 	blk.Block.code)
     blk_arr;
@@ -242,7 +281,10 @@ let string_of_info = function
     Used_as_addr meminfo ->
       Printf.sprintf "used as addr (%s)" (CT.string_of_mem meminfo)
   | Loaded_pc_rel -> "loaded PC-relative"
-  | Type_known _ -> "type known (...)"
+  | Type_known x ->
+      Printf.sprintf "type known (%s)" (Ctype.string_of_ctype x)
+  | Used_as_type x ->
+      Printf.sprintf "used as type (%s)" (Ctype.string_of_ctype x)
   | Byte_loads -> "loaded as byte"
   | Byte_stores -> "stored as byte"
   | Signed_byte_loads -> "loaded as signed byte"

@@ -23,8 +23,8 @@ PACKAGES := -package camlp4.macro,bitstring,bitstring.syntax,num,unix
 OCAMLSRC := log.ml elfreader.ml dwarfreader.ml dwarfprint.ml line.ml \
 	    decode_arm.ml insn.ml symbols.ml mapping.ml emit.ml deque.ml \
 	    ranlist.ml boolset.ml getoption.ml code.ml block.ml ctype.ml \
-	    irtypes.ml ir.ml function.ml builtin.ml binary_info.ml \
-	    insn_to_ir.ml plt.ml dfs.ml dominator.ml phi.ml typedb.ml \
+	    irtypes.ml ir.ml typedb.ml function.ml builtin.ml binary_info.ml \
+	    insn_to_ir.ml plt.ml dfs.ml dominator.ml phi.ml defs.ml \
 	    minipool.ml sptracking.ml decompiler.ml
 
 # OCAMLOBJ := $(shell < .depend $(OCAMLDSORT) -byte $(OCAMLSRC))
