@@ -59,11 +59,17 @@ let minipool_resolve elfbits ehdr shdr_arr symbols mapping_syms strtab
 		  let sec_base =
 		    shdr_arr.(pointed_to_sec_num).Elfreader.sh_addr in
 		  Log.printf 3 "section base: %lx\n" sec_base;
-		  Log.printf 3 "offset into section %ld\n"
-		    (Int32.sub word sec_base);
+		  let offset = Int32.sub word sec_base in
+		  Log.printf 3 "offset into section %ld\n" offset;
 		  (* FIXME: Special section+offset, then print section as
-		     char array?  *)
-		  C.Immed word
+		     char array?  Better to use coverage -- split rodata up
+		     into pieces, the best we can, after we've converted all
+		     the code in the binary.  We can also make use of any
+		     symbols defined in the section, which helpfully also have
+		     sizes.  *)
+		  C.Binary (Irtypes.Add,
+			    C.Entity (CT.Section pointed_to_sec_name),
+			    C.Immed offset)
 	      end else begin
 		Log.printf 3 "register loaded is not used as pointer\n";
 		C.Immed word

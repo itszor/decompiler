@@ -19,6 +19,7 @@ module IrCT =
     type mem = ir_mem
     type entity = PC of int32
 		| Symbol_addr of string * Elfreader.elf_sym
+		| Section of string
 		| Arg_out
 		| Caller_restored
 		| Frame_base_update of Dwarfreader.dwarf_op
@@ -118,6 +119,7 @@ module IrCT =
     let string_of_entity = function
       PC loc -> Printf.sprintf "pc(0x%lx)" loc
     | Symbol_addr (name, _) -> Printf.sprintf "&%s" name
+    | Section name -> Printf.sprintf "section(%s)" name
     | Arg_out -> "arg_out"
     | Caller_restored -> "caller_restored"
     | Frame_base_update _ -> "frame_base_update"

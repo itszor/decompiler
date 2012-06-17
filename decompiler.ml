@@ -258,8 +258,8 @@ let add_stackvars_to_entry_block blk_arr entry_pt_ref regset =
 
 (*let binf = open_file "libGLESv2.so"*)
 (*let binf = open_file "foo"*)
-let binf = open_file "libglslcompiler.so"
-(*let binf = open_file "tests/hello"*)
+(*let binf = open_file "libglslcompiler.so"*)
+let binf = open_file "tests/hello"
 
 let go symname =
   let sym = Symbols.find_named_symbol binf.symbols binf.strtab symname in
@@ -329,8 +329,8 @@ let _ =
   Log.loglevel := 4;
   (*go "InitAccumUSECodeBlocks"*)
   (*;go "AddComparisonToUFCode"*)
-  go "ProcessICInstIFNOT"
- (* go "main2"*)
+  (*go "ProcessICInstIFNOT"*)
+  go "main2"
 
 let pubnames = Dwarfreader.parse_all_pubname_data binf.debug_pubnames
 

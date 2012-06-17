@@ -103,7 +103,9 @@ let rec find_innermost_matching coverage index addr =
 (* Find a stack of intervals which match ADDR, from innermost (head of list)
    to outermost.  This only works for inner ranges which are completely
    nested within each other: otherwise the range with the highest matching
-   start address is returned.  *)
+   start address is returned.
+   The idea is that we can get useful data from e.g. constant data composed
+   from nested struct initialisers.  *)
 
 let find_range_stack coverage addr =
   fix_coverage coverage;
@@ -112,16 +114,16 @@ let find_range_stack coverage addr =
       failwith "find_range_stack failed"
     else if low = high - 1 then begin
       try
-      (* This is the winning condition.  *)
-      let win = find_innermost_matching coverage low addr in
-      let rec build_result idx =
-	if idx == 0 || not coverage.nested_in_prev.(idx) then
-	  [coverage.intervals.(idx)]
-	else
-	  coverage.intervals.(idx) :: build_result (pred idx) in
-      build_result win
-    with Not_found ->
-      []
+	(* This is the winning condition.  *)
+	let win = find_innermost_matching coverage low addr in
+	let rec build_result idx =
+	  if idx == 0 || not coverage.nested_in_prev.(idx) then
+	    [coverage.intervals.(idx)]
+	  else
+	    coverage.intervals.(idx) :: build_result (pred idx) in
+	build_result win
+      with Not_found ->
+	[]
     end else begin
       let mid = (low + high) / 2 in
       (* The condition should pass for LOW and fail for HIGH.  We should

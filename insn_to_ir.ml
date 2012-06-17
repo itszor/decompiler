@@ -285,7 +285,7 @@ let find_symbol symbols strtab addr =
   with Not_found ->
     CT.Absolute addr
 
-let fn_args inforec callee_addr bl_addr ft_args arglocs =
+let fn_args inforec callee_addr ft_args arglocs =
   let args_from_ctype = Array.mapi
     (fun i typ ->
       match arglocs.(i) with
@@ -368,7 +368,7 @@ let convert_bl binf inforec addr insn =
 	    Function.function_type binf symname die
 	      cu_inf.Binary_info.ci_dietab cu_inf.Binary_info.ci_ctypes
 	      ~compunit_baseaddr:cu_inf.Binary_info.ci_baseaddr in
-	  let passes = fn_args inforec call_addr addr fn_inf.Function.args
+	  let passes = fn_args inforec call_addr fn_inf.Function.args
 			       fn_inf.Function.arg_locs
 	  and returns = fn_ret fn_inf.Function.return in
 	  C.Control (C.Call_ext (CT.EABI, ct_sym, passes, ret_addr, returns))
@@ -384,7 +384,7 @@ let convert_bl binf inforec addr insn =
 	  begin try
 	    let fn_inf = Builtin.builtin_function_type sym_name in
             C.Control (C.Call_ext (CT.Plt_call, CT.Symbol (sym_name, sym),
-				   fn_args inforec call_addr addr
+				   fn_args inforec call_addr
 				     fn_inf.Function.args
 				     fn_inf.Function.arg_locs, ret_addr,
 				   fn_ret fn_inf.Function.return))
