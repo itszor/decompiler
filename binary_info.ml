@@ -39,7 +39,7 @@ type binary_info = {
   dynstr : Bitstring.bitstring;
   symbols : elf_sym list;
   dyn_symbols : elf_sym list;
-  mapping_syms : elf_sym list;
+  mapping_syms : elf_sym Coverage.coverage;
   (* Parsed arange data.  *)
   parsed_aranges : (aranges_header * (int32 * int32) list) list;
   (* Relocations from the .rel.plt section.  *)

@@ -6,6 +6,35 @@ type mapping =
   | Data
   | Unknown
 
+let get_mapping_symbols elfbits ehdr shdr_arr strtab symbols secname =
+  let secnum = Elfreader.get_section_number elfbits ehdr shdr_arr secname in
+  let syms_for_sec = symbols_for_section symbols secnum in
+  let r = Coverage.create_coverage 0l 0xffffffffl in
+  List.iter
+    (fun sym ->
+      if symbol_binding sym = STB_LOCAL
+	 && symbol_type sym = STT_NOTYPE then begin
+	let name = symbol_name sym strtab in
+	match name with
+	  "$a" | "$d" | "$t" ->
+	    Coverage.add_range r
+	      (Coverage.Half_open (sym, sym.Elfreader.st_value))
+	| _ -> ()
+      end)
+    syms_for_sec;
+  r
+
+let mapping_for_addr mapping_syms strtab addr =
+  let interv = Coverage.find_range mapping_syms addr in
+  let sym = Coverage.interval_type interv in
+  match symbol_name sym strtab with
+    "$a" -> ARM
+  | "$t" -> Thumb
+  | "$d" -> Data
+  | _ -> Unknown
+
+(*
+
 (* Retrieve mapping symbols for a given section, and return in reverse
    address order.  *)
 
@@ -43,6 +72,7 @@ let rec mapping_for_addr mapping_syms strtab addr =
 	| _ -> Unknown
       end else
         mapping_for_addr syms strtab addr
+*)
 
 let string_of_mapping = function
     ARM -> "arm"
