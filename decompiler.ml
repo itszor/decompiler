@@ -323,7 +323,13 @@ let go symname =
   Typedb.print_implied_info inforec.Typedb.implications;
   Log.printf 1 "--- eliminate phi nodes ---\n";
   IrPhiPlacement.eliminate blk_arr';
-  dump_blockarr blk_arr'
+  dump_blockarr blk_arr';
+  Log.printf 1 "--- slicing rodata ---\n";
+  let rodata_sec = get_section_number binf.elfbits binf.ehdr binf.shdr_arr
+				      ".rodata" in
+  Slice_section.slice blk_arr' binf.rodata_sliced
+    binf.shdr_arr.(rodata_sec).sh_addr ".rodata";
+  Slice_section.symbols binf.rodata_sliced binf.symbols binf.strtab rodata_sec
 
 let _ =
   Log.loglevel := 4;

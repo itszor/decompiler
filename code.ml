@@ -327,6 +327,9 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
 	| Virtual_exit -> Virtual_exit in
       scan code
     
+    let iter fn ?(ctl_fn = fun x -> ()) code =
+      ignore (map (fun x -> fn x; x) ~ctl_fn:(fun c -> ctl_fn c; c) code)
+    
     let id = ref 0
     
     let create_id () =

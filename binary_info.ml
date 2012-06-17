@@ -40,6 +40,7 @@ type binary_info = {
   symbols : elf_sym list;
   dyn_symbols : elf_sym list;
   mapping_syms : elf_sym Coverage.coverage;
+  rodata_sliced : string Coverage.coverage;
   (* Parsed arange data.  *)
   parsed_aranges : (aranges_header * (int32 * int32) list) list;
   (* Relocations from the .rel.plt section.  *)
@@ -164,6 +165,9 @@ let open_file filename =
   let dyn_symbols = Symbols.read_symbols dynsym in
   let mapping_syms = Mapping.get_mapping_symbols elfbits ehdr shdr_arr strtab
 		     symbols ".text" in
+  let rodata_shdrnum = get_section_number elfbits ehdr shdr_arr ".rodata" in
+  let rodata_sliced = Coverage.create_coverage
+    shdr_arr.(rodata_shdrnum).sh_addr shdr_arr.(rodata_shdrnum).sh_size in
   let ar = parse_all_arange_data debug_aranges in
   let plt_rels = parse_rel_sec rel_plt in
   let binf = {
@@ -188,6 +192,7 @@ let open_file filename =
     symbols = symbols;
     dyn_symbols = dyn_symbols;
     mapping_syms = mapping_syms;
+    rodata_sliced = rodata_sliced;
     parsed_aranges = ar;
     parsed_rel_plt = plt_rels;
     cu_hash = Hashtbl.create 10
