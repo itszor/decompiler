@@ -107,7 +107,7 @@ let rec find_innermost_matching coverage index addr =
    The idea is that we can get useful data from e.g. constant data composed
    from nested struct initialisers.  *)
 
-let find_range_stack coverage addr =
+let find_range_stack_idx coverage addr =
   fix_coverage coverage;
   let rec find low high =
     if low = high then
@@ -118,9 +118,9 @@ let find_range_stack coverage addr =
 	let win = find_innermost_matching coverage low addr in
 	let rec build_result idx =
 	  if idx == 0 || not coverage.nested_in_prev.(idx) then
-	    [coverage.intervals.(idx)]
+	    [idx]
 	  else
-	    coverage.intervals.(idx) :: build_result (pred idx) in
+	    idx :: build_result (pred idx) in
 	build_result win
       with Not_found ->
 	[]
@@ -136,12 +136,37 @@ let find_range_stack coverage addr =
   (* Note: end point is one place beyond the end of the array.  *)
   find 0 (Array.length coverage.intervals)
 
+let find_range_stack coverage addr =
+  List.map
+    (fun x -> coverage.intervals.(x))
+    (find_range_stack_idx coverage addr)
+
 (* Find just the innermost range, or raise Not_found.  *)
 
-let find_range coverage addr =
-  match find_range_stack coverage addr with
+let find_range_idx coverage addr =
+  match find_range_stack_idx coverage addr with
     [] -> raise Not_found
   | res::_ -> res
+
+let find_range coverage addr =
+  coverage.intervals.(find_range_idx coverage addr)
+
+let find_closed_range coverage addr =
+  let range_idx = find_range_idx coverage addr in
+  match coverage.intervals.(range_idx) with
+    (Range (_, _, _) | Padded_range (_, _, _, _)) as x -> x
+  | Half_open (x, start) ->
+      let rec following_start idx =
+	if idx == Array.length coverage.intervals then
+          let coverage_end = Int32.add coverage.start coverage.length in
+          coverage_end
+	else
+	  let start_at_idx = interval_start coverage.intervals.(idx) in
+	  if start_at_idx > start then
+	    start_at_idx
+	  else
+	    following_start (succ idx) in
+      Range (x, start, Int32.sub (following_start (succ range_idx)) start)
 
 (*
     |=====first======|

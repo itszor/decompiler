@@ -260,6 +260,7 @@ let add_stackvars_to_entry_block blk_arr entry_pt_ref regset =
 (*let binf = open_file "foo"*)
 (*let binf = open_file "libglslcompiler.so"*)
 let binf = open_file "tests/hello"
+(*let binf = open_file "tests/rodata"*)
 
 let go symname =
   let sym = Symbols.find_named_symbol binf.symbols binf.strtab symname in
@@ -328,15 +329,26 @@ let go symname =
   let rodata_sec = get_section_number binf.elfbits binf.ehdr binf.shdr_arr
 				      ".rodata" in
   Slice_section.slice blk_arr' binf.rodata_sliced
-    binf.shdr_arr.(rodata_sec).sh_addr ".rodata";
-  Slice_section.symbols binf.rodata_sliced binf.symbols binf.strtab rodata_sec
+    binf.shdr_arr.(rodata_sec).sh_addr ".rodata" symname;
+  blk_arr'
 
 let _ =
-  Log.loglevel := 4;
+  Log.loglevel := 1;
   (*go "InitAccumUSECodeBlocks"*)
   (*;go "AddComparisonToUFCode"*)
   (*go "ProcessICInstIFNOT"*)
-  go "main2"
+  let blk_arr1 = go "main" in
+  let blk_arr2 = go "main2" in
+  let rodata_sec = get_section_number binf.elfbits binf.ehdr binf.shdr_arr
+				      ".rodata" in
+  Slice_section.symbols binf.rodata_sliced binf.symbols binf.strtab rodata_sec;
+  Log.loglevel := 4;
+  let blk_arr1' =
+    Resolve_section.resolve blk_arr1 binf.rodata binf.rodata_sliced in
+  dump_blockarr blk_arr1';
+  let blk_arr2' =
+    Resolve_section.resolve blk_arr2 binf.rodata binf.rodata_sliced in
+  dump_blockarr blk_arr2'
 
 let pubnames = Dwarfreader.parse_all_pubname_data binf.debug_pubnames
 

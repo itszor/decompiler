@@ -24,8 +24,9 @@ OCAMLSRC := log.ml coverage.ml elfreader.ml dwarfreader.ml dwarfprint.ml \
 	    line.ml decode_arm.ml insn.ml symbols.ml mapping.ml emit.ml \
 	    deque.ml ranlist.ml boolset.ml getoption.ml code.ml block.ml \
 	    ctype.ml irtypes.ml ir.ml typedb.ml function.ml builtin.ml \
-	    binary_info.ml insn_to_ir.ml plt.ml dfs.ml dominator.ml phi.ml \
-	    defs.ml minipool.ml sptracking.ml slice_section.ml decompiler.ml
+	    slice_section.ml binary_info.ml insn_to_ir.ml plt.ml dfs.ml \
+	    dominator.ml phi.ml defs.ml minipool.ml sptracking.ml \
+	    resolve_section.ml decompiler.ml
 
 # OCAMLOBJ := $(shell < .depend $(OCAMLDSORT) -byte $(OCAMLSRC))
 OCAMLOBJ := $(OCAMLSRC:.ml=.cmo)

@@ -23,6 +23,7 @@ module IrCT =
 		| Arg_out
 		| Caller_restored
 		| Frame_base_update of Dwarfreader.dwarf_op
+		| String_constant of string
     type abi = Branch_exchange
 	     | Unknown_abi
 	     | Plt_call
@@ -123,6 +124,8 @@ module IrCT =
     | Arg_out -> "arg_out"
     | Caller_restored -> "caller_restored"
     | Frame_base_update _ -> "frame_base_update"
+    | String_constant str ->
+        Printf.sprintf "string_const(\"%s\")" (String.escaped str)
 
     let string_of_abi = function
       Branch_exchange -> "branch_exchange"

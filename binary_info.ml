@@ -31,6 +31,7 @@ type binary_info = {
   debug_loc : Bitstring.bitstring;
   lines : Line.line_prog_hdr;
   text : Bitstring.bitstring;
+  rodata : Bitstring.bitstring;
   strtab : Bitstring.bitstring;
   symtab : Bitstring.bitstring;
   plt : Bitstring.bitstring;
@@ -40,7 +41,7 @@ type binary_info = {
   symbols : elf_sym list;
   dyn_symbols : elf_sym list;
   mapping_syms : elf_sym Coverage.coverage;
-  rodata_sliced : string Coverage.coverage;
+  rodata_sliced : Slice_section.slicetype Coverage.coverage;
   (* Parsed arange data.  *)
   parsed_aranges : (aranges_header * (int32 * int32) list) list;
   (* Relocations from the .rel.plt section.  *)
@@ -155,6 +156,7 @@ let open_file filename =
   let debug_loc = get_section_by_name elfbits ehdr shdr_arr ".debug_loc" in
   let lines, _ = Line.parse_lines debug_line in
   let text = get_section_by_name elfbits ehdr shdr_arr ".text" in
+  let rodata = get_section_by_name elfbits ehdr shdr_arr ".rodata" in
   let strtab = get_section_by_name elfbits ehdr shdr_arr ".strtab" in
   let symtab = get_section_by_name elfbits ehdr shdr_arr ".symtab" in
   let plt = get_section_by_name elfbits ehdr shdr_arr ".plt" in
@@ -183,6 +185,7 @@ let open_file filename =
     debug_loc = debug_loc;
     lines = lines;
     text = text;
+    rodata = rodata;
     strtab = strtab;
     symtab = symtab;
     plt = plt;
