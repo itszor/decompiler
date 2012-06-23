@@ -874,12 +874,18 @@ let decode_branch cond ~link bits23_0 =
 	}
   | { _ } -> bad_insn
 
-let hard_reg_list bits =
+let hard_reg_list increment bits =
   let rlist = ref [] in
-  for i = 15 downto 0 do
-    if bits land (1 lsl i) <> 0 then
-      rlist := (hard_reg i) :: !rlist
-  done;
+  if increment then
+    for i = 15 downto 0 do
+      if bits land (1 lsl i) <> 0 then
+	rlist := (hard_reg i) :: !rlist
+    done
+  else
+    for i = 0 to 15 do
+      if bits land (1 lsl i) <> 0 then
+	rlist := (hard_reg i) :: !rlist
+    done;
   Array.of_list !rlist
 
 let decode_stm cond bits24_0 =
@@ -889,7 +895,7 @@ let decode_stm cond bits24_0 =
       let info = { before = before; increment = increment;
 		   mm_writeback = writeback } in
       let wr_operands = if writeback then [| hard_reg basereg |] else [| |] in
-      let regs = hard_reg_list reglist in
+      let regs = hard_reg_list increment reglist in
       {
         opcode = conditionalise cond (Stm info);
 	read_operands = Array.append [| hard_reg basereg |] regs;
@@ -905,7 +911,7 @@ let decode_ldm cond ~exception_return bits24_0 =
       let info = { before = before; increment = increment;
 		   mm_writeback = writeback } in
       let wr_operands = if writeback then [| hard_reg basereg |] else [| |] in
-      let regs = hard_reg_list reglist in
+      let regs = hard_reg_list increment reglist in
       {
         opcode = conditionalise cond (Ldm info);
 	read_operands = [| hard_reg basereg |];

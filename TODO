@@ -5,13 +5,13 @@ TODO list for decompiler
 
 * Removal of stack save/restore code.
 
-* Type tracking for function parameters.
+* Type tracking for (incoming) function parameters (outgoing ones are partly done).
 
 * Extract types for declarations of local variables.
 
 * Handle scopes/nested scopes properly (by matching to basic blocks?)
 
-* Speed up symbol access/mapping symbols (add suitable indices).
+* Speed up symbol access/mapping symbols (add suitable indices). [partly done]
 
 * Add parallel-set support for 'S' flag support etc.
 
@@ -20,3 +20,5 @@ TODO list for decompiler
 * Emission of types and data symbols.
 
 * Add loading of debug info for dependent libraries.
+
+* stm/ldm ordering broken? [fixed]
