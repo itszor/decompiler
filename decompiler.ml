@@ -330,10 +330,14 @@ let go symname =
 				      ".rodata" in
   Slice_section.slice blk_arr' binf.rodata_sliced
     binf.shdr_arr.(rodata_sec).sh_addr ".rodata" symname;
-  blk_arr'
+  Log.printf 1 "--- removing prologue/epilogue code\n";
+  let blk_arr'' = Ce.remove_prologue_and_epilogue blk_arr' in
+  dump_blockarr blk_arr'';
+  blk_arr''
+  
 
-let _ =
-  Log.loglevel := 1;
+let really_go () =
+  Log.loglevel := 4;
   (*go "InitAccumUSECodeBlocks"*)
   (*;go "AddComparisonToUFCode"*)
   (*go "ProcessICInstIFNOT"*)
