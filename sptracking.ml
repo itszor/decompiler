@@ -111,13 +111,26 @@ let sp_track blk_arr vars ctypes_for_cu =
   let sp_derived = function
     C.SSAReg (r, rn) -> Hashtbl.mem spht (r, rn)
   | _ -> false in
-  let sp_used code =
+  let rec sp_used code =
     C.fold
       (fun expr found ->
         match expr with
 	  C.Load (m, addr) as e -> C.Protect e, found
 	| C.Set (dst, src) -> C.Set (C.Protect dst, src), found
 	| x when sp_reg x || sp_derived x -> x, true
+	| C.Phi phi_args ->
+	    (* Oh dear, this doesn't work because a phi node might appear
+	       before the definition of its arguments, going by the order in
+	       which we scan the code.  *)
+	    Log.printf 3 "Checking phi node\n";
+	    (* If any of the phi node's arguments are sp-derived, see if we can
+	       resolve them.  This will (probably, at the moment?) only work if
+	       they all resolve to the same offset.  *)
+	    expr,
+	    Array.fold_right
+	      (fun node found -> if sp_used node then true else found)
+	      phi_args
+	      false
 	| x -> x, found)
       code
       false in
@@ -157,6 +170,16 @@ let sp_track blk_arr vars ctypes_for_cu =
       Hashtbl.add spht (r, rn) offset'
     (* Maybe we can handle Phi nodes here -- if all the inputs correspond to
        the same thing.  Dunno how likely that is.  *)
+  | C.Set (C.SSAReg (r, rn), C.Phi phi_args) ->
+      Array.iteri
+        (fun i node ->
+	  if sp_derived node then
+	    Log.printf 3 "Phi arg %d (%s) is SP-derived\n" i
+	      (C.string_of_code phi_args.(i))
+	  else
+	    Log.printf 3 "Phi arg %d (%s) isn't SP-derived\n" i
+	      (C.string_of_code phi_args.(i)))
+	phi_args
   | x ->
       Log.printf 3 "Don't know how to derive SP from '%s'\n"
 	(C.string_of_code x);

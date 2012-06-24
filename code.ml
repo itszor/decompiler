@@ -330,6 +330,9 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
     let iter fn ?(ctl_fn = fun x -> ()) code =
       ignore (map (fun x -> fn x; x) ~ctl_fn:(fun c -> ctl_fn c; c) code)
     
+    let strip_ids code =
+      map (function With_id (_, x) -> x | x -> x) code
+    
     let id = ref 0
     
     let create_id () =

@@ -49,7 +49,8 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
       CS.fold_right
         (fun node regset' ->
 	  match node with
-	    C.Set (C.Reg r, _) -> R.add r regset'
+	    C.Set (C.Reg r, _)
+	  | C.Set (C.With_id (_, C.Reg r), _) -> R.add r regset'
 	  | _ -> regset')
 	blk.code
 	regset
@@ -131,6 +132,11 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
 	0 in
       htab, numregs
 
+    let transfer_id from_node to_node =
+      match from_node with
+        C.With_id (id, _) -> C.With_id (id, to_node)
+      | _ -> to_node
+
     (* Algorithm for renaming variables
        also stolen shamelessly from Appel
 
@@ -182,14 +188,14 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
 	        C.Set (lhs, (C.Phi _ as rhs)) ->
 		  (* Don't process phi nodes.  *)
 		  C.Protect (C.Set (lhs, rhs))
-	      | C.Set ((C.Reg _ as lhs), rhs) ->
+	      | C.Set (((C.Reg _ | C.With_id (_, C.Reg _)) as lhs), rhs) ->
 	          (* Only interested in uses, not defs.  *)
 	          C.Set (C.Protect lhs, rhs)
-	      | C.Reg ru ->
+	      | (C.Reg ru | C.With_id (_, C.Reg ru) as node) ->
 		  begin try
 		    let runum = Hashtbl.find rnum_htab ru in
 		    let idx = List.hd stack.(runum) in
-		    C.SSAReg (ru, idx)
+		    transfer_id node (C.SSAReg (ru, idx))
 		  with Not_found as e ->
 		    Printf.fprintf stderr "reg %s not in rnum_htab\n"
 		      (CT.string_of_reg ru);
@@ -199,18 +205,19 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
 	      node in
 	    let node'' = C.map
 	      (function
-	        C.Set (C.Reg rd, rhs) ->
-		    begin try
-		      let rdnum = Hashtbl.find rnum_htab rd in
-		      count.(rdnum) <- count.(rdnum) + 1;
-		      let idx = count.(rdnum) in
-		      stack.(rdnum) <- idx :: stack.(rdnum);
-		      C.Protect (C.Set (C.SSAReg (rd, idx), rhs))
-		    with Not_found as e ->
-		      Printf.fprintf stderr "reg %s not in rnum_htab\n"
-		        (CT.string_of_reg rd);
-		      raise e
-		    end
+		C.Set ((C.Reg rd | C.With_id (_, C.Reg rd) as lhs), rhs) ->
+		  begin try
+		    let rdnum = Hashtbl.find rnum_htab rd in
+		    count.(rdnum) <- count.(rdnum) + 1;
+		    let idx = count.(rdnum) in
+		    stack.(rdnum) <- idx :: stack.(rdnum);
+		    let ssa_var = transfer_id lhs (C.SSAReg (rd, idx)) in
+		    C.Protect (C.Set (ssa_var, rhs))
+		  with Not_found as e ->
+		    Printf.fprintf stderr "reg %s not in rnum_htab\n"
+		      (CT.string_of_reg rd);
+		    raise e
+		  end
 	      | x -> x)
 	      node' in
 	    CS.snoc codeseq node'')
@@ -235,10 +242,10 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
 	        C.Set (lhs, C.Phi args) ->
 		  let jth_arg = args.(jth_pred) in
 		  let rewrote_reg = match jth_arg with
-		    C.Reg r ->
+		    C.With_id (_, C.Reg r) | C.Reg r ->
 		      let rnum = Hashtbl.find rnum_htab r in
 		      let idx = List.hd stack.(rnum) in
-		      C.SSAReg (r, idx)
+		      transfer_id jth_arg (C.SSAReg (r, idx))
 		  | x -> x (* failwith "Non-register in PHI node" *) in
 		  args.(jth_pred) <- rewrote_reg;
 		  C.Set (lhs, C.Phi args)
@@ -257,17 +264,18 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
 	(* Pop variables originally defined in block off the stack.  *)
 	CS.iter
 	  (function
-	      C.Set (C.SSAReg _, C.Phi _) -> ()
-	    | C.Set (C.SSAReg (rd, _) as c, _) ->
-	        begin try
-	          let rdnum = Hashtbl.find rnum_htab rd in
-		  stack.(rdnum) <- List.tl stack.(rdnum)
-		with Not_found ->
-		  Log.printf 3 "Ignoring SSA reg %s (already converted)\n"
-		    (C.string_of_code c);
-		  ()
-		end
-	    | _ -> ())
+	    C.Set (C.SSAReg _, C.Phi _) -> ()
+	  | C.Set (C.SSAReg (rd, _) as c, _)
+	  | C.Set (C.With_id (_, (C.SSAReg (rd, _) as c)), _) ->
+	      begin try
+	        let rdnum = Hashtbl.find rnum_htab rd in
+		stack.(rdnum) <- List.tl stack.(rdnum)
+	      with Not_found ->
+		Log.printf 3 "Ignoring SSA reg %s (already converted)\n"
+		  (C.string_of_code c);
+		()
+	      end
+	  | _ -> ())
 	  blk_n.code in
       (* Perform renaming.  *)
       rename' blk_arr entry_pt_idx
@@ -295,7 +303,7 @@ module PhiPlacement (CT : Code.CODETYPES) (CS : Code.CODESEQ)
 		      pred_blk.Block.code <- pred_code')
 		    phi_args;
 		  code
-	      | _ -> CS.snoc code insn)
+	      | x -> CS.snoc code x)
 	    CS.empty
 	    blk.Block.code in
 	  blk.Block.code <- code')

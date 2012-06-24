@@ -332,6 +332,50 @@ let add_incoming_args ft code =
     ft.Function.args in
   code'
 
+(* FT is a function_info record from function.ml.  INFOREC is an info record.
+   CODESEQ is a code sequence for the virtual entry block for a function.  *)
+
+let add_real_incoming_args ft start_addr inforec codeseq =
+  let known_incoming_regs = ref [] in
+  let _, added_args = Array.fold_left
+    (fun (i, codeseq') typ ->
+      match ft.Function.arg_locs.(i) with
+        Some loc ->
+	  begin match Dwarfreader.loc_for_addr start_addr loc with
+	    `DW_OP_reg r ->
+	      let reg = CT.Hard_reg r in
+	      let id = C.create_id () in
+	      known_incoming_regs := r :: !known_incoming_regs;
+	      Typedb.record_reg_info_for_id inforec reg id
+	        (Typedb.Type_known typ);
+	      let insn = C.Set (C.With_id (id, C.Reg reg),
+				C.Nullary Irtypes.Arg_in) in
+	      succ i, CS.snoc codeseq' insn
+	  | `DW_OP_fbreg o ->
+	      let stackreg = CT.Stack o in
+	      let id = C.create_id () in
+	      Typedb.record_reg_info_for_id inforec stackreg id
+	        (Typedb.Type_known typ);
+	      let insn = C.With_id (id, C.Store (Irtypes.Word,
+			   C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
+				     C.Immed (Int32.of_int o)),
+			   C.Nullary Irtypes.Arg_in)) in
+	      succ i, CS.snoc codeseq' insn
+	  | _ -> failwith "add_real_incoming_args/location"
+	  end
+      | None -> failwith "no loc for incoming arg")
+    (0, codeseq)
+    ft.Function.args in
+  List.fold_left
+    (fun codeseq' regnum ->
+      if List.mem regnum !known_incoming_regs then
+        codeseq'
+      else
+        CS.snoc codeseq' (C.Set (C.Reg (CT.Hard_reg regnum),
+				 C.Nullary Irtypes.Arg_in)))
+    added_args
+    [0; 1; 2; 3]
+
 let fn_ret = function
     Ctype.C_void -> C.Nullary Irtypes.Nop
   | _ -> C.Set (C.Reg (CT.Hard_reg 0), C.Entity CT.Arg_out)

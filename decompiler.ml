@@ -107,12 +107,12 @@ module CS = Ir.IrCS
 module CT = Ir.IrCT
 module C = Ir.Ir
 
-let eabi_pre_prologue ft real_entry_point =
+let eabi_pre_prologue ft start_addr inforec real_entry_point =
   let insns =
-    [C.Set (C.Reg (CT.Hard_reg 0), C.Nullary Irtypes.Arg_in);
+    [(*C.Set (C.Reg (CT.Hard_reg 0), C.Nullary Irtypes.Arg_in);
      C.Set (C.Reg (CT.Hard_reg 1), C.Nullary Irtypes.Arg_in);
      C.Set (C.Reg (CT.Hard_reg 2), C.Nullary Irtypes.Arg_in);
-     C.Set (C.Reg (CT.Hard_reg 3), C.Nullary Irtypes.Arg_in);
+     C.Set (C.Reg (CT.Hard_reg 3), C.Nullary Irtypes.Arg_in);*)
      C.Set (C.Reg (CT.Hard_reg 4), C.Nullary Irtypes.Caller_saved);
      C.Set (C.Reg (CT.Hard_reg 5), C.Nullary Irtypes.Caller_saved);
      C.Set (C.Reg (CT.Hard_reg 6), C.Nullary Irtypes.Caller_saved);
@@ -129,7 +129,11 @@ let eabi_pre_prologue ft real_entry_point =
      C.Set (C.Reg (CT.Status Irtypes.NZFlags), C.Nullary Irtypes.Special);
      C.Set (C.Reg (CT.Status Irtypes.Carry), C.Nullary Irtypes.Special)] in
   let cs = CS.of_list insns in
-  let cs = Insn_to_ir.add_incoming_args ft cs in
+  let cs =
+    if false then
+      Insn_to_ir.add_incoming_args ft cs
+    else
+      Insn_to_ir.add_real_incoming_args ft start_addr inforec cs in
   let cs = CS.snoc cs (C.Control (C.Jump real_entry_point)) in
   Block.make_block "entry block" cs
 
@@ -156,7 +160,7 @@ let cons_and_add_to_index blk bseq ht blockref idx =
   incr idx;
   BS.cons blk bseq
 
-let bs_of_code_hash ft binf inforec code_hash entry_pt framebase =
+let bs_of_code_hash ft binf inforec code_hash start_addr entry_pt framebase =
   let idx = ref 0 in
   let ht = Hashtbl.create 10 in
   let bseq_cons blk_id blk bseq =
@@ -168,7 +172,7 @@ let bs_of_code_hash ft binf inforec code_hash entry_pt framebase =
 			       code_hash framebase)
     code_hash
     BS.empty in
-  let pre_prologue_blk = eabi_pre_prologue ft entry_pt
+  let pre_prologue_blk = eabi_pre_prologue ft start_addr inforec entry_pt
   and virtual_exit = eabi_post_epilogue () in
   let with_entry_pt
     = bseq_cons Irtypes.Virtual_entry pre_prologue_blk blockseq in
@@ -256,10 +260,19 @@ let add_stackvars_to_entry_block blk_arr entry_pt_ref regset =
     code in
   blk_arr.(entry_pt_ref).Block.code <- code'
 
+let strip_ids blk_arr =
+  Array.map
+    (fun blk ->
+      let code' = CS.map
+        (fun stmt -> C.strip_ids stmt)
+	blk.Block.code in
+      { blk with Block.code = code' })
+    blk_arr
+
 (*let binf = open_file "libGLESv2.so"*)
 (*let binf = open_file "foo"*)
-(*let binf = open_file "libglslcompiler.so"*)
-let binf = open_file "tests/hello"
+let binf = open_file "libglslcompiler.so"
+(*let binf = open_file "tests/hello"*)
 (*let binf = open_file "tests/rodata"*)
 
 let go symname =
@@ -284,7 +297,7 @@ let go symname =
 	       ~compunit_baseaddr:base_addr_for_cu cu_inf.ci_ctypes in
   let inforec = Typedb.create_info () in
   let blockseq, ht =
-    bs_of_code_hash ft binf inforec code entry_point_ba framebase in
+    bs_of_code_hash ft binf inforec code entry_point entry_point_ba framebase in
   Log.printf 1 "--- initial blockseq ---\n";
   dump_blockseq blockseq;
   let entry_point_ref = Hashtbl.find ht entry_point_ba in
@@ -303,6 +316,9 @@ let go symname =
   let regset = IrPhiPlacement.place blk_arr in
   IrPhiPlacement.rename blk_arr 0 regset;
   dump_blockarr blk_arr;
+  (* Insert type info for function's locals here.  *)
+  Log.printf 1 "--- strip ids ---\n";
+  let blk_arr = strip_ids blk_arr in
   Log.printf 1 "--- gather info (1) ---\n";
   Typedb.gather_info blk_arr inforec;
   Log.printf 1 "--- minipool resolution ---\n";
@@ -330,12 +346,12 @@ let go symname =
 				      ".rodata" in
   Slice_section.slice blk_arr' binf.rodata_sliced
     binf.shdr_arr.(rodata_sec).sh_addr ".rodata" symname;
-  Log.printf 1 "--- removing prologue/epilogue code\n";
+  Log.printf 1 "--- removing prologue/epilogue code ---\n";
   let blk_arr'' = Ce.remove_prologue_and_epilogue blk_arr' in
   dump_blockarr blk_arr'';
   blk_arr''
   
-
+(*
 let really_go () =
   Log.loglevel := 4;
   (*go "InitAccumUSECodeBlocks"*)
@@ -353,6 +369,10 @@ let really_go () =
   let blk_arr2' =
     Resolve_section.resolve blk_arr2 binf.rodata binf.rodata_sliced in
   dump_blockarr blk_arr2'
+*)
+
+let _ =
+  go "ProcessICInstIFNOT"
 
 let pubnames = Dwarfreader.parse_all_pubname_data binf.debug_pubnames
 
