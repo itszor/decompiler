@@ -317,10 +317,10 @@ let go symname =
   IrPhiPlacement.rename blk_arr 0 regset;
   dump_blockarr blk_arr;
   (* Insert type info for function's locals here.  *)
-  Log.printf 1 "--- strip ids ---\n";
-  let blk_arr = strip_ids blk_arr in
   Log.printf 1 "--- gather info (1) ---\n";
   Typedb.gather_info blk_arr inforec;
+  Log.printf 1 "--- strip ids ---\n";
+  let blk_arr = strip_ids blk_arr in
   Log.printf 1 "--- minipool resolution ---\n";
   let blk_arr' =
     Minipool.minipool_resolve binf.elfbits binf.ehdr binf.shdr_arr binf.symbols
@@ -351,8 +351,7 @@ let go symname =
   dump_blockarr blk_arr'';
   blk_arr''
   
-(*
-let really_go () =
+(*let really_go () =
   Log.loglevel := 4;
   (*go "InitAccumUSECodeBlocks"*)
   (*;go "AddComparisonToUFCode"*)
@@ -368,10 +367,9 @@ let really_go () =
   dump_blockarr blk_arr1';
   let blk_arr2' =
     Resolve_section.resolve blk_arr2 binf.rodata binf.rodata_sliced in
-  dump_blockarr blk_arr2'
-*)
+  dump_blockarr blk_arr2'*)
 
-let _ =
+let x =
   go "ProcessICInstIFNOT"
 
 let pubnames = Dwarfreader.parse_all_pubname_data binf.debug_pubnames

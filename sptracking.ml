@@ -108,9 +108,11 @@ let sp_track blk_arr vars ctypes_for_cu =
   let spht = Hashtbl.create 10
   and framebase_loc = ref None
   and stack_vars = ref IrPhiPlacement.R.empty in
+  
   let sp_derived = function
     C.SSAReg (r, rn) -> Hashtbl.mem spht (r, rn)
   | _ -> false in
+
   let rec sp_used code =
     C.fold
       (fun expr found ->
@@ -118,22 +120,10 @@ let sp_track blk_arr vars ctypes_for_cu =
 	  C.Load (m, addr) as e -> C.Protect e, found
 	| C.Set (dst, src) -> C.Set (C.Protect dst, src), found
 	| x when sp_reg x || sp_derived x -> x, true
-	| C.Phi phi_args ->
-	    (* Oh dear, this doesn't work because a phi node might appear
-	       before the definition of its arguments, going by the order in
-	       which we scan the code.  *)
-	    Log.printf 3 "Checking phi node\n";
-	    (* If any of the phi node's arguments are sp-derived, see if we can
-	       resolve them.  This will (probably, at the moment?) only work if
-	       they all resolve to the same offset.  *)
-	    expr,
-	    Array.fold_right
-	      (fun node found -> if sp_used node then true else found)
-	      phi_args
-	      false
 	| x -> x, found)
       code
       false in
+
   let derived_offset base offset =
     if sp_reg base then
       offset
@@ -141,6 +131,7 @@ let sp_track blk_arr vars ctypes_for_cu =
       match base with
 	C.SSAReg (r, rn) -> Hashtbl.find spht (r, rn)
       | _ -> raise Not_found in
+
   let derive_sp offset = function
     (* Copy stack pointer to another register.  *)
     C.Set (C.SSAReg (r, rn), src) when sp_reg src ->
@@ -170,20 +161,11 @@ let sp_track blk_arr vars ctypes_for_cu =
       Hashtbl.add spht (r, rn) offset'
     (* Maybe we can handle Phi nodes here -- if all the inputs correspond to
        the same thing.  Dunno how likely that is.  *)
-  | C.Set (C.SSAReg (r, rn), C.Phi phi_args) ->
-      Array.iteri
-        (fun i node ->
-	  if sp_derived node then
-	    Log.printf 3 "Phi arg %d (%s) is SP-derived\n" i
-	      (C.string_of_code phi_args.(i))
-	  else
-	    Log.printf 3 "Phi arg %d (%s) isn't SP-derived\n" i
-	      (C.string_of_code phi_args.(i)))
-	phi_args
   | x ->
       Log.printf 3 "Don't know how to derive SP from '%s'\n"
 	(C.string_of_code x);
       raise Sp_tracking_failed in
+
   let underive_sp insn r rn offset =
     Log.printf 3 "Copying sp-derived var back to SP in '%s'\n"
       (C.string_of_code insn);
@@ -194,6 +176,7 @@ let sp_track blk_arr vars ctypes_for_cu =
       offset in
     Log.printf 3 "Offset now %d\n" offset';
     offset' in
+
   let rewrite_sp_from_dwarf_frame insn offset framebase_loc_opt =
     (* Try to find a variable in the stack frame which we might be trying
        to access.  This won't always work because the Dwarf info doesn't tend
@@ -231,29 +214,30 @@ let sp_track blk_arr vars ctypes_for_cu =
 	    let offset' = derived_offset base offset in
 	    try_rewrite_var vars offset' stack_vars x (`load dst) ctypes_for_cu
 	  (* Stores.  *)
-	 | C.Store (Irtypes.Word, C.Binary (Irtypes.Add, base, C.Immed imm),
-		    src) when sp_reg base || sp_derived base ->
-	     let offset' = derived_offset base offset in
-	     let real_stack_offset = offset' + Int32.to_int imm in
-	     try_rewrite_var vars real_stack_offset stack_vars x (`store src)
-			     ctypes_for_cu
-	 | C.Store (Irtypes.Word, C.Binary (Irtypes.Sub, base, C.Immed imm),
-		    src) when sp_reg base || sp_derived base ->
-	     let offset' = derived_offset base offset in
-	     let real_stack_offset = offset' - Int32.to_int imm in
-	     try_rewrite_var vars real_stack_offset stack_vars x (`store src)
-			     ctypes_for_cu
-	 | C.Store (Irtypes.Word, base, src)
-	     when sp_reg base || sp_derived base ->
-	     let offset' = derived_offset base offset in
-	     try_rewrite_var vars offset' stack_vars x (`store src)
-			     ctypes_for_cu
+	| C.Store (Irtypes.Word, C.Binary (Irtypes.Add, base, C.Immed imm),
+		   src) when sp_reg base || sp_derived base ->
+	    let offset' = derived_offset base offset in
+	    let real_stack_offset = offset' + Int32.to_int imm in
+	    try_rewrite_var vars real_stack_offset stack_vars x (`store src)
+			    ctypes_for_cu
+	| C.Store (Irtypes.Word, C.Binary (Irtypes.Sub, base, C.Immed imm),
+		   src) when sp_reg base || sp_derived base ->
+	    let offset' = derived_offset base offset in
+	    let real_stack_offset = offset' - Int32.to_int imm in
+	    try_rewrite_var vars real_stack_offset stack_vars x (`store src)
+			    ctypes_for_cu
+	| C.Store (Irtypes.Word, base, src)
+	    when sp_reg base || sp_derived base ->
+	    let offset' = derived_offset base offset in
+	    try_rewrite_var vars offset' stack_vars x (`store src)
+			    ctypes_for_cu
 	  (* Other.  *)
 	| C.SSAReg _ when sp_derived x ->
 	    let offset' = derived_offset x offset in
 	    try_rewrite_var vars offset' stack_vars x `ssa_reg ctypes_for_cu
 	| x -> x)
 	insn in
+
   let rewrite_sp insn offset =
     C.map
       (function
@@ -295,7 +279,9 @@ let sp_track blk_arr vars ctypes_for_cu =
           C.Protect (C.Unary (Irtypes.Address_of, C.Reg (CT.Stack offset')))
       | x -> x)
       insn in
+
   Block.clear_visited blk_arr;
+
   let rec scan blk sp_offset =
     blk.Block.start_sp_offset
       <- set_or_ensure_equal blk "start" blk.Block.start_sp_offset sp_offset;
@@ -336,7 +322,8 @@ let sp_track blk_arr vars ctypes_for_cu =
 	      "SP derived var '%s' in '%s' (initial sp offset %d)\n"
 	      (C.string_of_code dst) (C.string_of_code insn) off;
 	    derive_sp off insn;
-	    code, off
+	    let insn' = rewrite_sp_from_dwarf_frame insn off !framebase_loc in
+	    CS.snoc code (rewrite_sp insn' off), off
 	  (* Other uses of the stack pointer, or stack-pointer-derived
 	     registers.  *)
 	| _ ->
@@ -355,5 +342,27 @@ let sp_track blk_arr vars ctypes_for_cu =
         if not nextblk.Block.visited then
 	  scan nextblk sp_offset')
       blk.Block.idomchild in
+  (* Pass 1: Walk over code by children of immediate dominators.  *)
   scan blk_arr.(0) 0;
+
+  (* Pass 2: Attempt to resolve phi nodes.  *)
+  Array.iter
+    (fun blk ->
+      let code' = CS.fold_right
+        (fun stmt codeseq ->
+	  match stmt with
+	    C.Set (dst, C.Phi phi_args) ->
+	      Log.printf 3 "Attempt to resolve %s\n" (C.string_of_code stmt);
+	      Array.iteri
+	        (fun i arg ->
+		  if sp_derived arg then
+		    Log.printf 3 "Phi arg %d: %s, offset %d\n" i
+		      (C.string_of_code arg) (derived_offset arg 0))
+	        phi_args;
+	      CS.cons stmt codeseq
+	  | x -> CS.cons x codeseq)
+	blk.Block.code
+	CS.empty in
+      blk.Block.code <- code')
+    blk_arr;
   !stack_vars
