@@ -324,10 +324,16 @@ let go symname =
   Log.printf 1 "--- minipool resolution ---\n";
   let blk_arr' =
     Minipool.minipool_resolve binf.elfbits binf.ehdr binf.shdr_arr binf.symbols
-			      binf.mapping_syms binf.strtab blk_arr inforec in
+			      binf.mapping_syms binf.strtab blk_arr inforec
+			      cu_inf.ci_ctypes in
   dump_blockarr blk_arr';
-  Log.printf 1 "--- sp tracking ---\n";
+  (*Log.printf 1 "--- sp tracking ---\n";
   let sp_var_set = Sptracking.sp_track blk_arr' vars cu_inf.ci_ctypes in
+  add_stackvars_to_entry_block blk_arr' 0 sp_var_set;
+  dump_blockarr blk_arr';*)
+  Log.printf 1 "--- ptr tracking ---\n";
+  let blk_arr', sp_var_set =
+    Ptrtracking.pointer_tracking blk_arr' inforec vars cu_inf.ci_ctypes in
   add_stackvars_to_entry_block blk_arr' 0 sp_var_set;
   dump_blockarr blk_arr';
   Log.printf 1 "--- SSA conversion (2) ---\n";

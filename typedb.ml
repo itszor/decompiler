@@ -65,21 +65,21 @@ let implied_pointer regid hti =
     | _ -> false
   with Not_found -> false
 
-let used_as_pointer regid ht =
+let used_as_pointer ct_for_cu regid ht =
   try
     let features = Hashtbl.find ht regid in
     List.exists
       (function
-        Type_known k -> Ctype.pointer_type k
-      | Used_as_type k -> Ctype.pointer_type k
+        Type_known k -> Ctype.pointer_type ct_for_cu k
+      | Used_as_type k -> Ctype.pointer_type ct_for_cu k
       | _ -> false)
       features
   with Not_found -> false
 
-let probably_pointer regid inforec =
+let probably_pointer ct_for_cu regid inforec =
   used_as_addr regid inforec.infotag
   || implied_pointer regid inforec.implications
-  || used_as_pointer regid inforec.infotag
+  || used_as_pointer ct_for_cu regid inforec.infotag
 
 let record_info ht reg info =
   try

@@ -22,3 +22,5 @@ TODO list for decompiler
 * Add loading of debug info for dependent libraries.
 
 * stm/ldm ordering broken? [fixed]
+
+* I think we want exact address information during pointer tracking (to find the right locations in debug info). Maybe use "set_address" statements.

@@ -33,12 +33,14 @@ type ctype_info = {
   ct_typetags : (string, ctype) Hashtbl.t
 }
 
-let rec pointer_type ctyp = 
+let rec pointer_type ct_for_cu ctyp = 
   match ctyp with
     C_pointer _ -> true
-  | C_const c | C_volatile c -> pointer_type c
-  | C_typedef _
-  | C_typetag _ -> failwith "unknown if pointer, fixme"
+  | C_const c | C_volatile c -> pointer_type ct_for_cu c
+  | C_typedef td ->
+      pointer_type ct_for_cu (Hashtbl.find ct_for_cu.ct_typedefs td)
+  | C_typetag tt ->
+      pointer_type ct_for_cu (Hashtbl.find ct_for_cu.ct_typetags tt)
   | _ -> false
 
 let string_of_ctype ctyp =

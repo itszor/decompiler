@@ -34,73 +34,7 @@ let offset_from_current_sp loc =
   | `DW_OP_breg (13, offs) -> Big_int.int_of_big_int offs
   | _ -> failwith "offset_from_current_sp"
 
-(* We can sometimes tell the names and proper types of registers too -- that's
-   not handled at present, and probably won't be handled here anyway.  *)
-
-let fb_relative_var_loc loc =
-  match loc with
-    Dwarfreader.Loc_expr (`DW_OP_fbreg offs) -> offs
-  | _ -> raise Not_found
-
-let known_var vars sp_offset =
-  let fv, ofs =
-    List.fold_left
-      (fun ((found_var, offset) as prev) var ->
-	match var.Function.var_location with
-          None -> prev
-	| Some loc ->
-            try
-	      let var_offset = fb_relative_var_loc loc in
-	      if sp_offset >= var_offset
-		 && sp_offset < (var_offset + var.Function.var_size) then begin
-		Log.printf 3 "sp offset:%d var_offset:%d var_size:%d\n"
-		  sp_offset var_offset var.Function.var_size;
-		Some var, sp_offset - var_offset
-	      end else
-		prev
-	    with Not_found -> prev)
-      (None, 0)
-      vars in
-  match fv with
-    Some f -> f, ofs
-  | None -> raise Not_found
-
 module IrPhiPlacement = Phi.PhiPlacement (Ir.IrCT) (Ir.IrCS) (Ir.IrBS)
-
-let try_rewrite_var vars offset stack_vars insn rewrite_as ctypes_for_cu =
-  try
-    let kvar, var_ofs = known_var vars offset in
-    Log.printf 3 "Offset %d looks like variable %s (+%d)\n"
-      offset kvar.Function.var_name var_ofs;
-    let sv = CT.Stack_var kvar.Function.var_name in
-    stack_vars := IrPhiPlacement.R.add sv !stack_vars;
-    let aggr_access, _ =
-      Insn_to_ir.resolve_aggregate_access kvar.Function.var_type var_ofs
-					  ctypes_for_cu in
-    (*let blk = {
-      Irtypes.ctype = kvar.Function.var_type;
-      block_size = kvar.Function.var_size;
-      access_size = Irtypes.Word
-    } in*)
-    match rewrite_as with
-      `load dst ->
-	C.Protect (C.Set (dst,
-		     C.Load (Irtypes.Word,
-		       C.Unary (Irtypes.Aggr_member (kvar.Function.var_type,
-		        			     aggr_access),
-			 C.Unary (Irtypes.Address_of, C.Reg sv)))))
-    | `store src ->
-        C.Protect (C.Store (Irtypes.Word,
-		     C.Unary (Irtypes.Aggr_member (kvar.Function.var_type,
-						   aggr_access),
-		       C.Unary (Irtypes.Address_of, C.Reg sv)),
-		     src))
-    | `ssa_reg ->
-        C.Protect (C.Unary (Irtypes.Aggr_member (kvar.Function.var_type,
-						 aggr_access),
-		     C.Unary (Irtypes.Address_of, C.Reg sv)))
-  with Not_found ->
-    insn
 
 exception Sp_tracking_failed
 
@@ -200,41 +134,49 @@ let sp_track blk_arr vars ctypes_for_cu =
 	    when sp_reg base || sp_derived base ->
 	    let offset' = derived_offset base offset in
 	    let real_stack_offset = offset' + Int32.to_int imm in
-	    try_rewrite_var vars real_stack_offset stack_vars x (`load dst)
-			    ctypes_for_cu
+	    Ptrtracking.try_rewrite_var vars real_stack_offset stack_vars x
+					(`load (Irtypes.Word, dst))
+					ctypes_for_cu
 	| C.Set (dst, C.Load (Irtypes.Word,
 			      C.Binary (Irtypes.Sub, base, C.Immed imm)))
 	    when sp_reg base || sp_derived base ->
 	    let offset' = derived_offset base offset in
 	    let real_stack_offset = offset' - Int32.to_int imm in
-            try_rewrite_var vars real_stack_offset stack_vars x (`load dst)
-			    ctypes_for_cu
+            Ptrtracking.try_rewrite_var vars real_stack_offset stack_vars x
+					(`load (Irtypes.Word, dst))
+					ctypes_for_cu
 	| C.Set (dst, C.Load (Irtypes.Word, base))
 	    when sp_reg base || sp_derived base ->
 	    let offset' = derived_offset base offset in
-	    try_rewrite_var vars offset' stack_vars x (`load dst) ctypes_for_cu
+	    Ptrtracking.try_rewrite_var vars offset' stack_vars x
+					(`load (Irtypes.Word, dst))
+					ctypes_for_cu
 	  (* Stores.  *)
 	| C.Store (Irtypes.Word, C.Binary (Irtypes.Add, base, C.Immed imm),
 		   src) when sp_reg base || sp_derived base ->
 	    let offset' = derived_offset base offset in
 	    let real_stack_offset = offset' + Int32.to_int imm in
-	    try_rewrite_var vars real_stack_offset stack_vars x (`store src)
-			    ctypes_for_cu
+	    Ptrtracking.try_rewrite_var vars real_stack_offset stack_vars x
+					(`store (Irtypes.Word, src))
+					ctypes_for_cu
 	| C.Store (Irtypes.Word, C.Binary (Irtypes.Sub, base, C.Immed imm),
 		   src) when sp_reg base || sp_derived base ->
 	    let offset' = derived_offset base offset in
 	    let real_stack_offset = offset' - Int32.to_int imm in
-	    try_rewrite_var vars real_stack_offset stack_vars x (`store src)
-			    ctypes_for_cu
+	    Ptrtracking.try_rewrite_var vars real_stack_offset stack_vars x
+					(`store (Irtypes.Word, src))
+					ctypes_for_cu
 	| C.Store (Irtypes.Word, base, src)
 	    when sp_reg base || sp_derived base ->
 	    let offset' = derived_offset base offset in
-	    try_rewrite_var vars offset' stack_vars x (`store src)
-			    ctypes_for_cu
+	    Ptrtracking.try_rewrite_var vars offset' stack_vars x
+					(`store (Irtypes.Word, src))
+					ctypes_for_cu
 	  (* Other.  *)
 	| C.SSAReg _ when sp_derived x ->
 	    let offset' = derived_offset x offset in
-	    try_rewrite_var vars offset' stack_vars x `ssa_reg ctypes_for_cu
+	    Ptrtracking.try_rewrite_var vars offset' stack_vars x `ssa_reg
+					ctypes_for_cu
 	| x -> x)
 	insn in
 
