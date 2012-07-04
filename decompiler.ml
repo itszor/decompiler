@@ -160,7 +160,7 @@ let cons_and_add_to_index blk bseq ht blockref idx =
   incr idx;
   BS.cons blk bseq
 
-let bs_of_code_hash ft binf inforec code_hash start_addr entry_pt framebase =
+let bs_of_code_hash ft binf inforec code_hash start_addr entry_pt =
   let idx = ref 0 in
   let ht = Hashtbl.create 10 in
   let bseq_cons blk_id blk bseq =
@@ -169,7 +169,7 @@ let bs_of_code_hash ft binf inforec code_hash start_addr entry_pt framebase =
     (fun addr code bseq ->
       let block_id = Irtypes.BlockAddr addr in
       Insn_to_ir.convert_block binf inforec block_id bseq bseq_cons addr code
-			       code_hash framebase)
+			       code_hash)
     code_hash
     BS.empty in
   let pre_prologue_blk = eabi_pre_prologue ft start_addr inforec entry_pt
@@ -271,9 +271,10 @@ let strip_ids blk_arr =
 
 (*let binf = open_file "libGLESv2.so"*)
 (*let binf = open_file "foo"*)
-let binf = open_file "libglslcompiler.so"
+(*let binf = open_file "libglslcompiler.so"*)
 (*let binf = open_file "tests/hello"*)
 (*let binf = open_file "tests/rodata"*)
+let binf = open_file "tests/fnargs"
 
 let go symname =
   let sym = Symbols.find_named_symbol binf.symbols binf.strtab symname in
@@ -290,14 +291,11 @@ let go symname =
   let ft =
     Function.function_type binf symname die cu_inf.ci_dietab cu_inf.ci_ctypes
       ~compunit_baseaddr:base_addr_for_cu in
-  let framebase =
-    Function.function_frame_base die cu_inf.ci_dietab binf.debug_loc
-      ~compunit_baseaddr:base_addr_for_cu in
   let vars = Function.function_vars die cu_inf.ci_dietab binf.debug_loc
 	       ~compunit_baseaddr:base_addr_for_cu cu_inf.ci_ctypes in
   let inforec = Typedb.create_info () in
   let blockseq, ht =
-    bs_of_code_hash ft binf inforec code entry_point entry_point_ba framebase in
+    bs_of_code_hash ft binf inforec code entry_point entry_point_ba in
   Log.printf 1 "--- initial blockseq ---\n";
   dump_blockseq blockseq;
   let entry_point_ref = Hashtbl.find ht entry_point_ba in
@@ -355,7 +353,8 @@ let go symname =
   Log.printf 1 "--- removing prologue/epilogue code ---\n";
   let blk_arr'' = Ce.remove_prologue_and_epilogue blk_arr' in
   dump_blockarr blk_arr'';
-  blk_arr''
+  ignore (blk_arr'');
+  ft, vars
   
 (*let really_go () =
   Log.loglevel := 4;
@@ -375,8 +374,8 @@ let go symname =
     Resolve_section.resolve blk_arr2 binf.rodata binf.rodata_sliced in
   dump_blockarr blk_arr2'*)
 
-let x =
-  go "ProcessICInstIFNOT"
+(*let x =
+  go "ProcessICInstIFNOT"*)
 
 let pubnames = Dwarfreader.parse_all_pubname_data binf.debug_pubnames
 

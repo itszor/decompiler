@@ -251,6 +251,8 @@ let gather_info blk_arr inforec =
 	      record_impl impl_ht (rb, rbn) Int
 	  | C.Control (C.CompJump_ext (_, C.SSAReg (rc, rcn))) ->
 	      record_info ht (rc, rcn) Code_pointer
+	  | C.Entity (CT.Insn_address _) ->
+	      ()
 	  | x ->
 	      let got_something = ref false in
 	      ignore (C.map

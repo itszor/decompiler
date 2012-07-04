@@ -465,7 +465,9 @@ let get_section_by_name elfbits ehdr shdr_arr name =
     ~init:None
     shdr_arr in
   match found_sec with
-    None -> raise Not_found
+    None ->
+      Log.printf 1 "Warning: section '%s' not found, substituting dummy\n" name;
+      Bitstring.empty_bitstring
   | Some shdr -> extract_section elfbits shdr
 
 let get_section_number elfbits ehdr shdr_arr name =

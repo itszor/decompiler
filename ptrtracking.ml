@@ -71,7 +71,7 @@ let try_rewrite_var vars offset stack_vars insn rewrite_as ctypes_for_cu =
 	             C.Unary (Irtypes.Aggr_member (kvar.Function.var_type,
 						   aggr_access),
 			      C.Reg sv)))
-  with Not_found ->
+  with Not_found | Insn_to_ir.Non_aggregate ->
     insn
 
 exception Untrackable
@@ -143,28 +143,57 @@ let ptr_plus_offset addr vars defs inforec =
       improve_pointer vars defs (r, rn) (Int32.neg imm)
   | _ -> raise Not_found
 
+(* Try to build a snapshot of the stack at a given address (from debug
+   info).  *)
+
+let stack_for_addr vars addr =
+  let cov = Coverage.create_coverage Int32.min_int 0l in
+  List.iter
+    (fun var ->
+      match var.Function.var_location with
+        None -> ()
+      | Some loc ->
+          try
+	    let loc' = Dwarfreader.loc_for_addr addr loc in
+	    match loc' with
+	      `DW_OP_fbreg offs ->
+		let range =
+		  Coverage.Range (var, Int32.of_int offs,
+				  Int32.of_int var.Function.var_size) in
+		Coverage.add_range cov range
+	    | `DW_OP_reg _ -> ()
+	    | _ -> failwith "unexpected location/stack_for_addr"
+	  with Not_found ->
+	    ())
+    vars;
+  cov
+
 let pointer_tracking blk_arr inforec vars ctypes_for_cu =
   let defs = get_defs blk_arr in
   let stack_vars = ref IrPhiPlacement.R.empty in
   let blk_arr' = Array.map
     (fun blk ->
-      let code' = CS.fold_right
-        (fun stmt codeseq ->
+      let addr = ref None in
+      let code' = CS.fold_left
+        (fun codeseq stmt ->
 	  match stmt with
-	    C.Set (dst, C.Load (accsz, addr)) ->
+	    C.Entity (CT.Insn_address ia) ->
+	      addr := Some ia;
+	      CS.snoc codeseq stmt
+	  | C.Set (dst, C.Load (accsz, addr)) ->
 	      let base, offset = ptr_plus_offset addr vars defs inforec in
 	      let new_stmt = try_rewrite_var vars (Int32.to_int offset)
 					     stack_vars stmt
 					     (`load (accsz, dst))
 					     ctypes_for_cu in
-	      CS.cons new_stmt codeseq
+	      CS.snoc codeseq new_stmt
 	  | C.Store (accsz, addr, src) ->
 	      let base, offset = ptr_plus_offset addr vars defs inforec in
 	      let new_stmt = try_rewrite_var vars (Int32.to_int offset)
 					     stack_vars stmt
 					     (`store (accsz, src))
 					     ctypes_for_cu in
-	      CS.cons new_stmt codeseq
+	      CS.snoc codeseq new_stmt
 	  | C.Set (dst, src) ->
 	      let src' = C.map
 	        (fun addr ->
@@ -182,10 +211,10 @@ let pointer_tracking blk_arr inforec vars ctypes_for_cu =
 		      new_var
 		  | x -> x)
 		src in
-	      CS.cons (C.Set (dst, src')) codeseq
-	  | x -> CS.cons x codeseq)
-	blk.Block.code
-	CS.empty in
+	      CS.snoc codeseq (C.Set (dst, src'))
+	  | x -> CS.snoc codeseq x)
+	CS.empty
+	blk.Block.code in
       { blk with Block.code = code' })
     blk_arr in
   blk_arr', !stack_vars

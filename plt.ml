@@ -6,8 +6,6 @@ module CT = Ir.IrCT
 module BS = Ir.IrBS
 module C = Ir.Ir
 
-let dummy_loc = Dwarfreader.Loc_expr (`DW_OP_reg 13)
-
 let decode_stub binf addr =
   (* We're not interested in gathering info for stubs.  *)
   let inforec = Typedb.create_info () in
@@ -25,7 +23,7 @@ let decode_stub binf addr =
   done;
   Insn_to_ir.convert_block binf inforec (Irtypes.BlockAddr addr) BS.empty
 			   (fun _ blk bseq -> BS.cons blk bseq) addr
-			   !stub_insns (Hashtbl.create 0) dummy_loc
+			   !stub_insns (Hashtbl.create 0)
 
 (* A decoded PLT stub looks like this:
 

@@ -308,6 +308,8 @@ let fn_args inforec callee_addr ft_args arglocs =
 	  | x -> failwith "fn_args/location"
 	  end
       | None ->
+          Log.printf 3
+	    "Warning: no loc for argument, falling back to cheap hack";
 	  begin match i with
             (0 | 1 | 2 | 3) as r -> C.Reg (CT.Hard_reg r)
 	  | n -> C.Load (Irtypes.Word,
@@ -513,6 +515,7 @@ let finish_block block_id ?chain insnlist bseq bseq_cons =
   bseq_cons block_id blk bseq
 
 let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =
+  let ilist = CS.snoc ilist (C.Entity (CT.Insn_address addr)) in
   let append insn =
     CS.snoc ilist insn, blk_id, bseq
   and same_blk ilist =
@@ -585,35 +588,17 @@ and convert_shift binf inforec addr insn ilist opc shift blk_id bseq bseq_cons =
   end else
     CS.snoc ilist (C.Nullary (Irtypes.Untranslated)), blk_id, bseq
 
-let framebase_for_addr framebase_loc addr =
-  match framebase_loc with
-    Dwarfreader.Loc_expr loc -> loc
-  | Dwarfreader.Loc_list lst ->
-      let _, _, loc =
-        List.find (fun (lo, hi, loc) -> addr >= lo && addr < hi) lst in
-      loc
 
-let convert_block binf inforec block_id bseq bseq_cons addr insn_list code_hash
-		  framebase_loc =
+let convert_block binf inforec block_id bseq bseq_cons addr insn_list
+		  code_hash =
   let frame_base = ref None in
-  let add_framebase_update addr ilist =
-    try
-      let loc = framebase_for_addr framebase_loc addr in
-      match !frame_base with
-        Some old_loc when loc == old_loc -> ilist
-      | _ ->
-        frame_base := Some loc;
-	CS.snoc ilist (C.Entity (CT.Frame_base_update loc))
-    with Not_found ->
-      ilist in
   let code_deque, blk_id', bseq', last_offset = Deque.fold_left
     (fun (ilist, blk_id, bseq, offset) insn ->
       let insn_addr = Int32.add addr offset in
-      let ilist' = add_framebase_update insn_addr ilist in
-      let ilist'', blk_id', bseq'
-        = convert_insn binf inforec insn_addr insn ilist' blk_id bseq
+      let ilist', blk_id', bseq'
+        = convert_insn binf inforec insn_addr insn ilist blk_id bseq
 		       bseq_cons in
-      ilist'', blk_id', bseq', Int32.add offset 4l)
+      ilist', blk_id', bseq', Int32.add offset 4l)
     (CS.empty, block_id, bseq, 0l)
     insn_list in
   let next_addr = Int32.add addr last_offset in
@@ -630,6 +615,8 @@ let base_type_p = function
   | Ctype.C_union _
   | Ctype.C_array _ -> false
   | _ -> true
+
+exception Non_aggregate
 
 (* Return aggr_member_id, type of member.  FIXME: We don't necessarily always
    want the innermost member.  If we know the type of the context (e.g. a
@@ -661,4 +648,4 @@ let rec resolve_aggregate_access typ offset ctypes_for_cu =
       let targ = Hashtbl.find ctypes_for_cu.Ctype.ct_typedefs typename in
       resolve_aggregate_access targ offset ctypes_for_cu
   | _ ->
-      failwith "non-aggregate"
+      raise Non_aggregate

@@ -6,6 +6,7 @@ type function_info =
     args : ctype array;
     arg_locs : location option array;
     arg_names : string array;
+    framebase_loc : location option;
     return : ctype;
     local : bool;
     prototyped : bool
@@ -30,9 +31,10 @@ let function_args binf die die_hash ctypes_for_cu ~compunit_baseaddr =
 	(*Dwarfprint.print_die die die_hash;*)
 	makelist sibl ((argname, ctype, loc) :: acc) (succ argno)
     | _ ->
-	Array.of_list (List.map (fun (n, _, _) -> n) acc),
-	Array.of_list (List.map (fun (_, t, _) -> t) acc),
-	Array.of_list (List.map (fun (_, _, l) -> l) acc) in
+        let acc' = List.rev acc in
+	Array.of_list (List.map (fun (n, _, _) -> n) acc'),
+	Array.of_list (List.map (fun (_, t, _) -> t) acc'),
+	Array.of_list (List.map (fun (_, _, l) -> l) acc') in
   makelist die [] 0
 
 let function_type binf name die die_hash ctypes_for_cu ~compunit_baseaddr =
@@ -48,12 +50,18 @@ let function_type binf name die die_hash ctypes_for_cu ~compunit_baseaddr =
 	  C_void
       and external_p = get_attr_bool_present attrs DW_AT_external
       and prototyped = get_attr_bool_present attrs DW_AT_prototyped in
+      let framebase_loc =
+        try
+          Some (get_attr_loc attrs DW_AT_frame_base binf.Binary_info.debug_loc
+			     ~addr_size:4 ~compunit_baseaddr)
+	with Not_found -> None in
       let argnames, args, arglocs =
         function_args binf child die_hash ctypes_for_cu ~compunit_baseaddr in
       { return = return_type;
         args = args;
 	arg_locs = arglocs;
 	arg_names = argnames;
+	framebase_loc = framebase_loc;
 	local = not external_p;
 	prototyped = prototyped }
   | Die_node ((DW_TAG_subprogram, attrs), _) ->
@@ -66,22 +74,19 @@ let function_type binf name die die_hash ctypes_for_cu ~compunit_baseaddr =
 	  C_void
       and external_p = get_attr_bool_present attrs DW_AT_external
       and prototyped = get_attr_bool_present attrs DW_AT_prototyped in
+      let framebase_loc =
+        try
+          Some (get_attr_loc attrs DW_AT_frame_base binf.Binary_info.debug_loc
+			     ~addr_size:4 ~compunit_baseaddr)
+	with Not_found -> None in
       { return = return_type;
         args = [| |];
 	arg_locs = [| |];
 	arg_names = [| |];
+	framebase_loc = framebase_loc;
 	local = not external_p;
 	prototyped = prototyped }
   | _ -> raise Unknown_type
-
-let function_frame_base die die_hash locbits ~compunit_baseaddr =
-  match die with
-    Die_tree ((DW_TAG_subprogram, attrs), _, _)
-  | Die_node ((DW_TAG_subprogram, attrs), _) ->
-      let framebase = get_attr_loc attrs DW_AT_frame_base locbits
-				   ~addr_size:4 ~compunit_baseaddr in
-      framebase
-  | _ -> failwith "not subprogram die"
 
 type var =
   {

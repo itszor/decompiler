@@ -4,6 +4,7 @@ open Dwarfreader
 
 type ctype =
     C_void
+  | C_longlong
   | C_int
   | C_short
   | C_char
@@ -46,6 +47,7 @@ let rec pointer_type ct_for_cu ctyp =
 let string_of_ctype ctyp =
   let rec scan = function
     C_void -> "void"
+  | C_longlong -> "long long"
   | C_int -> "int"
   | C_short -> "short"
   | C_char -> "char"
@@ -183,6 +185,8 @@ let rec resolve_type die die_hash ctypes_for_cu =
       begin match enc, size with
         DW_ATE_signed, 4 -> C_int
       | DW_ATE_unsigned, 4 -> C_unsigned C_int
+      | DW_ATE_signed, 8 -> C_longlong
+      | DW_ATE_unsigned, 8 -> C_unsigned C_longlong
       | DW_ATE_signed, 2 -> C_short
       | DW_ATE_unsigned, 2 -> C_unsigned C_short
       | (DW_ATE_signed | DW_ATE_signed_char), 1 -> C_signed C_char
