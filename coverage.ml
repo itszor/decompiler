@@ -64,15 +64,35 @@ let rec interval_within second first =
           second_start >= first_start && second_end <= first_end
       end
 
+(* Remove duplicates from a list of ranges.  Attempt to break ties (for a
+   particular start address) by preferring closed ranges over half-open ones. 
+   Otherwise, just remove identical intervals.  *)
+
+let cleanup_intervals int_list =
+  let sorted =
+    List.sort (fun a b -> compare (interval_start a) (interval_start b))
+	      int_list in
+  let rec uniq = function
+    [] -> []
+  | [a] -> [a]
+  | a :: b :: rest ->
+      if interval_start a = interval_start b then
+        match a, b with
+	  Half_open _, (Range _ | Padded_range _) -> uniq (b :: rest)
+	| (Range _ | Padded_range _), Half_open _ -> uniq (a :: rest)
+	| a, b when a = b -> uniq (b :: rest)
+	| _ -> a :: uniq (b :: rest)
+      else
+        a :: uniq (b :: rest) in
+  uniq sorted
+
 (* Sort intervals, and determine those which are nested completely inside their
    predecessors.  *)
 
 let fix_coverage coverage =
   if not coverage.valid then begin
-    let sorted = Array.of_list coverage.raw_intervals in
-    Array.sort
-      (fun a b -> compare (interval_start a) (interval_start b))
-      sorted;
+    let cleaned_up = cleanup_intervals coverage.raw_intervals in
+    let sorted = Array.of_list cleaned_up in
     coverage.nested_in_prev <- Array.create (Array.length sorted) false;
     let prev = ref None in
     for i = 0 to Array.length sorted - 1 do

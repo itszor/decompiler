@@ -19,6 +19,7 @@ type ctype =
   | C_union of aggregate_member list
   | C_array of int * ctype
   | C_enum (* of ... *)
+  | C_funtype of ctype * ctype list
   | C_typedef of string
   | C_typetag of string
 
@@ -77,7 +78,10 @@ let string_of_ctype ctyp =
 	    (fun ag ->
 	      Printf.sprintf "%s %s; /* offset=%d, size=%d */" (scan ag.typ)
 			     ag.name ag.offset ag.size)
-	    agg)) in
+	    agg))
+  | C_funtype (ret, args) ->
+      Printf.sprintf "%s (*fn) (%s)" (scan ret)
+	(String.concat ", " (List.map scan args)) in
   scan ctyp
 
 let rec dwarf_type_size die die_hash =

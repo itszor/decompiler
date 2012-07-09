@@ -34,6 +34,7 @@ module IrCT =
     type immed = int32
     type addr = Absolute of int32
 	      | Symbol of string * Elfreader.elf_sym
+	      | Finf_sym of string * Function.function_info * Elfreader.elf_sym
     
     let string_of_nulop = function
       Nop -> "nop"
@@ -41,6 +42,7 @@ module IrCT =
     | Arg_in -> "arg_in"
     | Caller_saved -> "caller_saved"
     | Special -> "special"
+    | Incoming_sp -> "incoming_sp"
     | Declaration ct -> Printf.sprintf "declaration(%s)"
 	(Ctype.string_of_ctype ct)
     
@@ -140,6 +142,8 @@ module IrCT =
     let string_of_addr = function
       Absolute i -> Printf.sprintf "absolute(%lx)" i
     | Symbol (name, _) -> Printf.sprintf "symbol(%s)" name
+    | Finf_sym (name, finf, _) ->
+	Printf.sprintf "finf-sym(%s,%s)" "fninf" name
   end
 
 module IrBS =

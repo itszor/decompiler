@@ -122,7 +122,7 @@ let eabi_pre_prologue ft start_addr inforec real_entry_point =
      C.Set (C.Reg (CT.Hard_reg 10), C.Nullary Irtypes.Caller_saved);
      C.Set (C.Reg (CT.Hard_reg 11), C.Nullary Irtypes.Caller_saved);
      C.Set (C.Reg (CT.Hard_reg 12), C.Nullary Irtypes.Special);
-     C.Set (C.Reg (CT.Hard_reg 13), C.Nullary Irtypes.Special);
+     C.Set (C.Reg (CT.Hard_reg 13), C.Nullary Irtypes.Incoming_sp);
      C.Set (C.Reg (CT.Hard_reg 14), C.Nullary Irtypes.Special);
      C.Set (C.Reg (CT.Hard_reg 15), C.Nullary Irtypes.Special);
      C.Set (C.Reg (CT.Status Irtypes.CondFlags), C.Nullary Irtypes.Special);
@@ -289,7 +289,7 @@ let go symname =
   Log.printf 2 "comp unit base addr: %lx\n" base_addr_for_cu;
   let die = Hashtbl.find cu_inf.ci_dieaddr entry_point in
   let ft =
-    Function.function_type binf symname die cu_inf.ci_dietab cu_inf.ci_ctypes
+    Function.function_type binf.debug_loc symname die cu_inf.ci_dietab cu_inf.ci_ctypes
       ~compunit_baseaddr:base_addr_for_cu in
   let vars = Function.function_vars die cu_inf.ci_dietab binf.debug_loc
 	       ~compunit_baseaddr:base_addr_for_cu cu_inf.ci_ctypes in
@@ -329,6 +329,9 @@ let go symname =
   let sp_var_set = Sptracking.sp_track blk_arr' vars cu_inf.ci_ctypes in
   add_stackvars_to_entry_block blk_arr' 0 sp_var_set;
   dump_blockarr blk_arr';*)
+  Log.printf 1 "--- gather sp refs ---\n";
+  let stack_coverage =
+    Ptrtracking.find_stack_references blk_arr' inforec vars cu_inf.ci_ctypes in
   Log.printf 1 "--- ptr tracking ---\n";
   let blk_arr', sp_var_set =
     Ptrtracking.pointer_tracking blk_arr' inforec vars cu_inf.ci_ctypes in
@@ -354,7 +357,7 @@ let go symname =
   let blk_arr'' = Ce.remove_prologue_and_epilogue blk_arr' in
   dump_blockarr blk_arr'';
   ignore (blk_arr'');
-  ft, vars
+  stack_coverage
   
 (*let really_go () =
   Log.loglevel := 4;

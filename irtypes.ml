@@ -4,6 +4,7 @@ type ir_nulop =
   | Caller_saved
   | Arg_in
   | Special
+  | Incoming_sp
   | Declaration of Ctype.ctype
 
 type ir_unop =

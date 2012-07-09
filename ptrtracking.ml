@@ -94,6 +94,7 @@ let track_pointer defs use =
 	  (reg, offset') :: track (d, dn) offset'
       | C.Nullary Irtypes.Caller_saved
       | C.Nullary Irtypes.Special
+      | C.Nullary Irtypes.Incoming_sp
       | C.Nullary Irtypes.Arg_in
       | C.Entity CT.Arg_out
       | C.Phi _
@@ -126,7 +127,7 @@ let improve_pointer vars defs ptr offset =
         let offset_from_def = Int32.add def_offset offset in
         Log.printf 3 "Examine %s+%lx\n" (C.string_of_code src) offset_from_def;
 	match src with
-	  C.Nullary Irtypes.Special -> src, offset_from_def
+	  C.Nullary Irtypes.Incoming_sp -> src, offset_from_def
 	| _ -> best)
       (C.SSAReg (p, pn), offset)
       def_chain
@@ -218,3 +219,70 @@ let pointer_tracking blk_arr inforec vars ctypes_for_cu =
       { blk with Block.code = code' })
     blk_arr in
   blk_arr', !stack_vars
+
+let maybe_stack_use cov ?accsz base offset =
+  match base with
+    C.Nullary Irtypes.Incoming_sp ->
+      begin match accsz with
+        None ->
+	  Coverage.add_range cov (Coverage.Half_open ((), offset))
+      | Some x ->
+          let range_size =
+	    match x with
+	      Irtypes.U8 | Irtypes.S8 -> 1l
+	    | Irtypes.U16 | Irtypes.S16 -> 2l
+	    | Irtypes.Word -> 4l
+	    | Irtypes.Dword -> 8l in
+	  Coverage.add_range cov (Coverage.Range ((), offset, range_size))
+      end
+  | _ -> ()
+
+let find_stack_references blk_arr inforec vars ctypes_for_cu =
+  let defs = get_defs blk_arr in
+  let cov = Coverage.create_coverage Int32.min_int Int32.max_int in
+  let escaping_ref node =
+    match node with
+      C.Load (_, _) -> C.Protect node
+    | C.Store (_, _, _) -> C.Protect node
+    | C.Binary (Irtypes.Add, C.SSAReg (r, rn), C.Immed _)
+    | C.Binary (Irtypes.Sub, C.SSAReg (r, rn), C.Immed _)
+    | C.SSAReg (r, rn) ->
+	let base, offset = ptr_plus_offset node vars defs inforec in
+	maybe_stack_use cov base offset;
+	C.Protect node
+    | _ -> node in
+  Array.iter
+    (fun blk ->
+      let insn_addr = ref None in
+      CS.iter
+        (fun stmt ->
+	  ignore (C.map
+	    (fun node ->
+	      match node with
+		C.Entity (CT.Insn_address ia) ->
+	          insn_addr := Some ia;
+		  node
+	      | C.Load (accsz, addr) ->
+		  let base, offset = ptr_plus_offset addr vars defs inforec in
+		  maybe_stack_use cov ~accsz base offset;
+		  C.Protect node
+	      | C.Store (accsz, addr, src) ->
+		  let base, offset = ptr_plus_offset addr vars defs inforec in
+		  maybe_stack_use cov ~accsz base offset;
+		  ignore (escaping_ref src);
+		  C.Protect node
+	      | _ -> node)
+	    ~ctl_fn:(fun ctlnode ->
+	      match ctlnode with
+		C.Call_ext (_, _, args, _, _) ->
+	          (* Note any stack var which escapes (by having its address
+		     taken) via being a function argument.  *)
+	          ignore (C.map
+		    (fun node -> escaping_ref node)
+		    args);
+		  ctlnode
+	      | _ -> ctlnode)
+	    stmt))
+	blk.Block.code)
+    blk_arr;
+  cov

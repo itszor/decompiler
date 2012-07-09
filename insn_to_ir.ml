@@ -407,13 +407,13 @@ let convert_bl binf inforec addr insn =
 	  let sym = Hashtbl.find cu_inf.Binary_info.ci_symtab call_addr
 	  and die = Hashtbl.find cu_inf.Binary_info.ci_dieaddr call_addr in
 	  let symname = Symbols.symbol_name sym binf.Binary_info.strtab in
-	  let ct_sym = CT.Symbol (symname, sym) in
 	  (*let sym_or_addr = find_symbol binf.Binary_info.symbols
 					binf.Binary_info.strtab call_addr in*)
 	  let fn_inf =
-	    Function.function_type binf symname die
+	    Function.function_type binf.Binary_info.debug_loc symname die
 	      cu_inf.Binary_info.ci_dietab cu_inf.Binary_info.ci_ctypes
 	      ~compunit_baseaddr:cu_inf.Binary_info.ci_baseaddr in
+	  let ct_sym = CT.Finf_sym (symname, fn_inf, sym) in
 	  let passes = fn_args inforec call_addr fn_inf.Function.args
 			       fn_inf.Function.arg_locs
 	  and returns = fn_ret fn_inf.Function.return in
