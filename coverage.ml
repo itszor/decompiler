@@ -188,6 +188,10 @@ let find_closed_range coverage addr =
 	    following_start (succ idx) in
       Range (x, start, Int32.sub (following_start (succ range_idx)) start)
 
+let all_ranges cov =
+  fix_coverage cov;
+  cov.intervals
+
 (*
     |=====first======|
        |======second======|

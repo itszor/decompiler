@@ -112,7 +112,7 @@ let track_pointer defs use =
 (* Improve a pointer. This might be done by:
 
      * walking through the chain of defs until we find a base register with a
-       known type.
+       known type. [not yet implemented.]
      * finding a src which is "special" -- i.e. the stack pointer.
      * anything else?
 *)
@@ -134,6 +134,8 @@ let improve_pointer vars defs ptr offset =
   with Untrackable ->
     C.SSAReg (p, pn), offset
 
+exception Non_constant_offset
+
 let ptr_plus_offset addr vars defs inforec =
   match addr with
     C.SSAReg (r, rn) ->
@@ -142,7 +144,7 @@ let ptr_plus_offset addr vars defs inforec =
       improve_pointer vars defs (r, rn) imm
   | C.Binary (Irtypes.Sub, C.SSAReg (r, rn), C.Immed imm) ->
       improve_pointer vars defs (r, rn) (Int32.neg imm)
-  | _ -> raise Not_found
+  | _ -> raise Non_constant_offset
 
 (* Try to build a snapshot of the stack at a given address (from debug
    info).  *)
@@ -182,19 +184,27 @@ let pointer_tracking blk_arr inforec vars ctypes_for_cu =
 	      addr := Some ia;
 	      CS.snoc codeseq stmt
 	  | C.Set (dst, C.Load (accsz, addr)) ->
-	      let base, offset = ptr_plus_offset addr vars defs inforec in
-	      let new_stmt = try_rewrite_var vars (Int32.to_int offset)
-					     stack_vars stmt
-					     (`load (accsz, dst))
-					     ctypes_for_cu in
-	      CS.snoc codeseq new_stmt
+	      begin try
+		let base, offset = ptr_plus_offset addr vars defs inforec in
+		let new_stmt = try_rewrite_var vars (Int32.to_int offset)
+					       stack_vars stmt
+					       (`load (accsz, dst))
+					       ctypes_for_cu in
+		CS.snoc codeseq new_stmt
+	      with Non_constant_offset ->
+	        CS.snoc codeseq stmt
+	      end
 	  | C.Store (accsz, addr, src) ->
-	      let base, offset = ptr_plus_offset addr vars defs inforec in
-	      let new_stmt = try_rewrite_var vars (Int32.to_int offset)
-					     stack_vars stmt
-					     (`store (accsz, src))
-					     ctypes_for_cu in
-	      CS.snoc codeseq new_stmt
+	      begin try
+		let base, offset = ptr_plus_offset addr vars defs inforec in
+		let new_stmt = try_rewrite_var vars (Int32.to_int offset)
+					       stack_vars stmt
+					       (`store (accsz, src))
+					       ctypes_for_cu in
+		CS.snoc codeseq new_stmt
+	      with Non_constant_offset ->
+	        CS.snoc codeseq stmt
+	      end
 	  | C.Set (dst, src) ->
 	      let src' = C.map
 	        (fun addr ->
@@ -204,12 +214,16 @@ let pointer_tracking blk_arr inforec vars ctypes_for_cu =
 		  | C.Binary (Irtypes.Sub, C.SSAReg (r, rn), C.Immed _)
 		      when Typedb.probably_pointer ctypes_for_cu (r, rn)
 						   inforec ->
-		      let base, offset =
-		        ptr_plus_offset addr vars defs inforec in
-		      let new_var = try_rewrite_var vars (Int32.to_int offset)
-						    stack_vars addr `ssa_reg
-						    ctypes_for_cu in
-		      new_var
+		      begin try
+			let base, offset =
+		          ptr_plus_offset addr vars defs inforec in
+			let new_var = try_rewrite_var vars (Int32.to_int offset)
+						      stack_vars addr `ssa_reg
+						      ctypes_for_cu in
+			new_var
+		      with Non_constant_offset ->
+		        addr
+		      end
 		  | x -> x)
 		src in
 	      CS.snoc codeseq (C.Set (dst, src'))
@@ -237,6 +251,8 @@ let maybe_stack_use cov ?accsz base offset =
       end
   | _ -> ()
 
+(* FIXME: Phi-node arguments might be classed as "escaping" too.  *)
+
 let find_stack_references blk_arr inforec vars ctypes_for_cu =
   let defs = get_defs blk_arr in
   let cov = Coverage.create_coverage Int32.min_int Int32.max_int in
@@ -258,20 +274,23 @@ let find_stack_references blk_arr inforec vars ctypes_for_cu =
         (fun stmt ->
 	  ignore (C.map
 	    (fun node ->
-	      match node with
-		C.Entity (CT.Insn_address ia) ->
-	          insn_addr := Some ia;
-		  node
-	      | C.Load (accsz, addr) ->
-		  let base, offset = ptr_plus_offset addr vars defs inforec in
-		  maybe_stack_use cov ~accsz base offset;
-		  C.Protect node
-	      | C.Store (accsz, addr, src) ->
-		  let base, offset = ptr_plus_offset addr vars defs inforec in
-		  maybe_stack_use cov ~accsz base offset;
-		  ignore (escaping_ref src);
-		  C.Protect node
-	      | _ -> node)
+	      try
+	        match node with
+		  C.Entity (CT.Insn_address ia) ->
+	            insn_addr := Some ia;
+		    node
+		| C.Load (accsz, addr) ->
+		    let base, offset = ptr_plus_offset addr vars defs inforec in
+		    maybe_stack_use cov ~accsz base offset;
+		    C.Protect node
+		| C.Store (accsz, addr, src) ->
+		    let base, offset = ptr_plus_offset addr vars defs inforec in
+		    maybe_stack_use cov ~accsz base offset;
+		    ignore (escaping_ref src);
+		    C.Protect node
+		| _ -> node
+	      with Non_constant_offset ->
+	        C.Protect node)
 	    ~ctl_fn:(fun ctlnode ->
 	      match ctlnode with
 		C.Call_ext (_, _, args, _, _) ->
@@ -286,3 +305,67 @@ let find_stack_references blk_arr inforec vars ctypes_for_cu =
 	blk.Block.code)
     blk_arr;
   cov
+
+let maybe_replace_stackref accesstype orig base offset ranges =
+  match base with
+    C.Nullary Irtypes.Incoming_sp ->
+      begin try
+        let ival =
+	  List.find (fun ival -> Coverage.interval_start ival = offset)
+		    (Array.to_list ranges) in
+	let var = C.Reg (CT.Stack (Int32.to_int offset)) in
+	match accesstype with
+	  `load -> var
+	| `store src -> C.Set (var, src)
+	| `ssa_reg -> C.Protect (C.Unary (Irtypes.Address_of, var))
+      with Not_found ->
+        orig
+      end
+  | _ -> orig
+
+(* Call after pointer tracking, which might find actual variables for stack
+   references.  *)
+
+let replace_stack_references blk_arr coverage vars inforec =
+  let defs = get_defs blk_arr in
+  let ranges = Coverage.all_ranges coverage in
+  let rewrite_escaping_ref node =
+    match node with
+      C.Load (_, _) -> C.Protect node
+    | C.Store (_, _, _) -> C.Protect node
+    | C.Binary (Irtypes.Add, C.SSAReg (r, rn), C.Immed _)
+    | C.Binary (Irtypes.Sub, C.SSAReg (r, rn), C.Immed _)
+    | C.SSAReg (r, rn) ->
+        let base, offset = ptr_plus_offset node vars defs inforec in
+	maybe_replace_stackref `ssa_reg node base offset ranges
+    | _ -> node in
+  Array.map
+    (fun blk ->
+      let code' = CS.map
+        (fun stmt ->
+	  C.map
+	    (fun node ->
+	      try
+		match node with
+	          C.Load (accsz, addr) ->
+		    let base, offset = ptr_plus_offset addr vars defs inforec in
+		    maybe_replace_stackref `load node base offset ranges
+		| C.Store (accsz, addr, src) ->
+	            let base, offset = ptr_plus_offset addr vars defs inforec in
+		    let src' = rewrite_escaping_ref src in
+	            maybe_replace_stackref (`store src') node base offset ranges
+		| _ -> node
+	      with Non_constant_offset ->
+	        C.Protect node)
+	    ~ctl_fn:(fun ctlnode ->
+	      match ctlnode with
+	        C.Call_ext (abi, addr, args, ret, retval) ->
+		  let args' = C.map
+		    (fun node -> rewrite_escaping_ref node)
+		    args in
+		  C.Call_ext (abi, addr, args', ret, retval)
+	      | _ -> ctlnode)
+	    stmt)
+	blk.Block.code in
+      { blk with Block.code = code' })
+    blk_arr

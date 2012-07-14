@@ -35,7 +35,7 @@ module LabelSet = Set.Make
    for INSN.  *)
 
 let targets addr insn labelset =
-  match strip_condition insn.Insn.opcode with
+  match insn.Insn.opcode with
     Insn.B
   | Insn.Bl
   | Insn.Bx
@@ -271,16 +271,16 @@ let strip_ids blk_arr =
 
 (*let binf = open_file "libGLESv2.so"*)
 (*let binf = open_file "foo"*)
-(*let binf = open_file "libglslcompiler.so"*)
+let binf = open_file "libglslcompiler.so"
 (*let binf = open_file "tests/hello"*)
 (*let binf = open_file "tests/rodata"*)
-let binf = open_file "tests/fnargs"
+(*let binf = open_file "tests/fnargs"*)
 
-let go symname =
-  let sym = Symbols.find_named_symbol binf.symbols binf.strtab symname in
+let decompile_sym binf sym =
+  let symname = Symbols.symbol_name sym binf.strtab in
   Log.printf 1 "*** decompiling '%s' ***\n" symname;
   let entry_point = sym.Elfreader.st_value in
-  Log.printf 2 "entry point: %lx\n" entry_point;
+  Log.printf 3 "entry point: %lx\n" entry_point;
   let entry_point_ba = Irtypes.BlockAddr entry_point in
   let code = code_for_sym binf binf.text binf.mapping_syms sym in
   let cu_offset_for_sym = cu_offset_for_address binf entry_point in
@@ -296,30 +296,30 @@ let go symname =
   let inforec = Typedb.create_info () in
   let blockseq, ht =
     bs_of_code_hash ft binf inforec code entry_point entry_point_ba in
-  Log.printf 1 "--- initial blockseq ---\n";
+  Log.printf 2 "--- initial blockseq ---\n";
   dump_blockseq blockseq;
   let entry_point_ref = Hashtbl.find ht entry_point_ba in
   Log.printf 3 "entry point %lx, ref %d\n" entry_point entry_point_ref;
   IrDfs.pred_succ ~whole_program:false blockseq ht Irtypes.Virtual_exit;
   IrDfs.dfs blockseq ht Irtypes.Virtual_entry;
   let blk_arr = IrDfs.blockseq_to_dfs_array blockseq in
-  Log.printf 1 "--- after doing DFS ---\n";
+  Log.printf 2 "--- after doing DFS ---\n";
   print_blockseq_dfsinfo blk_arr;
   flush stdout;
   IrDominator.dominators blk_arr;
   IrDominator.computedf blk_arr;
-  Log.printf 1 "--- after computing dominators ---\n";
+  Log.printf 2 "--- after computing dominators ---\n";
   print_blockseq_dfsinfo blk_arr;
-  Log.printf 1 "--- SSA conversion (1) ---\n";
+  Log.printf 2 "--- SSA conversion (1) ---\n";
   let regset = IrPhiPlacement.place blk_arr in
   IrPhiPlacement.rename blk_arr 0 regset;
   dump_blockarr blk_arr;
   (* Insert type info for function's locals here.  *)
-  Log.printf 1 "--- gather info (1) ---\n";
+  Log.printf 2 "--- gather info (1) ---\n";
   Typedb.gather_info blk_arr inforec;
-  Log.printf 1 "--- strip ids ---\n";
+  Log.printf 2 "--- strip ids ---\n";
   let blk_arr = strip_ids blk_arr in
-  Log.printf 1 "--- minipool resolution ---\n";
+  Log.printf 2 "--- minipool resolution ---\n";
   let blk_arr' =
     Minipool.minipool_resolve binf.elfbits binf.ehdr binf.shdr_arr binf.symbols
 			      binf.mapping_syms binf.strtab blk_arr inforec
@@ -329,36 +329,44 @@ let go symname =
   let sp_var_set = Sptracking.sp_track blk_arr' vars cu_inf.ci_ctypes in
   add_stackvars_to_entry_block blk_arr' 0 sp_var_set;
   dump_blockarr blk_arr';*)
-  Log.printf 1 "--- gather sp refs ---\n";
+  Log.printf 2 "--- gather sp refs ---\n";
   let stack_coverage =
     Ptrtracking.find_stack_references blk_arr' inforec vars cu_inf.ci_ctypes in
-  Log.printf 1 "--- ptr tracking ---\n";
+  Log.printf 2 "--- ptr tracking ---\n";
   let blk_arr', sp_var_set =
     Ptrtracking.pointer_tracking blk_arr' inforec vars cu_inf.ci_ctypes in
   add_stackvars_to_entry_block blk_arr' 0 sp_var_set;
   dump_blockarr blk_arr';
-  Log.printf 1 "--- SSA conversion (2) ---\n";
+  Log.printf 2 "--- rewrite sp refs ---\n";
+  let blk_arr' =
+    Ptrtracking.replace_stack_references blk_arr' stack_coverage vars inforec in
+  dump_blockarr blk_arr';
+  Log.printf 2 "--- SSA conversion (2) ---\n";
   let regset2 = IrPhiPlacement.place blk_arr' in
   IrPhiPlacement.rename blk_arr' 0 regset2;
   dump_blockarr blk_arr';
-  Log.printf 1 "--- gather info (2) ---\n";
+  Log.printf 2 "--- gather info (2) ---\n";
   Typedb.gather_info blk_arr' inforec;
   Typedb.print_info inforec.Typedb.infotag;
   Typedb.print_implied_info inforec.Typedb.implications;
-  Log.printf 1 "--- eliminate phi nodes ---\n";
+  Log.printf 2 "--- eliminate phi nodes ---\n";
   IrPhiPlacement.eliminate blk_arr';
   dump_blockarr blk_arr';
-  Log.printf 1 "--- slicing rodata ---\n";
+  Log.printf 2 "--- slicing rodata ---\n";
   let rodata_sec = get_section_number binf.elfbits binf.ehdr binf.shdr_arr
 				      ".rodata" in
   Slice_section.slice blk_arr' binf.rodata_sliced
     binf.shdr_arr.(rodata_sec).sh_addr ".rodata" symname;
-  Log.printf 1 "--- removing prologue/epilogue code ---\n";
+  Log.printf 2 "--- removing prologue/epilogue code ---\n";
   let blk_arr'' = Ce.remove_prologue_and_epilogue blk_arr' in
   dump_blockarr blk_arr'';
-  ignore (blk_arr'');
-  stack_coverage
-  
+  (*stack_coverage*)
+  blk_arr''
+
+let go symname =
+  let sym = Symbols.find_named_symbol binf.symbols binf.strtab symname in
+  decompile_sym binf sym
+
 (*let really_go () =
   Log.loglevel := 4;
   (*go "InitAccumUSECodeBlocks"*)
@@ -377,10 +385,83 @@ let go symname =
     Resolve_section.resolve blk_arr2 binf.rodata binf.rodata_sliced in
   dump_blockarr blk_arr2'*)
 
+(*let _ = really_go ()*)
+
 (*let x =
   go "ProcessICInstIFNOT"*)
+  (*go "main2"*)
 
-let pubnames = Dwarfreader.parse_all_pubname_data binf.debug_pubnames
+let continue_after_error = ref false
+
+let find_sym_and_try_decompile binf sym_addr fun_select =
+  let sym = Symbols.find_symbol_by_addr
+    ~filter:(fun sym -> Symbols.symbol_type sym = Symbols.STT_FUNC)
+    binf.symbols
+    sym_addr in
+  try
+    let name = Symbols.symbol_name sym binf.strtab in
+    if fun_select name then begin
+      ignore (decompile_sym binf sym);
+      Log.printf 1 "PASS\n"
+    end
+  with x ->
+    if not !continue_after_error then
+      match x with
+        Not_found ->
+	  Printf.fprintf stderr "Not found\n";
+	  failwith "Not found"
+      | _ -> raise x
+    else
+      Log.printf 1 "FAIL\n"
+
+(* Scan the toplevel DIEs defined in a CU.  *)
+
+let scan_dietab_cu binf die fun_select =
+  let rec scan die =
+    match die with
+      Die_tree ((DW_TAG_subprogram, attrs), children, sibl) ->
+        begin try
+	  let lowpc = get_attr_address attrs DW_AT_low_pc in
+	  ignore (find_sym_and_try_decompile binf lowpc fun_select)
+	with Not_found -> ()
+	end;
+	scan sibl
+    | Die_node ((DW_TAG_subprogram, attrs), sibl) ->
+        begin try
+	  let lowpc = get_attr_address attrs DW_AT_low_pc in
+	  ignore (find_sym_and_try_decompile binf lowpc fun_select)
+	with Not_found -> ()
+	end;
+	scan sibl
+    | Die_tree ((_, attrs), children, sibl) ->
+	scan sibl
+    | Die_node ((_, attrs), sibl) ->
+	scan sibl
+    | Die_empty -> () in
+  scan die
+
+let scan_dietab binf cu_inf cu_select fun_select =
+  match cu_inf.ci_dies with
+    Die_node ((DW_TAG_compile_unit, attrs), children) ->
+      let name = get_attr_string attrs DW_AT_name in
+      if cu_select name then begin
+	Log.printf 1 "Compilation unit '%s'\n" name;
+	scan_dietab_cu binf children fun_select
+      end
+  | _ -> ()
+
+let scan_compunits ?(cu_select = fun _ -> true) ?(fun_select = fun _ -> true)
+		   binf =
+  Hashtbl.iter
+    (fun cu_offset cu_inf ->
+      scan_dietab binf cu_inf cu_select fun_select)
+    binf.cu_hash
+
+let x =
+  scan_compunits ~cu_select:((=) "glsl/icunroll.c")
+    ~fun_select:((=) "EvaluateCondition") binf
+
+(*let pubnames = Dwarfreader.parse_all_pubname_data binf.debug_pubnames
 
 let debug_inf =
   List.map
@@ -408,7 +489,7 @@ let debug_inf =
 	  print_die die die_hash;*)
 	  name, debug_inf_for_hdr, abbrevs, die, die_hash)
 	contents)
-    pubnames
+    pubnames*)
 
 (*let (name, die_bits, abbrevs, die, die_hash) =
   List.nth (List.nth debug_inf 1) 3*)

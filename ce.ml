@@ -40,7 +40,8 @@ let remove_prologue_and_epilogue blk_arr =
 		  Hashtbl.replace defs_for_deletion def last)
 		chain
 	    with Unsafe_for_deletion ->
-	      ()
+	      Log.printf 3 "Def chain for %s is unsafe for deletion\n"
+	        (C.string_of_code (C.SSAReg (r, rn)))
 	    end
 	| _ -> ())
 	blk.Block.code)

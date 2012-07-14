@@ -21,7 +21,7 @@ let count_uses blk_arr defs =
         (fun stmt ->
 	  ignore (C.map
 	    (fun node ->
-	      match C.strip_ids node with
+	      match node with
 		C.Set (dst, src) -> C.Set (C.Protect dst, src)
 	      | C.SSAReg (rs, rsn) ->
 	          begin try
@@ -29,8 +29,6 @@ let count_uses blk_arr defs =
 		    dinf.num_uses <- dinf.num_uses + 1;
 		    node
 		  with Not_found ->
-		    Log.printf 3 "Can't find def for %s\n"
-		      (C.string_of_code (C.SSAReg (rs, rsn)));
 		    node
 		  end
 	      | _ -> node)

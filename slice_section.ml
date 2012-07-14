@@ -35,5 +35,6 @@ let symbols coverage symbols strtab sec_num =
     (fun sym ->
       let addr = sym.Elfreader.st_value
       and size = sym.Elfreader.st_size in
-      Coverage.add_range coverage (Coverage.Range (Symbol sym, addr, size)))
+      if not (Mapping.is_mapping_symbol sym) then
+	Coverage.add_range coverage (Coverage.Range (Symbol sym, addr, size)))
     (Symbols.symbols_for_section symbols sec_num)

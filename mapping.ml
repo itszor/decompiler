@@ -6,14 +6,16 @@ type mapping =
   | Data
   | Unknown
 
+let is_mapping_symbol sym =
+  symbol_binding sym = STB_LOCAL && symbol_type sym = STT_NOTYPE
+
 let get_mapping_symbols elfbits ehdr shdr_arr strtab symbols secname =
   let secnum = Elfreader.get_section_number elfbits ehdr shdr_arr secname in
   let syms_for_sec = symbols_for_section symbols secnum in
   let r = Coverage.create_coverage 0l 0xffffffffl in
   List.iter
     (fun sym ->
-      if symbol_binding sym = STB_LOCAL
-	 && symbol_type sym = STT_NOTYPE then begin
+      if is_mapping_symbol sym then begin
 	let name = symbol_name sym strtab in
 	match name with
 	  "$a" | "$d" | "$t" ->

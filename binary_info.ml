@@ -15,7 +15,9 @@ type cu_info = {
   (* Just the parsed dies.  *)
   ci_dies : tag_attr_die;
   (* Table mapping type names (strings) to C types for this CU.  *)
-  ci_ctypes : Ctype.ctype_info
+  ci_ctypes : Ctype.ctype_info;
+  (* Parsed line number info for compilation unit.  *)
+  ci_lines : Line.line_prog_hdr
 }
 
 type binary_info = {
@@ -29,7 +31,6 @@ type binary_info = {
   debug_pubnames : Bitstring.bitstring;
   debug_aranges : Bitstring.bitstring;
   debug_loc : Bitstring.bitstring;
-  lines : Line.line_prog_hdr;
   text : Bitstring.bitstring;
   rodata : Bitstring.bitstring;
   strtab : Bitstring.bitstring;
@@ -51,7 +52,7 @@ type binary_info = {
 }
 
 let index_dies_by_low_pc dieaddr_ht dies =
-  Log.printf 3 "index_dies_by_low_pc\n";
+  (*Log.printf 3 "index_dies_by_low_pc\n";*)
   let rec scan = function
     Die_node ((DW_TAG_compile_unit, attrs), children) ->
       scan children
@@ -59,7 +60,7 @@ let index_dies_by_low_pc dieaddr_ht dies =
       begin try
         let name = get_attr_string sp_attrs DW_AT_name in
         let lowpc = get_attr_address sp_attrs DW_AT_low_pc in
-	Log.printf 3 "name: '%s', low pc: %lx\n" name lowpc;
+	(*Log.printf 3 "name: '%s', low pc: %lx\n" name lowpc;*)
 	Hashtbl.add dieaddr_ht lowpc die
       with Not_found -> ()
       end;
@@ -69,7 +70,7 @@ let index_dies_by_low_pc dieaddr_ht dies =
       begin try
         let name = get_attr_string sp_attrs DW_AT_name in
         let lowpc = get_attr_address sp_attrs DW_AT_low_pc in
-	Log.printf 3 "name: '%s', low pc: %lx\n" name lowpc;
+	(*Log.printf 3 "name: '%s', low pc: %lx\n" name lowpc;*)
 	Hashtbl.add dieaddr_ht lowpc die
       with Not_found -> ()
       end;
@@ -77,13 +78,13 @@ let index_dies_by_low_pc dieaddr_ht dies =
   | Die_tree ((_, attrs), children, sibl) ->
       let name = try get_attr_string attrs DW_AT_name
       with Not_found -> "unknown name" in
-      Log.printf 4 "tree (%s)\n" name;
+      (*Log.printf 4 "tree (%s)\n" name;*)
       scan children;
       scan sibl
   | Die_node ((_, attrs), sibl) ->
       let name = try get_attr_string attrs DW_AT_name
       with Not_found -> "unknown name" in
-      Log.printf 4 "node (%s)\n" name;
+      (*Log.printf 4 "node (%s)\n" name;*)
       scan sibl
   | Die_empty -> ()
   in
@@ -95,6 +96,12 @@ let base_addr_for_comp_unit cu_die =
   match cu_die with
     Die_node ((DW_TAG_compile_unit, attrs), _) ->
       get_attr_address attrs DW_AT_low_pc
+  | _ -> raise Not_found
+
+let debug_lines_for_comp_unit cu_die =
+  match cu_die with
+    Die_node ((DW_TAG_compile_unit, attrs), _) ->
+      get_attr_int32 attrs DW_AT_stmt_list
   | _ -> raise Not_found
 
 let index_debug_data binf parsed_data =
@@ -112,6 +119,9 @@ let index_debug_data binf parsed_data =
 	      ~length:(Bitstring.bitstring_length debug_inf_for_hdr)
 	      ~abbrevs:abbrevs ~addr_size:cu_header.address_size
 	      ~string_sec:binf.debug_str_sec in
+	  let lines, _ =
+	    Line.parse_lines (offset_section binf.debug_line
+				(debug_lines_for_comp_unit cu_dies)) in
 	  let cu_inf = {
 	    ci_baseaddr = base_addr_for_comp_unit cu_dies;
 	    ci_addrsize = cu_header.address_size;
@@ -122,7 +132,8 @@ let index_debug_data binf parsed_data =
 	    ci_ctypes = {
 	      Ctype.ct_typedefs = Hashtbl.create 10;
 	      ct_typetags = Hashtbl.create 10
-	    }
+	    };
+	    ci_lines = lines
 	  } in
 	  List.iter
 	    (fun (start, len) ->
@@ -154,7 +165,6 @@ let open_file filename =
   let debug_aranges = get_section_by_name elfbits ehdr shdr_arr
 					  ".debug_aranges" in
   let debug_loc = get_section_by_name elfbits ehdr shdr_arr ".debug_loc" in
-  let lines, _ = Line.parse_lines debug_line in
   let text = get_section_by_name elfbits ehdr shdr_arr ".text" in
   let rodata = get_section_by_name elfbits ehdr shdr_arr ".rodata" in
   let strtab = get_section_by_name elfbits ehdr shdr_arr ".strtab" in
@@ -183,7 +193,6 @@ let open_file filename =
     debug_pubnames = debug_pubnames;
     debug_aranges = debug_aranges;
     debug_loc = debug_loc;
-    lines = lines;
     text = text;
     rodata = rodata;
     strtab = strtab;

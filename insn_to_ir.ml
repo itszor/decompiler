@@ -46,6 +46,14 @@ let convert_mov addr insn =
   end else
     C.Nullary (Irtypes.Untranslated)
 
+let convert_mvn addr insn =
+  if insn.write_flags = [] && insn.read_flags = [] then begin
+    let dst = convert_operand addr insn.write_operands.(0)
+    and op1 = convert_operand addr insn.read_operands.(0) in
+    C.Set (dst, C.Unary (Irtypes.Not, op1))
+  end else
+    C.Nullary (Irtypes.Untranslated)
+
 let convert_binop addr opcode insn =
   let convert_operand = convert_operand addr in
   if insn.write_flags = [] && insn.read_flags = [] then begin
@@ -522,6 +530,7 @@ let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =
     ilist, blk_id, bseq in
   match insn.opcode with
     Mov -> append (convert_mov addr insn)
+  | Mvn -> append (convert_mvn addr insn)
   | Add -> append (convert_binop addr Irtypes.Add insn)
   | Sub -> append (convert_binop addr Irtypes.Sub insn)
   | And -> append (convert_binop addr Irtypes.And insn)

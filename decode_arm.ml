@@ -443,9 +443,9 @@ let decode_dp cond opcode ~s_bit ~reg bits19_0 =
 	  match opcode with
 	    Cmp | Cmn | Teq | Tst -> [| |]
 	  | _ -> [| hard_reg rd |] in
-	let opcode', rd_operands', rd_flags', wr_flags'
-	  = decode_imm_shift opcode s_bit imm_shift rd_operands ~rd_flags
-			     ~wr_flags in
+	let opcode', rd_operands', rd_flags', wr_flags' =
+	  decode_imm_shift opcode s_bit imm_shift rd_operands ~rd_flags
+			   ~wr_flags in
 	{
 	  opcode = conditionalise cond opcode';
 	  read_operands = rd_operands';
@@ -515,8 +515,76 @@ let decode_dp_reg_or_imm cond bits24_0 ~reg =
       decode_dp cond Mvn ~s_bit ~reg bits19_0
   | { _ } -> bad_insn
 
-let decode_dp_reg_shifted_reg cond op1 bits19_8 op2 bits3_0 =
-  bad_insn
+let decode_reg_shift opcode shtype ~s_bit ~wr_flags =
+  let shifted_opcode =
+    match shtype with
+      0b00 -> Shifted (opcode, Lsl)
+    | 0b01 -> Shifted (opcode, Lsr)
+    | 0b10 -> Shifted (opcode, Asr)
+    | 0b11 -> Shifted (opcode, Ror)
+    | _ -> failwith "decode_reg_shift" in
+  shifted_opcode, add_flag_if_sbit wr_flags C_from_shift s_bit
+
+let decode_dp_regshift cond opcode ~s_bit bits19_0 =
+  bitmatch bits19_0 with
+    { rn : 4; rd : 4; rs : 4; false : 1; shtype : 2; true : 1;
+      rm : 4 } ->
+      let rd_operands =
+        match opcode with
+	  Mov | Mvn -> [| hard_reg rm; hard_reg rs |]
+	| _ -> [| hard_reg rn; hard_reg rm; hard_reg rs |]
+      and wr_operands =
+        match opcode with
+	  Cmp | Cmn | Teq | Tst -> [| |]
+	| _ -> [| hard_reg rd |] in
+      let rd_flags = read_flags_for_op opcode
+      and wr_flags = conditional_set_flags_for_op opcode s_bit in
+      let opcode', wr_flags' =
+        decode_reg_shift opcode shtype ~s_bit ~wr_flags in
+      {
+        opcode = conditionalise cond opcode';
+	read_operands = rd_operands;
+	write_operands = wr_operands;
+	read_flags = rd_flags;
+	write_flags = wr_flags';
+	clobber_flags = []
+      }
+  | { _ } -> bad_insn
+
+let decode_dp_reg_shifted_reg cond bits24_0 =
+  bitmatch bits24_0 with
+    { 0b0000 : 4; s_bit : 1; bits19_0 : 20 : bitstring } ->
+      decode_dp_regshift cond And ~s_bit bits19_0
+  | { 0b0001 : 4; s_bit : 1; bits19_0 : 20 : bitstring } ->
+      decode_dp_regshift cond Eor ~s_bit bits19_0
+  | { 0b0010 : 4; s_bit : 1; bits19_0 : 20 : bitstring } ->
+      decode_dp_regshift cond Sub ~s_bit bits19_0
+  | { 0b0011 : 4; s_bit : 1; bits19_0 : 20 : bitstring } ->
+      decode_dp_regshift cond Rsb ~s_bit bits19_0
+  | { 0b0100 : 4; s_bit : 1; bits19_0 : 20 : bitstring } ->
+      decode_dp_regshift cond Add ~s_bit bits19_0
+  | { 0b0101 : 4; s_bit : 1; bits19_0 : 20 : bitstring } ->
+      decode_dp_regshift cond Adc ~s_bit bits19_0
+  | { 0b0110 : 4; s_bit : 1; bits19_0 : 20 : bitstring } ->
+      decode_dp_regshift cond Sbc ~s_bit bits19_0
+  | { 0b0111 : 4; s_bit : 1; bits19_0 : 20 : bitstring } ->
+      decode_dp_regshift cond Rsc ~s_bit bits19_0
+  | { 0b10001 : 5; bits19_0 : 20 : bitstring } ->
+      decode_dp_regshift cond Tst ~s_bit:true bits19_0
+  | { 0b10011 : 5; bits19_0 : 20 : bitstring } ->
+      decode_dp_regshift cond Teq ~s_bit:true bits19_0
+  | { 0b10101 : 5; bits19_0 : 20 : bitstring } ->
+      decode_dp_regshift cond Cmp ~s_bit:true bits19_0
+  | { 0b10111 : 5; bits19_0 : 20 : bitstring } ->
+      decode_dp_regshift cond Cmn ~s_bit:true bits19_0
+  | { 0b1100 : 4; s_bit : 1; bits19_0 : 20 : bitstring } ->
+      decode_dp_regshift cond Orr ~s_bit bits19_0
+  | { 0b1101 : 4; s_bit : 1; bits19_0 : 20 : bitstring } ->
+      decode_dp_regshift cond Mov ~s_bit bits19_0
+  | { 0b1110 : 4; s_bit : 1; bits19_0 : 20 : bitstring } ->
+      decode_dp_regshift cond Bic ~s_bit bits19_0
+  | { 0b1111 : 4; s_bit : 1; bits19_0 : 20 : bitstring } ->
+      decode_dp_regshift cond Mvn ~s_bit bits19_0
 
 (* Decode 32 bits of data-processing & media instructions.  *)
 let decode_dp_misc cond ibits =
@@ -562,7 +630,7 @@ let decode_dp_misc cond ibits =
 	    _ : 3; false : 1 } -> decode_dp_reg_or_imm cond bits24_0 ~reg:true
 	| { _ : 5;
 	    false : 1; _ : 2; true : 1 } ->
-	    decode_dp_reg_shifted_reg cond op1 bits19_8 op2 bits3_0)
+	    decode_dp_reg_shifted_reg cond bits24_0)
 
 let sign_extend imm32 bitpos =
   let bit = Int32.shift_left 1l bitpos in
