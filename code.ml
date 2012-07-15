@@ -226,6 +226,14 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
             CS.snoc cseq insn
       end
 
+    let finishes_with_control cseq =
+      if CS.is_empty cseq then
+        false
+      else
+        match CS.noced cseq with
+          _, Control _ -> true
+	| _, _ -> false
+
     let fold fn ?(ctl_fn = (fun ctl acc -> ctl, acc)) code acc =
       let rec scan e acc =
 	let expr', acc' = fn e acc in

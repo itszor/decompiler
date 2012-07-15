@@ -300,6 +300,11 @@ let decompile_sym binf sym =
   dump_blockseq blockseq;
   let entry_point_ref = Hashtbl.find ht entry_point_ba in
   Log.printf 3 "entry point %lx, ref %d\n" entry_point entry_point_ref;
+  Log.printf 2 "--- find & repair jump tables ---\n";
+  let blockseq =
+    Jumptable.repair_jumptables binf binf.text blockseq ht sym in
+  dump_blockseq blockseq;
+  Log.printf 2 "--- build DFS graph ---\n";
   IrDfs.pred_succ ~whole_program:false blockseq ht Irtypes.Virtual_exit;
   IrDfs.dfs blockseq ht Irtypes.Virtual_entry;
   let blk_arr = IrDfs.blockseq_to_dfs_array blockseq in
@@ -457,9 +462,11 @@ let scan_compunits ?(cu_select = fun _ -> true) ?(fun_select = fun _ -> true)
       scan_dietab binf cu_inf cu_select fun_select)
     binf.cu_hash
 
-let x =
+let decompile_something () =
   scan_compunits ~cu_select:((=) "glsl/icunroll.c")
     ~fun_select:((=) "EvaluateCondition") binf
+
+let _ = decompile_something ()
 
 (*let pubnames = Dwarfreader.parse_all_pubname_data binf.debug_pubnames
 

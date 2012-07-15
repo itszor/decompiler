@@ -54,24 +54,27 @@ let convert_mvn addr insn =
   end else
     C.Nullary (Irtypes.Untranslated)
 
-let convert_binop addr opcode insn =
-  let convert_operand = convert_operand addr in
+let convert_binop addr opcode insn ilist =
   if insn.write_flags = [] && insn.read_flags = [] then begin
-    let dst = convert_operand insn.write_operands.(0)
-    and op1 = convert_operand insn.read_operands.(0)
-    and op2 = convert_operand insn.read_operands.(1) in
-    C.Set (dst, C.Binary (opcode, op1, op2))
+    let dst, loads_pc = convert_maybe_pc_operand insn.write_operands.(0)
+    and op1 = convert_operand addr insn.read_operands.(0)
+    and op2 = convert_operand addr insn.read_operands.(1) in
+    if loads_pc then
+      let ilist' = CS.snoc ilist (C.Set (dst, C.Binary (opcode, op1, op2))) in
+      CS.snoc ilist' (C.Control (C.CompJump (dst, [])))
+    else
+      CS.snoc ilist (C.Set (dst, C.Binary (opcode, op1, op2)))
   end else
-    C.Nullary (Irtypes.Untranslated)
+    CS.snoc ilist (C.Nullary (Irtypes.Untranslated))
 
-let convert_bic addr insn =
+let convert_bic addr insn ilist =
   if insn.write_flags = [] && insn.read_flags = [] then begin
     let op2 = convert_operand addr insn.read_operands.(1) in
     let new_reads = Array.copy insn.read_operands in
     new_reads.(1) <- Converted (C.Unary (Irtypes.Not, op2));
-    convert_binop addr Irtypes.And { insn with read_operands = new_reads }
+    convert_binop addr Irtypes.And { insn with read_operands = new_reads } ilist
   end else
-    C.Nullary (Irtypes.Untranslated)
+    CS.snoc ilist (C.Nullary (Irtypes.Untranslated))
 
 let convert_rsb addr insn =
   let convert_operand = convert_operand addr in
@@ -502,15 +505,15 @@ let name_for_block_id = function
 let finish_block block_id ?chain insnlist bseq bseq_cons =
   let insnlist' =
     if not (CS.is_empty insnlist) then begin
-      match CS.noced insnlist with
-	prev, C.Control _ -> insnlist
-      | _ ->
-        begin match chain with
+      if C.finishes_with_control insnlist then
+	insnlist
+      else begin
+        match chain with
 	  None -> insnlist
 	| Some chain ->
 	    let fallthru = C.Control (C.Jump chain) in
 	    CS.snoc insnlist fallthru
-	end
+      end
     end else begin
       match chain with
 	None -> failwith "empty block and no chain?"
@@ -531,13 +534,13 @@ let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =
   match insn.opcode with
     Mov -> append (convert_mov addr insn)
   | Mvn -> append (convert_mvn addr insn)
-  | Add -> append (convert_binop addr Irtypes.Add insn)
-  | Sub -> append (convert_binop addr Irtypes.Sub insn)
-  | And -> append (convert_binop addr Irtypes.And insn)
-  | Eor -> append (convert_binop addr Irtypes.Eor insn)
-  | Orr -> append (convert_binop addr Irtypes.Or insn)
-  | Bic -> append (convert_bic addr insn)
-  | Mul -> append (convert_binop addr Irtypes.Mul insn)
+  | Add -> same_blk (convert_binop addr Irtypes.Add insn ilist)
+  | Sub -> same_blk (convert_binop addr Irtypes.Sub insn ilist)
+  | And -> same_blk (convert_binop addr Irtypes.And insn ilist)
+  | Eor -> same_blk (convert_binop addr Irtypes.Eor insn ilist)
+  | Orr -> same_blk (convert_binop addr Irtypes.Or insn ilist)
+  | Bic -> same_blk (convert_bic addr insn ilist)
+  | Mul -> same_blk (convert_binop addr Irtypes.Mul insn ilist)
   | Rsb -> append (convert_rsb addr insn)
   | Adc -> append (convert_carry_in_op addr Irtypes.Adc insn)
   | Sbc -> append (convert_carry_in_op addr Irtypes.Sbc insn)
@@ -579,7 +582,11 @@ and convert_conditional binf inforec addr cond insn ilist blk_id bseq bseq_cons 
         convert_insn binf inforec addr { insn with opcode = op } CS.empty
 		     cond_passed bseq' bseq_cons
     | _ -> failwith "not a conditional insn" in
-  let cond_ilist' = CS.snoc cond_ilist (C.Control (C.Jump after_insn)) in
+  let cond_ilist' =
+    if C.finishes_with_control cond_ilist then
+      cond_ilist
+    else
+      CS.snoc cond_ilist (C.Control (C.Jump after_insn)) in
   let bseq'3 = finish_block cond_blk_id cond_ilist' bseq'' bseq_cons in
   CS.empty, after_insn, bseq'3
 
