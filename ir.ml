@@ -83,6 +83,7 @@ module IrCT =
     | Or -> "or"
     | Mul -> "mul"
     | Cmp -> "cmp"
+    | Cmn -> "cmn"
     | Tst -> "tst"
     | Lsl -> "lsl"
     | Lsr -> "lsr"
@@ -93,6 +94,7 @@ module IrCT =
     let string_of_triop = function
       Adc -> "adc"
     | Sbc -> "sbc"
+    | Mla -> "mla"
     
     let string_of_extop = function
       Fnargs -> "fnargs"

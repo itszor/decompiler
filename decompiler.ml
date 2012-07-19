@@ -269,6 +269,24 @@ let strip_ids blk_arr =
       { blk with Block.code = code' })
     blk_arr
 
+let graphviz blk_arr =
+  let fh = open_out "func.gv" in
+  Printf.fprintf fh "digraph func {\n";
+  for i = 0 to Array.length blk_arr - 1 do
+    Printf.fprintf fh "n%d [label=\"%s\"];\n" i blk_arr.(i).Block.id;
+    List.iter
+      (fun successor ->
+	Printf.fprintf fh "n%d -> n%d;\n" i successor.Block.dfnum)
+      blk_arr.(i).Block.successors;
+    begin match blk_arr.(i).Block.idom with
+      Some idom ->
+        Printf.fprintf fh "n%d -> n%d [style=dotted];\n" i idom
+    | None -> ()
+    end
+  done;
+  Printf.fprintf fh "}\n";
+  close_out fh
+
 (*let binf = open_file "libGLESv2.so"*)
 (*let binf = open_file "foo"*)
 let binf = open_file "libglslcompiler.so"
@@ -289,8 +307,9 @@ let decompile_sym binf sym =
   Log.printf 2 "comp unit base addr: %lx\n" base_addr_for_cu;
   let die = Hashtbl.find cu_inf.ci_dieaddr entry_point in
   let ft =
-    Function.function_type binf.debug_loc symname die cu_inf.ci_dietab cu_inf.ci_ctypes
-      ~compunit_baseaddr:base_addr_for_cu in
+    Function.function_type binf.debug_loc symname die cu_inf.ci_dietab
+			   cu_inf.ci_ctypes
+			   ~compunit_baseaddr:base_addr_for_cu in
   let vars = Function.function_vars die cu_inf.ci_dietab binf.debug_loc
 	       ~compunit_baseaddr:base_addr_for_cu cu_inf.ci_ctypes in
   let inforec = Typedb.create_info () in
@@ -315,6 +334,7 @@ let decompile_sym binf sym =
   IrDominator.computedf blk_arr;
   Log.printf 2 "--- after computing dominators ---\n";
   print_blockseq_dfsinfo blk_arr;
+  graphviz blk_arr;
   Log.printf 2 "--- SSA conversion (1) ---\n";
   let regset = IrPhiPlacement.place blk_arr in
   IrPhiPlacement.rename blk_arr 0 regset;
@@ -343,8 +363,9 @@ let decompile_sym binf sym =
   add_stackvars_to_entry_block blk_arr' 0 sp_var_set;
   dump_blockarr blk_arr';
   Log.printf 2 "--- rewrite sp refs ---\n";
-  let blk_arr' =
+  let blk_arr', sp_ref_set =
     Ptrtracking.replace_stack_references blk_arr' stack_coverage vars inforec in
+  add_stackvars_to_entry_block blk_arr' 0 sp_ref_set;
   dump_blockarr blk_arr';
   Log.printf 2 "--- SSA conversion (2) ---\n";
   let regset2 = IrPhiPlacement.place blk_arr' in
@@ -354,9 +375,6 @@ let decompile_sym binf sym =
   Typedb.gather_info blk_arr' inforec;
   Typedb.print_info inforec.Typedb.infotag;
   Typedb.print_implied_info inforec.Typedb.implications;
-  Log.printf 2 "--- eliminate phi nodes ---\n";
-  IrPhiPlacement.eliminate blk_arr';
-  dump_blockarr blk_arr';
   Log.printf 2 "--- slicing rodata ---\n";
   let rodata_sec = get_section_number binf.elfbits binf.ehdr binf.shdr_arr
 				      ".rodata" in
@@ -364,6 +382,9 @@ let decompile_sym binf sym =
     binf.shdr_arr.(rodata_sec).sh_addr ".rodata" symname;
   Log.printf 2 "--- removing prologue/epilogue code ---\n";
   let blk_arr'' = Ce.remove_prologue_and_epilogue blk_arr' in
+  dump_blockarr blk_arr'';
+  Log.printf 2 "--- eliminate phi nodes ---\n";
+  IrPhiPlacement.eliminate blk_arr'';
   dump_blockarr blk_arr'';
   (*stack_coverage*)
   blk_arr''
@@ -464,7 +485,7 @@ let scan_compunits ?(cu_select = fun _ -> true) ?(fun_select = fun _ -> true)
 
 let decompile_something () =
   scan_compunits ~cu_select:((=) "glsl/icunroll.c")
-    ~fun_select:((=) "EvaluateCondition") binf
+    ~fun_select:((=) "RewriteLoopCode") binf
 
 let _ = decompile_something ()
 

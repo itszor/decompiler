@@ -288,6 +288,11 @@ let find_stack_references blk_arr inforec vars ctypes_for_cu =
 		    maybe_stack_use cov ~accsz base offset;
 		    ignore (escaping_ref src);
 		    C.Protect node
+		| C.Set (dst, C.Phi phiargs) ->
+		    Array.iter
+		      (fun phiarg -> ignore (escaping_ref phiarg))
+		      phiargs;
+		    C.Protect node
 		| _ -> node
 	      with Non_constant_offset ->
 	        C.Protect node)
@@ -327,8 +332,9 @@ let maybe_replace_stackref accesstype orig base offset ranges =
    references.  *)
 
 let replace_stack_references blk_arr coverage vars inforec =
-  let defs = get_defs blk_arr in
-  let ranges = Coverage.all_ranges coverage in
+  let stack_refs = ref IrPhiPlacement.R.empty
+  and defs = get_defs blk_arr
+  and ranges = Coverage.all_ranges coverage in
   let rewrite_escaping_ref node =
     match node with
       C.Load (_, _) -> C.Protect node
@@ -339,7 +345,7 @@ let replace_stack_references blk_arr coverage vars inforec =
         let base, offset = ptr_plus_offset node vars defs inforec in
 	maybe_replace_stackref `ssa_reg node base offset ranges
     | _ -> node in
-  Array.map
+  let blk_arr' = Array.map
     (fun blk ->
       let code' = CS.map
         (fun stmt ->
@@ -354,6 +360,12 @@ let replace_stack_references blk_arr coverage vars inforec =
 	            let base, offset = ptr_plus_offset addr vars defs inforec in
 		    let src' = rewrite_escaping_ref src in
 	            maybe_replace_stackref (`store src') node base offset ranges
+		| C.Set (dst, C.Phi phiargs) ->
+		    let phiargs' =
+		      Array.map
+		        (fun phiarg -> rewrite_escaping_ref phiarg)
+			phiargs in
+		    C.Set (dst, C.Phi phiargs')
 		| _ -> node
 	      with Non_constant_offset ->
 	        C.Protect node)
@@ -368,4 +380,18 @@ let replace_stack_references blk_arr coverage vars inforec =
 	    stmt)
 	blk.Block.code in
       { blk with Block.code = code' })
-    blk_arr
+    blk_arr in
+  Array.iter
+    (fun blk ->
+      CS.iter
+        (fun stmt ->
+	  C.iter
+	    (fun node ->
+	      match node with
+	        C.Reg ((CT.Stack stkoff) as sref) ->
+		  stack_refs := IrPhiPlacement.R.add sref !stack_refs;
+	      | _ -> ())
+	    stmt)
+	blk.Block.code)
+    blk_arr';
+  blk_arr', !stack_refs

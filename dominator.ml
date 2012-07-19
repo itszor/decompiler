@@ -101,28 +101,33 @@ module Dominator (BS : Code.BLOCKSEQ) =
     let computedf blk_arr =
       let setsize = Array.length blk_arr in
       let rec scandf node =
-        let df_local =
-          List.fold_left
-            (fun s y ->
+	Log.printf 3 "scandf node: %d\n" node;
+	let df_local =
+	  List.fold_left
+	    (fun s y ->
 	      match y.idom with
 	        Some idom when idom == node -> s
-	      | _ -> RS.update s y.dfnum true)
-            (RS.make setsize)
-            blk_arr.(node).successors in
-        let df_up = List.fold_left
-          (fun s c ->
-            scandf c;
-            List.fold_left
-              (fun s w ->
-                if not (List.mem w blk_arr.(node).idomchild) then
-                  RS.update s w true
-                else s)
-              s
-              blk_arr.(c).domfront)
-          df_local
-          blk_arr.(node).idomchild in
-        let elnums = RS.elements df_up in
-        blk_arr.(node).domfront <- elnums
+	      | _ ->
+	        RS.update s y.dfnum true)
+	    (RS.make setsize)
+	    blk_arr.(node).successors in
+	let df_up =
+	  List.fold_left
+	    (fun s c ->
+	      scandf c;
+	      List.fold_left
+		(fun s w ->
+		  if not (List.mem w blk_arr.(node).idomchild) then
+		    RS.update s w true
+		  else s)
+		s
+		blk_arr.(c).domfront)
+	    df_local
+	    blk_arr.(node).idomchild in
+	let elnums = RS.elements df_up in
+	List.iter (fun c -> Log.printf 3 "elnum (set in %d): %d\n" node c)
+		  elnums;
+	blk_arr.(node).domfront <- elnums
       in
-        scandf 0
+	scandf 0
   end

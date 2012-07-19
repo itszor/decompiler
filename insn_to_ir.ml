@@ -86,6 +86,16 @@ let convert_rsb addr insn =
   end else
     C.Nullary (Irtypes.Untranslated)
 
+let convert_mla addr insn =
+  if insn.write_flags = [] && insn.read_flags = [] then begin
+    let dst = convert_operand addr insn.write_operands.(0)
+    and op1 = convert_operand addr insn.read_operands.(0)
+    and op2 = convert_operand addr insn.read_operands.(1)
+    and op3 = convert_operand addr insn.read_operands.(2) in
+    C.Set (dst, C.Trinary (Irtypes.Mla, op1, op2, op3))
+  end else
+    C.Nullary (Irtypes.Untranslated)
+
 let convert_carry_in_op addr opcode insn =
   let convert_operand = convert_operand addr in
   if insn.write_flags = [] && insn.read_flags = [C] then begin
@@ -413,22 +423,32 @@ let convert_bl binf inforec addr insn =
 			    targ_sec in
       begin match targ_sec_name with
         ".text" ->
-	  let cu_for_dest = Binary_info.cu_offset_for_address binf call_addr in
-	  let cu_inf = Hashtbl.find binf.Binary_info.cu_hash cu_for_dest in
-	  let sym = Hashtbl.find cu_inf.Binary_info.ci_symtab call_addr
-	  and die = Hashtbl.find cu_inf.Binary_info.ci_dieaddr call_addr in
-	  let symname = Symbols.symbol_name sym binf.Binary_info.strtab in
-	  (*let sym_or_addr = find_symbol binf.Binary_info.symbols
-					binf.Binary_info.strtab call_addr in*)
-	  let fn_inf =
-	    Function.function_type binf.Binary_info.debug_loc symname die
-	      cu_inf.Binary_info.ci_dietab cu_inf.Binary_info.ci_ctypes
-	      ~compunit_baseaddr:cu_inf.Binary_info.ci_baseaddr in
-	  let ct_sym = CT.Finf_sym (symname, fn_inf, sym) in
-	  let passes = fn_args inforec call_addr fn_inf.Function.args
-			       fn_inf.Function.arg_locs
-	  and returns = fn_ret fn_inf.Function.return in
-	  C.Control (C.Call_ext (CT.EABI, ct_sym, passes, ret_addr, returns))
+	  begin try
+	    let cu_for_dest = Binary_info.cu_offset_for_address binf call_addr in
+	    let cu_inf = Hashtbl.find binf.Binary_info.cu_hash cu_for_dest in
+	    let sym = Hashtbl.find cu_inf.Binary_info.ci_symtab call_addr
+	    and die = Hashtbl.find cu_inf.Binary_info.ci_dieaddr call_addr in
+	    let symname = Symbols.symbol_name sym binf.Binary_info.strtab in
+	    (*let sym_or_addr = find_symbol binf.Binary_info.symbols
+					  binf.Binary_info.strtab call_addr in*)
+	    let fn_inf =
+	      Function.function_type binf.Binary_info.debug_loc symname die
+		cu_inf.Binary_info.ci_dietab cu_inf.Binary_info.ci_ctypes
+		~compunit_baseaddr:cu_inf.Binary_info.ci_baseaddr in
+	    let ct_sym = CT.Finf_sym (symname, fn_inf, sym) in
+	    let passes = fn_args inforec call_addr fn_inf.Function.args
+				 fn_inf.Function.arg_locs
+	    and returns = fn_ret fn_inf.Function.return in
+	    C.Control (C.Call_ext (CT.EABI, ct_sym, passes, ret_addr, returns))
+	  with Not_found ->
+	    (* No debug info for this one.  *)
+	    let sym = Symbols.find_symbol_by_addr
+	      ~filter:(fun sym -> not (Mapping.is_mapping_symbol sym))
+	      binf.Binary_info.symbols call_addr in
+	    let symname = Symbols.symbol_name sym binf.Binary_info.strtab in
+	    C.Control (C.Call_ext (CT.EABI, CT.Symbol (symname, sym), no_arg,
+				   ret_addr, no_arg))
+	  end
       | ".plt" ->
           let sym, sym_name =
 	    try
@@ -453,13 +473,12 @@ let convert_bl binf inforec addr insn =
       end
   | _ -> failwith "unexpected bx operand"
 
-let convert_cmp addr insn =
-  let convert_operand = convert_operand addr in
+let convert_cmp cmptype addr insn =
   if insn.read_flags = [] && flags_match insn.write_flags [C;V;N;Z] then begin
-    let op1 = convert_operand insn.read_operands.(0)
-    and op2 = convert_operand insn.read_operands.(1) in
+    let op1 = convert_operand addr insn.read_operands.(0)
+    and op2 = convert_operand addr insn.read_operands.(1) in
     C.Set (C.Reg (CT.Status Irtypes.CondFlags),
-	   C.Binary (Irtypes.Cmp, op1, op2))
+	   C.Binary (cmptype, op1, op2))
   end else
     C.Nullary (Irtypes.Untranslated)
 
@@ -541,10 +560,12 @@ let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =
   | Orr -> same_blk (convert_binop addr Irtypes.Or insn ilist)
   | Bic -> same_blk (convert_bic addr insn ilist)
   | Mul -> same_blk (convert_binop addr Irtypes.Mul insn ilist)
+  | Mla -> append (convert_mla addr insn)
   | Rsb -> append (convert_rsb addr insn)
   | Adc -> append (convert_carry_in_op addr Irtypes.Adc insn)
   | Sbc -> append (convert_carry_in_op addr Irtypes.Sbc insn)
-  | Cmp -> append (convert_cmp addr insn)
+  | Cmp -> append (convert_cmp Irtypes.Cmp addr insn)
+  | Cmn -> append (convert_cmp Irtypes.Cmn addr insn)
   | Tst -> append (convert_tst addr insn)
   | Ldr ainf -> same_blk (convert_load addr ainf insn Irtypes.Word ilist)
   | Ldrb ainf -> same_blk (convert_load addr ainf insn Irtypes.U8 ilist)

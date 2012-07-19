@@ -49,6 +49,7 @@ type ir_binop =
   | Or
   | Mul
   | Cmp
+  | Cmn
   | Tst
   | Lsl
   | Lsr
@@ -59,6 +60,7 @@ type ir_binop =
 type ir_triop =
     Adc
   | Sbc
+  | Mla
 
 type ir_extop =
     Fnargs

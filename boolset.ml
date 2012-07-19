@@ -70,5 +70,18 @@ let fold_right func set base =
   in
     res
 
+let fold_left func base set =
+  let _, res = Ranlist.fold_left
+    (fun (startbit, acc) elem ->
+      let accr = ref acc in
+      for bit = 0 to bsize - 1 do
+        if elem land (1 lsl bit) != 0 then
+	  accr := func !accr (startbit + bit)
+      done;
+      (startbit + bsize, !accr))
+    (0, base)
+    set in
+  res
+
 let elements set =
-  fold_right (fun enum acc -> enum :: acc) set.set []
+  fold_left (fun acc enum -> enum :: acc) [] set.set
