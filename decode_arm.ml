@@ -895,13 +895,44 @@ let decode_usad8 cond ~accumulate ibits =
   bad_insn
 
 let decode_bfx cond ~signed ibits =
-  bad_insn
+  bitmatch ibits with
+    { _ : 11; widthm1 : 5; rd : 4; lsb : 5; 0b101 : 3; rn : 4 } ->
+      let width = widthm1 + 1 in
+      let opc = if signed then Sbfx else Ubfx in
+      {
+        opcode = conditionalise cond opc;
+	write_operands = [| hard_reg rd |];
+	read_operands = [| hard_reg rn; Immediate (Int32.of_int lsb);
+			   Immediate (Int32.of_int width) |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ } -> bad_insn
 
 let decode_bfc cond ibits =
-  bad_insn
+  bitmatch ibits with
+    { _ : 11; msb : 5; rd : 4; lsb : 5 } ->
+      let width = msb - lsb + 1 in
+      {
+        opcode = conditionalise cond Bfc;
+	write_operands = [| hard_reg rd |];
+	read_operands = [| hard_reg rd; Immediate (Int32.of_int lsb);
+			   Immediate (Int32.of_int width) |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ } -> bad_insn
 
 let decode_bfi cond ibits =
-  bad_insn
+  bitmatch ibits with
+    { _ : 11; msb : 5; rd : 4; lsb : 5; 0b001 : 3; rn : 4 } ->
+      let width = msb - lsb + 1 in
+      {
+        opcode = conditionalise cond Bfi;
+	write_operands = [| hard_reg rd |];
+	read_operands = [| hard_reg rn; Immediate (Int32.of_int lsb);
+			   Immediate (Int32.of_int width) |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ } -> bad_insn
 
 let decode_media cond ibits =
   bitmatch ibits with
@@ -917,13 +948,13 @@ let decode_media cond ibits =
       decode_usad8 cond ~accumulate:false ibits
   | { _ : 7; 0b11000 : 5; _ : 12; 0b000 : 3 } ->
       decode_usad8 cond ~accumulate:true ibits
-  | { _ : 7; 0b1101 : 4; _ : 13; _ : 1; 0b10 : 2 } ->
+  | { _ : 7; 0b1101 : 4; _ : 14; 0b101 : 3 } ->
       decode_bfx cond ~signed:true ibits
   | { _ : 7; 0b1110 : 4; _ : 5; 0b1111 : 4; _ : 5; 0b00 : 2 } ->
       decode_bfc cond ibits
   | { _ : 7; 0b1110 : 4; _ : 14; 0b00 : 2 } ->
       decode_bfi cond ibits
-  | { _ : 7; 0b1111 : 4; _ : 14; 0b10 : 2 } ->
+  | { _ : 7; 0b1111 : 4; _ : 14; 0b101 : 3 } ->
       decode_bfx cond ~signed:false ibits
   | { _ } -> bad_insn
 
@@ -1003,8 +1034,29 @@ let decode_branch_block_xfer cond ibits =
       and exception_return = Bitstring.is_set ibits 16 in
       decode_ldm cond ~exception_return bits24_0
 
-let decode_svc_copro cond ibits =
+let decode_vfp_load_store cond ibits =
   bad_insn
+
+let decode_vfp_word_transfer cond ibits =
+  bad_insn
+
+let decode_vfp_dword_transfer cond ibits =
+  bad_insn
+
+let decode_vfp_dataproc cond ibits =
+  bad_insn
+
+let decode_svc_copro cond ibits =
+  bitmatch ibits with
+    { _ : 4; 0b110 : 3; _ : 13; 0b101 : 3 } ->
+      decode_vfp_load_store cond ibits
+  | { _ : 4; 0b1110 : 4; _ : 12; 0b101 : 3; _ : 4; true : 1 } ->
+      decode_vfp_word_transfer cond ibits
+  | { _ : 4; 0b1100010 : 7; _ : 9; 0b101 : 3 } ->
+      decode_vfp_dword_transfer cond ibits
+  | { _ : 4; 0b1110 : 4; _ : 12; 0b101 : 3; _ : 4; false : 1 } ->
+      decode_vfp_dataproc cond ibits
+  | { _ } -> bad_insn
 
 let decode_insn_byterev ibits =
   bitmatch ibits with

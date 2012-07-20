@@ -1,5 +1,7 @@
 type 'a operand =
     Hard_reg of int
+  | VFP_sreg of int
+  | VFP_dreg of int
   | Immediate of int32
   | Address of int32
   | PC_relative of int32
@@ -56,6 +58,10 @@ type opcode =
   | Uxth
   | Sxtb
   | Sxth
+  | Sbfx
+  | Ubfx
+  | Bfc
+  | Bfi
   | Shifted of opcode * shift_opcode
   | Conditional of condition * opcode
   | BAD
