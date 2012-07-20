@@ -62,6 +62,8 @@ type opcode =
   | Ubfx
   | Bfc
   | Bfi
+  | Vmov_f2rr
+  | Vmov_rr2f
   | Shifted of opcode * shift_opcode
   | Conditional of condition * opcode
   | BAD

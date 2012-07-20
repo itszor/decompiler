@@ -36,6 +36,8 @@ let conditionalise cond opcode =
   | Some cond -> Conditional (cond, opcode)
 
 let hard_reg n = Hard_reg n
+let vfp_sreg n = VFP_sreg n
+let vfp_dreg n = VFP_dreg n
 
 (* Decode 28 remaining bits of NV space.  *)
 let decode_nv_space ibits =
@@ -1041,19 +1043,40 @@ let decode_vfp_word_transfer cond ibits =
   bad_insn
 
 let decode_vfp_dword_transfer cond ibits =
-  bad_insn
+  bitmatch ibits with
+    { _ : 11; op : 1; rt2 : 4; rt : 4; 0b101000 : 6; m : 1; true : 1;
+      vm : 4 } ->
+      let m = if m then vm + 16 else vm in
+      let m2 = succ m in
+      if op then
+        (* To ARM registers.  *)
+	{
+	  opcode = conditionalise cond Vmov_f2rr;
+	  write_operands = [| hard_reg rt; hard_reg rt2 |];
+	  read_operands = [| vfp_sreg m; vfp_sreg m2 |];
+	  read_flags = []; write_flags = []; clobber_flags = []
+	}
+      else
+        (* From ARM registers.  *)
+	{
+	  opcode = conditionalise cond Vmov_rr2f;
+	  write_operands = [| vfp_sreg m; vfp_sreg m2 |];
+	  read_operands = [| hard_reg rt; hard_reg rt2 |];
+	  read_flags = []; write_flags = []; clobber_flags = []
+	}
+  | { _ } -> bad_insn
 
 let decode_vfp_dataproc cond ibits =
   bad_insn
 
 let decode_svc_copro cond ibits =
   bitmatch ibits with
-    { _ : 4; 0b110 : 3; _ : 13; 0b101 : 3 } ->
+    { _ : 4; 0b1100010 : 7; _ : 9; 0b101 : 3 } ->
+      decode_vfp_dword_transfer cond ibits
+  | { _ : 4; 0b110 : 3; _ : 13; 0b101 : 3 } ->
       decode_vfp_load_store cond ibits
   | { _ : 4; 0b1110 : 4; _ : 12; 0b101 : 3; _ : 4; true : 1 } ->
       decode_vfp_word_transfer cond ibits
-  | { _ : 4; 0b1100010 : 7; _ : 9; 0b101 : 3 } ->
-      decode_vfp_dword_transfer cond ibits
   | { _ : 4; 0b1110 : 4; _ : 12; 0b101 : 3; _ : 4; false : 1 } ->
       decode_vfp_dataproc cond ibits
   | { _ } -> bad_insn
