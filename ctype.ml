@@ -131,8 +131,12 @@ let rec resolve_type die die_hash ctypes_for_cu =
       end;
       C_typedef typename
   | Die_node ((DW_TAG_pointer_type, attrs), _) ->
-      let targ = get_attr_deref attrs DW_AT_type die_hash in
-      C_pointer (build targ)
+      begin try
+        let targ = get_attr_deref attrs DW_AT_type die_hash in
+	C_pointer (build targ)
+      with Not_found ->
+        C_pointer C_void  (* ??? *)
+      end
   | Die_node ((DW_TAG_const_type, attrs), _) ->
       let targ = get_attr_deref attrs DW_AT_type die_hash in
       C_const (build targ)

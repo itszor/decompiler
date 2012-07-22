@@ -295,6 +295,7 @@ let binf = open_file "libglslcompiler.so"
 (*let binf = open_file "tests/hello"*)
 (*let binf = open_file "tests/rodata"*)
 (*let binf = open_file "tests/fnargs"*)
+(*let binf = open_file "tests/structs"*)
 
 let decompile_sym binf sym =
   let symname = Symbols.symbol_name sym binf.strtab in
@@ -328,6 +329,7 @@ let decompile_sym binf sym =
   Log.printf 2 "--- build DFS graph ---\n";
   IrDfs.pred_succ ~whole_program:false blockseq ht Irtypes.Virtual_exit;
   IrDfs.dfs blockseq ht Irtypes.Virtual_entry;
+  let blockseq = IrDfs.remove_unreachable blockseq in
   let blk_arr = IrDfs.blockseq_to_dfs_array blockseq in
   Log.printf 2 "--- after doing DFS ---\n";
   print_blockseq_dfsinfo blk_arr;
@@ -395,21 +397,21 @@ let go symname =
   let sym = Symbols.find_named_symbol binf.symbols binf.strtab symname in
   decompile_sym binf sym
 
-(*let really_go () =
+let really_go () =
   Log.loglevel := 4;
   (*go "InitAccumUSECodeBlocks"*)
   (*;go "AddComparisonToUFCode"*)
   (*go "ProcessICInstIFNOT"*)
   let blk_arr1 = go "main" in
-  let blk_arr2 = go "main2" in
+  (*let blk_arr2 = go "main2" in*)
   let rodata_sec = get_section_number binf.elfbits binf.ehdr binf.shdr_arr
 				      ".rodata" in
   Slice_section.symbols binf.rodata_sliced binf.symbols binf.strtab rodata_sec;
   Log.loglevel := 4;
   let blk_arr1' =
     Resolve_section.resolve blk_arr1 binf.rodata binf.rodata_sliced in
-  dump_blockarr blk_arr1';
-  let blk_arr2' =
+  dump_blockarr blk_arr1'
+  (*let blk_arr2' =
     Resolve_section.resolve blk_arr2 binf.rodata binf.rodata_sliced in
   dump_blockarr blk_arr2'*)
 
@@ -486,8 +488,8 @@ let scan_compunits ?(cu_select = fun _ -> true) ?(fun_select = fun _ -> true)
     binf.cu_hash
 
 let decompile_something () =
-  scan_compunits ~cu_select:((=) "glsl/icunroll.c")
-    ~fun_select:((=) "ICUnrollLoopFOR") binf
+  scan_compunits ~cu_select:((=) "glsl/astbuiltin.c")
+    ~fun_select:((=) "ASTBIAddGLState") binf
 
 let _ = decompile_something ()
 

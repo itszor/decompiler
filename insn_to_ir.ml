@@ -495,8 +495,17 @@ let convert_tst addr insn =
 let convert_bfx xtype addr insn =
   let op1 = convert_operand addr insn.read_operands.(0)
   and op2 = convert_operand addr insn.read_operands.(1)
+  and op3 = convert_operand addr insn.read_operands.(2)
   and dst = convert_operand addr insn.write_operands.(0) in
-  C.Set (dst, C.Binary (xtype, op1, op2))
+  C.Set (dst, C.Trinary (xtype, op1, op2, op3))
+
+let convert_bfi addr insn =
+  let op1 = convert_operand addr insn.read_operands.(0)
+  and op2 = convert_operand addr insn.read_operands.(1)
+  and op3 = convert_operand addr insn.read_operands.(2)
+  and op4 = convert_operand addr insn.read_operands.(3)
+  and dst = convert_operand addr insn.write_operands.(0) in
+  C.Set (dst, C.Nary (Irtypes.Bfi, [op1; op2; op3]))
 
 let convert_rr2f addr insn =
   match insn.read_operands with
@@ -611,6 +620,7 @@ let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =
   | Stm minf -> same_blk (convert_stm addr minf insn ilist)
   | Ubfx -> append (convert_bfx Irtypes.Ubfx addr insn)
   | Sbfx -> append (convert_bfx Irtypes.Sbfx addr insn)
+  | Bfi -> append (convert_bfi addr insn)
   | Vmov_rr2f -> append (convert_rr2f addr insn)
   | Vldm minf -> same_blk (convert_vldm addr minf insn ilist)
   | Vstm minf -> same_blk (convert_vstm addr minf insn ilist)

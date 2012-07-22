@@ -1,10 +1,7 @@
 #include <stdio.h>
 
-int main2 (int c)
+int main (int argc, char *argv[])
 {
   puts ("Hello world!\n");
-  puts ("world!\n");
   return 0;
 }
-
-int main(void) { return 0; }

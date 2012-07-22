@@ -930,7 +930,8 @@ let decode_bfi cond ibits =
       {
         opcode = conditionalise cond Bfi;
 	write_operands = [| hard_reg rd |];
-	read_operands = [| hard_reg rn; Immediate (Int32.of_int lsb);
+	read_operands = [| hard_reg rd; hard_reg rn;
+			   Immediate (Int32.of_int lsb);
 			   Immediate (Int32.of_int width) |];
 	read_flags = []; write_flags = []; clobber_flags = []
       }

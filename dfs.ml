@@ -91,6 +91,18 @@ module Dfs (CT : Code.CODETYPES) (CS : Code.CODESEQ) (BS : Code.BLOCKSEQ) =
 	  blk.parent <- refresh_option blk.parent)
 	blk_arr*)
 
+    let remove_unreachable blks =
+      BS.fold_right
+        (fun blk blks ->
+	  if blk.dfnum <> -1 then
+	    BS.cons blk blks
+	  else begin
+	    Log.printf 3 "Removing unreachable block with id: '%s'\n" blk.id;
+	    blks
+	  end)
+	blks
+	BS.empty
+
     let blockseq_to_dfs_array blks =
       let len = BS.length blks in
       let arr = Array.init len (fun n -> BS.lookup blks n) in

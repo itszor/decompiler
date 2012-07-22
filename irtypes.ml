@@ -58,16 +58,17 @@ type ir_binop =
   | Asr
   | Ror
   | Rrx
-  | Ubfx
-  | Sbfx
 
 type ir_triop =
     Adc
   | Sbc
   | Mla
+  | Ubfx
+  | Sbfx
 
 type ir_extop =
     Fnargs
+  | Bfi
 
 type ir_mem =
     U8
