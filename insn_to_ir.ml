@@ -678,8 +678,15 @@ let convert_block binf inforec block_id bseq bseq_cons addr insn_list
   if Hashtbl.mem code_hash next_addr then
     finish_block blk_id' ~chain:(Irtypes.BlockAddr next_addr) code_deque
 		 bseq' bseq_cons
-  else
-    finish_block blk_id' code_deque bseq' bseq_cons
+  else begin
+    if C.finishes_with_control code_deque then
+      finish_block blk_id' code_deque bseq' bseq_cons
+    else
+      (* This is how we represent the end of a block of code which appears to
+         fall through into nothingness (which is probably dead anyway).  *)
+      let code_deque' = CS.snoc code_deque (C.Control C.Virtual_exit) in
+      finish_block blk_id' code_deque' bseq' bseq_cons
+  end
 
 exception Out_of_range
 

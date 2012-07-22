@@ -489,7 +489,7 @@ let decompile_something () =
   scan_compunits ~cu_select:((=) "glsl/icunroll.c")
     ~fun_select:((=) "ICUnrollLoopFOR") binf
 
-(*let _ = decompile_something ()*)
+let _ = decompile_something ()
 
 (*let pubnames = Dwarfreader.parse_all_pubname_data binf.debug_pubnames
 
