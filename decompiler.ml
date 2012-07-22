@@ -67,6 +67,8 @@ let code_for_sym binf section mapping_syms sym =
         let decoded
 	  = Decode_arm.decode_insn (Bitstring.dropbits (i * 32) sym_bits) in
         Log.printf 3 "%lx : %s\n" insn_addr (Mapping.string_of_mapping map);
+	if decoded.Insn.opcode = Insn.BAD then
+	  Log.printf 1 "Didn't decode insn at %lx successfully.\n" insn_addr;
 	labelset := targets insn_addr decoded !labelset;
     | _ -> ()
   done;
@@ -485,9 +487,9 @@ let scan_compunits ?(cu_select = fun _ -> true) ?(fun_select = fun _ -> true)
 
 let decompile_something () =
   scan_compunits ~cu_select:((=) "glsl/icunroll.c")
-    ~fun_select:((=) "RewriteLoopCode") binf
+    ~fun_select:((=) "ICUnrollLoopFOR") binf
 
-let _ = decompile_something ()
+(*let _ = decompile_something ()*)
 
 (*let pubnames = Dwarfreader.parse_all_pubname_data binf.debug_pubnames
 

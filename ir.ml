@@ -90,6 +90,8 @@ module IrCT =
     | Asr -> "asr"
     | Ror -> "ror"
     | Rrx -> "rrx"
+    | Ubfx -> "ubfx"
+    | Sbfx -> "sbfx"
 
     let string_of_triop = function
       Adc -> "adc"

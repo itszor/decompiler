@@ -29,6 +29,8 @@ type ir_unop =
   | Sxtb
   | Uxth
   | Sxth
+  | Dreg_hipart
+  | Dreg_lopart
 
 (* Code will look like:
 
@@ -56,6 +58,8 @@ type ir_binop =
   | Asr
   | Ror
   | Rrx
+  | Ubfx
+  | Sbfx
 
 type ir_triop =
     Adc

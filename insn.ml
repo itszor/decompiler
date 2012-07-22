@@ -2,6 +2,7 @@ type 'a operand =
     Hard_reg of int
   | VFP_sreg of int
   | VFP_dreg of int
+  | FPSCR
   | Immediate of int32
   | Address of int32
   | PC_relative of int32
@@ -64,6 +65,42 @@ type opcode =
   | Bfi
   | Vmov_f2rr
   | Vmov_rr2f
+  | Vmov_r2d_lo
+  | Vmov_r2d_hi
+  | Vmov_d2r_lo
+  | Vmov_d2r_hi
+  | Vmov_r2f
+  | Vmov_f2r
+  | Vmov_imm
+  | Vmov_reg
+  | Vstr
+  | Vldr
+  | Vmla
+  | Vnmla
+  | Vmls
+  | Vnmls
+  | Vmul
+  | Vnmul
+  | Vadd
+  | Vsub
+  | Vdiv
+  | Vabs
+  | Vneg
+  | Vsqrt
+  | Vcmp
+  | Vcmpe
+  | Vcvt_f2d
+  | Vcvt_d2f
+  | Vcvt_f2si
+  | Vcvt_f2ui
+  | Vcvtr_f2si
+  | Vcvtr_f2ui
+  | Vcvt_si2f
+  | Vcvt_ui2f
+  | Vmsr
+  | Vmrs
+  | Vstm of multimem_info
+  | Vldm of multimem_info
   | Shifted of opcode * shift_opcode
   | Conditional of condition * opcode
   | BAD

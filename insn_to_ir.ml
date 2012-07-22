@@ -492,6 +492,36 @@ let convert_tst addr insn =
   end else
     C.Nullary (Irtypes.Untranslated)
 
+let convert_bfx xtype addr insn =
+  let op1 = convert_operand addr insn.read_operands.(0)
+  and op2 = convert_operand addr insn.read_operands.(1)
+  and dst = convert_operand addr insn.write_operands.(0) in
+  C.Set (dst, C.Binary (xtype, op1, op2))
+
+let convert_rr2f addr insn =
+  match insn.read_operands with
+    [| VFP_dreg rm |] ->
+      C.Parallel
+        [| C.Set (convert_operand addr insn.write_operands.(0),
+		  C.Unary (Irtypes.Dreg_lopart,
+		    convert_operand addr insn.read_operands.(0)));
+	   C.Set (convert_operand addr insn.write_operands.(1),
+		  C.Unary (Irtypes.Dreg_hipart,
+		    convert_operand addr insn.read_operands.(0))) |]
+  | [| VFP_sreg rm1; VFP_sreg rm2 |] ->
+      C.Parallel
+        [| C.Set (convert_operand addr insn.write_operands.(0),
+		  convert_operand addr insn.read_operands.(0));
+	   C.Set (convert_operand addr insn.write_operands.(1),
+		  convert_operand addr insn.read_operands.(1)) |]
+  | _ -> C.Nullary (Irtypes.Untranslated)
+
+let convert_vstm addr minf insn ilist =
+  ilist
+
+let convert_vldm addr minf insn ilist =
+  ilist
+
 let convert_cbranch cond addr insn =
   let dest = insn.read_operands.(0) in
   match dest with
@@ -579,6 +609,11 @@ let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =
   | Ldrd ainf -> same_blk (convert_load addr ainf insn Irtypes.Dword ilist)
   | Ldm minf -> same_blk (convert_ldm addr minf insn ilist)
   | Stm minf -> same_blk (convert_stm addr minf insn ilist)
+  | Ubfx -> append (convert_bfx Irtypes.Ubfx addr insn)
+  | Sbfx -> append (convert_bfx Irtypes.Sbfx addr insn)
+  | Vmov_rr2f -> append (convert_rr2f addr insn)
+  | Vldm minf -> same_blk (convert_vldm addr minf insn ilist)
+  | Vstm minf -> same_blk (convert_vstm addr minf insn ilist)
   | Bx -> append (convert_bx addr insn)
   | Bl -> append (convert_bl binf inforec addr insn)
   | B -> append (convert_branch addr insn)
@@ -588,6 +623,7 @@ let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =
 			  bseq_cons
   | Shifted (opc, shift) ->
       convert_shift binf inforec addr insn ilist opc shift blk_id bseq bseq_cons
+  | BAD -> append (C.Nullary Irtypes.Untranslated)
   | x -> raise (Unsupported_opcode x)
 
 and convert_conditional binf inforec addr cond insn ilist blk_id bseq bseq_cons =

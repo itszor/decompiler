@@ -1036,38 +1036,342 @@ let decode_branch_block_xfer cond ibits =
       and exception_return = Bitstring.is_set ibits 16 in
       decode_ldm cond ~exception_return bits24_0
 
+let decode_fpreg ~dreg vd d =
+  if dreg then
+    vfp_dreg (if d then vd + 16 else vd)
+  else
+    vfp_sreg (if d then vd * 2 + 1 else vd * 2)
+
+let next_vfp_reg = function
+    VFP_sreg n -> VFP_sreg (succ n)
+  | VFP_dreg n -> VFP_dreg (succ n)
+  | _ -> failwith "Not VFP reg"
+
+let vfp_reg_list ~dreg ~inc vd d nregs =
+  let reg = ref (decode_fpreg ~dreg vd d) in
+  let reglist = ref [] in
+  for i = 0 to nregs - 1 do
+    reglist := !reg :: !reglist;
+    reg := next_vfp_reg !reg
+  done;
+  if inc then Array.of_list (List.rev !reglist)
+  else Array.of_list !reglist
+
 let decode_vfp_load_store cond ibits =
-  bad_insn
+  bitmatch ibits with
+    { _ : 4; 0b1101 : 4; u : 1; d : 1; 0b00 : 2; rn : 4; vd : 4; 0b101 : 3;
+      is_dreg : 1; imm8 : 8 } ->
+      let fpreg = decode_fpreg ~dreg:is_dreg vd d in
+      let offset =
+        Immediate (Int32.of_int (if u then imm8 * 4 else -imm8 * 4)) in
+      {
+	opcode = conditionalise cond Vstr;
+	read_operands = [| fpreg; hard_reg rn; offset |];
+	write_operands = [| |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ : 4; 0b1101 : 4; u : 1; d : 1; 0b01 : 2; rn : 4; vd : 4; 0b101 : 3;
+      is_dreg : 1; imm8 : 8 } ->
+      let fpreg = decode_fpreg ~dreg:is_dreg vd d in
+      let offset =
+        Immediate (Int32.of_int (if u then imm8 * 4 else -imm8 * 4)) in
+      {
+        opcode = conditionalise cond Vldr;
+	read_operands = [| hard_reg rn; offset |];
+	write_operands = [| fpreg |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ : 4; 0b110 : 3; p : 1; u : 1; d : 1; w : 1; false : 1; rn : 4; vd : 4;
+      0b101 : 3; rsize : 1; imm8 : 8 } ->
+      let info = { before = p; increment = u; mm_writeback = w } in
+      let wr_operands = if w then [| hard_reg rn |] else [| |] in
+      let nregs = if rsize then imm8 / 2 else imm8 in
+      let regs = vfp_reg_list ~dreg:rsize ~inc:u vd d nregs in
+      {
+        opcode = conditionalise cond (Vstm info);
+	read_operands = Array.append [| hard_reg rn |] regs;
+	write_operands = wr_operands;
+	write_flags = []; read_flags = []; clobber_flags = []
+      }
+  | { _ : 4; 0b110 : 3; p : 1; u : 1; d : 1; w : 1; true : 1; rn : 4; vd : 4;
+      0b101 : 3; rsize : 1; imm8 : 8 } ->
+      let info = { before = p; increment = u; mm_writeback = w } in
+      let wr_operands = if w then [| hard_reg rn |] else [| |] in
+      let nregs = if rsize then imm8 / 2 else imm8 in
+      let regs = vfp_reg_list ~dreg:rsize ~inc:u vd d nregs in
+      {
+        opcode = conditionalise cond (Vldm info);
+	read_operands = [| hard_reg rn |];
+	write_operands = Array.append wr_operands regs;
+	write_flags = []; read_flags = []; clobber_flags = []
+      }
+  | { _ } -> bad_insn
 
 let decode_vfp_word_transfer cond ibits =
-  bad_insn
+  bitmatch ibits with
+    { _ : 4; 0b1110000 : 7; op : 1; vn : 4; rt : 4; 0b1010 : 4; n : 1;
+      0b0010000 : 7 } ->
+      let fpreg = VFP_sreg (if n then vn * 2 + 1 else vn * 2) in
+      if op then
+        (* To ARM register.  *)
+	{
+	  opcode = conditionalise cond Vmov_f2r;
+	  read_operands = [| fpreg |];
+	  write_operands = [| hard_reg rt |];
+	  read_flags = []; write_flags = []; clobber_flags = []
+	}
+      else
+        (* From ARM register.  *)
+	{
+	  opcode = conditionalise cond Vmov_r2f;
+	  read_operands = [| hard_reg rt |];
+	  write_operands = [| fpreg |];
+	  read_flags = []; write_flags = []; clobber_flags = []
+	}
+  | { _ : 4; 0b111000 : 6; hi : 1; false : 1; vd : 4; rt : 4; 0b1011 : 4; d : 1;
+      0b0010000 : 7 } ->
+      let fpreg = VFP_dreg (if d then vd + 16 else vd) in
+      let opc = if hi then Vmov_r2d_hi else Vmov_r2d_lo in
+      {
+        opcode = conditionalise cond opc;
+	read_operands = [| fpreg; hard_reg rt |];
+	write_operands = [| fpreg |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ : 4; 0b111011100001 : 12; rt : 4; 0b101000010000 : 12 } ->
+      {
+        opcode = conditionalise cond Vmsr;
+	read_operands = [| hard_reg rt |];
+	write_operands = [| FPSCR |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ : 4; 0b111011110001 : 12; rt : 4; 0b101000010000 : 12 } ->
+      {
+        opcode = conditionalise cond Vmrs;
+	read_operands = [| FPSCR |];
+	write_operands = [| hard_reg rt |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ : 4; 0b111000 : 6; hi : 1; true : 1; vn : 4; rt : 4; 0b1011 : 4; n : 1;
+      0b0010000 : 7 } ->
+      let fpreg = VFP_dreg (if n then vn + 16 else vn) in
+      let opc = if hi then Vmov_d2r_hi else Vmov_d2r_lo in
+      {
+        opcode = conditionalise cond opc;
+	read_operands = [| fpreg |];
+	write_operands = [| hard_reg rt |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ } -> bad_insn
 
 let decode_vfp_dword_transfer cond ibits =
   bitmatch ibits with
-    { _ : 11; op : 1; rt2 : 4; rt : 4; 0b101000 : 6; m : 1; true : 1;
-      vm : 4 } ->
-      let m = if m then vm + 16 else vm in
-      let m2 = succ m in
+    { _ : 11; op : 1; rt2 : 4; rt : 4; 0b101 : 3; dreg : 1; 0b00 : 2; m : 1;
+      true : 1; vm : 4 } ->
+      let fp_regs =
+        if dreg then
+	  [| vfp_dreg (if m then vm + 16 else vm) |]
+	else
+	  let m = if m then vm * 2 + 1 else vm * 2 in
+	  let m2 = succ m in
+	  [| vfp_sreg m; vfp_sreg m2 |] in
       if op then
         (* To ARM registers.  *)
 	{
 	  opcode = conditionalise cond Vmov_f2rr;
 	  write_operands = [| hard_reg rt; hard_reg rt2 |];
-	  read_operands = [| vfp_sreg m; vfp_sreg m2 |];
+	  read_operands = fp_regs;
 	  read_flags = []; write_flags = []; clobber_flags = []
 	}
       else
         (* From ARM registers.  *)
 	{
 	  opcode = conditionalise cond Vmov_rr2f;
-	  write_operands = [| vfp_sreg m; vfp_sreg m2 |];
+	  write_operands = fp_regs;
 	  read_operands = [| hard_reg rt; hard_reg rt2 |];
 	  read_flags = []; write_flags = []; clobber_flags = []
 	}
   | { _ } -> bad_insn
 
 let decode_vfp_dataproc cond ibits =
-  bad_insn
+  bitmatch ibits with
+    { _ : 4; 0b11100 : 5; d : 1; 0b00 : 2; vn : 4; vd : 4; 0b101 : 3; sz : 1;
+      n : 1; op : 1; m : 1; false : 1; vm : 4 } ->
+      let opc = if op then Vmls else Vmla in
+      let rd = decode_fpreg ~dreg:sz vd d
+      and rn = decode_fpreg ~dreg:sz vn n
+      and rm = decode_fpreg ~dreg:sz vm m in
+      {
+	opcode = conditionalise cond opc;
+	write_operands = [| rd |];
+	read_operands = [| rd; rn; rm |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ : 4; 0b11100 : 5; d : 1; 0b01 : 2; vn : 4; vd : 4; 0b101 : 3; sz : 1;
+      n : 1; op : 1; m : 1; false : 1; vm : 4 } ->
+      let opc = if op then Vnmla else Vnmls in
+      let rd = decode_fpreg ~dreg:sz vd d
+      and rn = decode_fpreg ~dreg:sz vn n
+      and rm = decode_fpreg ~dreg:sz vm m in
+      {
+	opcode = conditionalise cond opc;
+	write_operands = [| rd |];
+	read_operands = [| rd; rn; rm |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ : 4; 0b11100 : 5; d : 1; 0b10 : 2; vn : 4; vd : 4; 0b101 : 3; sz : 1;
+      n : 1; neg : 1; m : 1; false : 1; vm : 4 } ->
+      let opc = if neg then Vnmul else Vmul in
+      let rd = decode_fpreg ~dreg:sz vd d
+      and rn = decode_fpreg ~dreg:sz vn n
+      and rm = decode_fpreg ~dreg:sz vm m in
+      {
+        opcode = conditionalise cond opc;
+	write_operands = [| rd |];
+	read_operands = [| rn; rm |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ : 4; 0b11100 : 5; d : 1; 0b11 : 2; vn : 4; vd : 4; 0b101 : 3; sz : 1;
+      n : 1; sub : 1; m : 1; false : 1; vm : 4 } ->
+      let opc = if sub then Vsub else Vadd in
+      let rd = decode_fpreg ~dreg:sz vd d
+      and rn = decode_fpreg ~dreg:sz vn n
+      and rm = decode_fpreg ~dreg:sz vm m in
+      {
+        opcode = conditionalise cond opc;
+	write_operands = [| rd |];
+	read_operands = [| rn; rm |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ : 4; 0b11101 : 5; d : 1; 0b00 : 2; vn : 4; vd : 4; 0b101 : 3; sz : 1;
+      n : 1; false : 1; m : 1; false : 1; vm : 4 } ->
+      let rd = decode_fpreg ~dreg:sz vd d
+      and rn = decode_fpreg ~dreg:sz vn n
+      and rm = decode_fpreg ~dreg:sz vm m in
+      {
+        opcode = conditionalise cond Vdiv;
+	write_operands = [| rd |];
+	read_operands = [| rn; rm |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ : 4; 0b11101 : 5; d : 1; 0b11 : 2; imm4h : 4; vd : 4; 0b101 : 3; sz : 1;
+      0b0000 : 4; imm4l : 4 } ->
+      let imm = (* decode immediate! *) imm4l + (imm4h * 16) in
+      let rd = decode_fpreg ~dreg:sz vd d in
+      {
+        opcode = conditionalise cond Vmov_imm;
+	write_operands = [| rd |];
+	read_operands = [| Immediate (Int32.of_int imm) |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ : 4; 0b11101 : 5; d : 1; 0b110000 : 6; vd : 4; 0b101 : 3; sz : 1;
+      0b01 : 2; m : 1; false : 1; vm : 4 } ->
+      let rd = decode_fpreg ~dreg:sz vd d
+      and rm = decode_fpreg ~dreg:sz vm m in
+      {
+        opcode = conditionalise cond Vmov_reg;
+	write_operands = [| rd |];
+	read_operands = [| rm |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ : 4; 0b11101 : 5; d : 1; 0b110000 : 6; vd : 4; 0b101 : 3; sz : 1;
+      0b11 : 2; m : 1; false : 1; vm : 4 } ->
+      let rd = decode_fpreg ~dreg:sz vd d
+      and rm = decode_fpreg ~dreg:sz vm m in
+      {
+        opcode = conditionalise cond Vabs;
+	write_operands = [| rd |];
+	read_operands = [| rm |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ : 4; 0b11101 : 5; d : 1; 0b110001 : 6; vd : 4; 0b101 : 3; sz : 1;
+      0b01 : 2; m : 1; false : 1; vm : 4 } ->
+      let rd = decode_fpreg ~dreg:sz vd d
+      and rm = decode_fpreg ~dreg:sz vm m in
+      {
+        opcode = conditionalise cond Vneg;
+	write_operands = [| rd |];
+	read_operands = [| rm |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ : 4; 0b11101 : 5; d : 1; 0b110001 : 6; vd : 4; 0b101 : 3; sz : 1;
+      0b11 : 2; m : 1; false : 1; vm : 4 } ->
+      let rd = decode_fpreg ~dreg:sz vd d
+      and rm = decode_fpreg ~dreg:sz vm m in
+      {
+        opcode = conditionalise cond Vsqrt;
+	write_operands = [| rd |];
+	read_operands = [| rm |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ : 4; 0b11101 : 5; d : 1; 0b110100 : 6; vd : 4; 0b101 : 3; sz : 1;
+      e : 1; true : 1; m : 1; false : 1; vm : 4 } ->
+      let opc = if e then Vcmpe else Vcmp in
+      let rd = decode_fpreg ~dreg:sz vd d
+      and rm = decode_fpreg ~dreg:sz vm m in
+      {
+        opcode = conditionalise cond opc;
+	write_operands = [| |];
+	read_operands = [| rd; rm |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ : 4; 0b11101 : 5; d : 1; 0b110101 : 6; vd : 4; 0b101 : 3; sz : 1;
+      e : 1; 0b1000000 : 7 } ->
+      let opc = if e then Vcmpe else Vcmp in
+      let rd = decode_fpreg ~dreg:sz vd d in
+      {
+        opcode = conditionalise cond opc;
+	write_operands = [| |];
+	read_operands = [| rd; Immediate 0l |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ : 4; 0b11101 : 5; d : 1; 0b110111 : 6; vd : 4; 0b101 : 3; d2s : 1;
+      0b11 : 2; m : 1; false : 1; vm : 4 } ->
+      let opc = if d2s then Vcvt_d2f else Vcvt_f2d in
+      let rd = decode_fpreg ~dreg:(not d2s) vd d
+      and rm = decode_fpreg ~dreg:d2s vm m in
+      {
+        opcode = conditionalise cond opc;
+	write_operands = [| rd |];
+	read_operands = [| rm |];
+	read_flags = []; write_flags = []; clobber_flags = []
+      }
+  | { _ : 4; 0b11101 : 5; d : 1; 0b111 : 3; opc2 : 3; vd : 4; 0b101 : 3;
+      sz : 1; op : 1; true : 1; m : 1; false : 1; vm : 4 } ->
+      let to_integer, unsigned =
+        match opc2 with
+          0b000 -> false, false
+	| 0b100 -> true, true
+	| 0b101 -> true, false
+	| _ -> failwith "decode_vfp_dataproc" in
+      if to_integer then
+        let round_zero = op in
+	let rd = decode_fpreg ~dreg:false vd d in
+	let rm = decode_fpreg ~dreg:sz vm m in
+	let opc =
+	  match round_zero, unsigned with
+	    true, true -> Vcvt_f2ui
+	  | true, false -> Vcvt_f2si
+	  | false, true -> Vcvtr_f2ui
+	  | false, false -> Vcvtr_f2si in
+	{
+	  opcode = conditionalise cond opc;
+	  write_operands = [| rd |];
+	  read_operands = [| rm |];
+	  read_flags = []; write_flags = []; clobber_flags = []
+	}
+      else
+        let unsigned = not op in
+	let rd = decode_fpreg ~dreg:sz vd d in
+	let rm = decode_fpreg ~dreg:false vm m in
+	let opc = if unsigned then Vcvt_ui2f else Vcvt_si2f in
+	{
+	  opcode = conditionalise cond opc;
+	  write_operands = [| rd |];
+	  read_operands = [| rm |];
+	  read_flags = []; write_flags = []; clobber_flags = []
+	}
+  | { _ } -> bad_insn
 
 let decode_svc_copro cond ibits =
   bitmatch ibits with
