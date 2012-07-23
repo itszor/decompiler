@@ -404,73 +404,80 @@ let fn_ret = function
   | _ -> C.Set (C.Reg (CT.Hard_reg 0), C.Entity CT.Arg_out)
 
 exception Calling of string
+exception Dest_not_function
 
 (* This is awful: a circular dependency!  Find a nicer solution...  *)
 let symbol_for_plt_entry = ref (fun _ _ -> failwith "binding")
+
+let try_function_call binf inforec dst_addr =
+  let no_arg = C.Nullary Irtypes.Nop in
+  let targ_sec = Elfreader.get_section_num_by_addr binf.Binary_info.elfbits
+		   binf.Binary_info.ehdr binf.Binary_info.shdr_arr
+		   dst_addr in
+  let targ_sec_name = Elfreader.get_section_name binf.Binary_info.elfbits
+			binf.Binary_info.ehdr binf.Binary_info.shdr_arr
+			targ_sec in
+  match targ_sec_name with
+    ".text" ->
+      begin try
+	let cu_for_dest = Binary_info.cu_offset_for_address binf dst_addr in
+	let cu_inf = Hashtbl.find binf.Binary_info.cu_hash cu_for_dest in
+	let sym =
+	  begin try
+	    Hashtbl.find cu_inf.Binary_info.ci_symtab dst_addr
+	  with Not_found ->
+	    raise Dest_not_function
+	  end in
+	let die = Hashtbl.find cu_inf.Binary_info.ci_dieaddr dst_addr in
+	let symname = Symbols.symbol_name sym binf.Binary_info.strtab in
+	(*let sym_or_addr = find_symbol binf.Binary_info.symbols
+				      binf.Binary_info.strtab dst_addr in*)
+	let fn_inf =
+	  Function.function_type binf.Binary_info.debug_loc symname die
+	    cu_inf.Binary_info.ci_dietab cu_inf.Binary_info.ci_ctypes
+	    ~compunit_baseaddr:cu_inf.Binary_info.ci_baseaddr in
+	let ct_sym = CT.Finf_sym (symname, fn_inf, sym) in
+	let passes = fn_args inforec dst_addr fn_inf.Function.args
+			     fn_inf.Function.arg_locs
+	and returns = fn_ret fn_inf.Function.return in
+	CT.EABI, ct_sym, passes, returns
+      with Not_found ->
+	(* No debug info for this one.  *)
+	let sym = Symbols.find_symbol_by_addr
+	  ~filter:(fun sym -> not (Mapping.is_mapping_symbol sym))
+	  binf.Binary_info.symbols dst_addr in
+	let symname = Symbols.symbol_name sym binf.Binary_info.strtab in
+	CT.EABI, CT.Symbol (symname, sym), no_arg, no_arg
+      end
+  | ".plt" ->
+      let sym, sym_name =
+	try
+	  let sym = (!symbol_for_plt_entry) binf dst_addr in
+	  let sym_name = Symbols.symbol_name sym binf.Binary_info.dynstr in
+	  sym, sym_name
+	with Not_found ->
+	  List.hd binf.Binary_info.symbols,
+	  Printf.sprintf "<plt@%lx>" dst_addr in
+      begin try
+	let fn_inf = Builtin.builtin_function_type sym_name in
+	CT.Plt_call, CT.Symbol (sym_name, sym),
+	  fn_args inforec dst_addr fn_inf.Function.args
+		  fn_inf.Function.arg_locs,
+	  fn_ret fn_inf.Function.return
+      with Not_found ->
+        CT.Plt_call, CT.Symbol (sym_name, sym), no_arg, no_arg
+      end
+  | x -> raise (Calling x)
 
 let convert_bl binf inforec addr insn =
   let dest = insn.read_operands.(0) in
   match dest with
     PC_relative i ->
-      let no_arg = C.Nullary Irtypes.Nop in
       let ret_addr = Irtypes.BlockAddr (Int32.add addr 4l) in
       let call_addr = Int32.add addr i in
-      let targ_sec = Elfreader.get_section_num_by_addr binf.Binary_info.elfbits
-		       binf.Binary_info.ehdr binf.Binary_info.shdr_arr
-		       call_addr in
-      let targ_sec_name = Elfreader.get_section_name binf.Binary_info.elfbits
-			    binf.Binary_info.ehdr binf.Binary_info.shdr_arr
-			    targ_sec in
-      begin match targ_sec_name with
-        ".text" ->
-	  begin try
-	    let cu_for_dest = Binary_info.cu_offset_for_address binf call_addr in
-	    let cu_inf = Hashtbl.find binf.Binary_info.cu_hash cu_for_dest in
-	    let sym = Hashtbl.find cu_inf.Binary_info.ci_symtab call_addr
-	    and die = Hashtbl.find cu_inf.Binary_info.ci_dieaddr call_addr in
-	    let symname = Symbols.symbol_name sym binf.Binary_info.strtab in
-	    (*let sym_or_addr = find_symbol binf.Binary_info.symbols
-					  binf.Binary_info.strtab call_addr in*)
-	    let fn_inf =
-	      Function.function_type binf.Binary_info.debug_loc symname die
-		cu_inf.Binary_info.ci_dietab cu_inf.Binary_info.ci_ctypes
-		~compunit_baseaddr:cu_inf.Binary_info.ci_baseaddr in
-	    let ct_sym = CT.Finf_sym (symname, fn_inf, sym) in
-	    let passes = fn_args inforec call_addr fn_inf.Function.args
-				 fn_inf.Function.arg_locs
-	    and returns = fn_ret fn_inf.Function.return in
-	    C.Control (C.Call_ext (CT.EABI, ct_sym, passes, ret_addr, returns))
-	  with Not_found ->
-	    (* No debug info for this one.  *)
-	    let sym = Symbols.find_symbol_by_addr
-	      ~filter:(fun sym -> not (Mapping.is_mapping_symbol sym))
-	      binf.Binary_info.symbols call_addr in
-	    let symname = Symbols.symbol_name sym binf.Binary_info.strtab in
-	    C.Control (C.Call_ext (CT.EABI, CT.Symbol (symname, sym), no_arg,
-				   ret_addr, no_arg))
-	  end
-      | ".plt" ->
-          let sym, sym_name =
-	    try
-	      let sym = (!symbol_for_plt_entry) binf call_addr in
-	      let sym_name = Symbols.symbol_name sym binf.Binary_info.dynstr in
-	      sym, sym_name
-	    with Not_found ->
-	      List.hd binf.Binary_info.symbols,
-	      Printf.sprintf "<plt@%lx>" call_addr in
-	  begin try
-	    let fn_inf = Builtin.builtin_function_type sym_name in
-            C.Control (C.Call_ext (CT.Plt_call, CT.Symbol (sym_name, sym),
-				   fn_args inforec call_addr
-				     fn_inf.Function.args
-				     fn_inf.Function.arg_locs, ret_addr,
-				   fn_ret fn_inf.Function.return))
-	  with Not_found ->
-            C.Control (C.Call_ext (CT.Plt_call, CT.Symbol (sym_name, sym),
-				   no_arg, ret_addr, no_arg))
-	  end
-      | x -> raise (Calling x)
-      end
+      let abi, call_code, passes, returns =
+        try_function_call binf inforec call_addr in
+      C.Control (C.Call_ext (abi, call_code, passes, ret_addr, returns))
   | _ -> failwith "unexpected bx operand"
 
 let convert_cmp cmptype addr insn =
@@ -505,7 +512,14 @@ let convert_bfi addr insn =
   and op3 = convert_operand addr insn.read_operands.(2)
   and op4 = convert_operand addr insn.read_operands.(3)
   and dst = convert_operand addr insn.write_operands.(0) in
-  C.Set (dst, C.Nary (Irtypes.Bfi, [op1; op2; op3]))
+  C.Set (dst, C.Nary (Irtypes.Bfi, [op1; op2; op3; op4]))
+
+(* FIXME: No rotates yet!  *)
+
+let convert_xt xtype addr insn =
+  let op = convert_operand addr insn.read_operands.(0)
+  and dst = convert_operand addr insn.write_operands.(0) in
+  C.Set (dst, C.Unary (xtype, op))
 
 let convert_rr2f addr insn =
   match insn.read_operands with
@@ -540,11 +554,19 @@ let convert_cbranch cond addr insn =
       C.Control (C.Branch (convert_condition cond, trueblock, falseblock))
   | _ -> failwith "unexpected b<cond> operand"
 
-let convert_branch addr insn =
+let convert_branch binf inforec addr insn =
   let dest = insn.read_operands.(0) in
   match dest with
     PC_relative i ->
-      C.Control (C.Jump (Irtypes.BlockAddr (Int32.add addr i)))
+      let dst_addr = Int32.add addr i in
+      let no_arg = C.Nullary Irtypes.Nop in
+      begin try
+        let abi, call_code, passes, _ =
+          try_function_call binf inforec dst_addr in
+	C.Control (C.TailCall_ext (abi, call_code, passes))
+      with Dest_not_function ->
+	C.Control (C.Jump (Irtypes.BlockAddr (Int32.add addr i)))
+      end
   | _ -> failwith "unexpected b operand"
 
 exception Unsupported_opcode of Insn.opcode
@@ -621,12 +643,16 @@ let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =
   | Ubfx -> append (convert_bfx Irtypes.Ubfx addr insn)
   | Sbfx -> append (convert_bfx Irtypes.Sbfx addr insn)
   | Bfi -> append (convert_bfi addr insn)
+  | Uxtb -> append (convert_xt Irtypes.Uxtb addr insn)
+  | Sxtb -> append (convert_xt Irtypes.Sxtb addr insn)
+  | Uxth -> append (convert_xt Irtypes.Uxth addr insn)
+  | Sxth -> append (convert_xt Irtypes.Sxth addr insn)
   | Vmov_rr2f -> append (convert_rr2f addr insn)
   | Vldm minf -> same_blk (convert_vldm addr minf insn ilist)
   | Vstm minf -> same_blk (convert_vstm addr minf insn ilist)
   | Bx -> append (convert_bx addr insn)
   | Bl -> append (convert_bl binf inforec addr insn)
-  | B -> append (convert_branch addr insn)
+  | B -> append (convert_branch binf inforec addr insn)
   | Conditional (cond, B) -> append (convert_cbranch cond addr insn)
   | Conditional (cond, _) ->
       convert_conditional binf inforec addr cond insn ilist blk_id bseq
