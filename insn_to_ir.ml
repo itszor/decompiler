@@ -539,10 +539,18 @@ let convert_rr2f addr insn =
 		  convert_operand addr insn.read_operands.(1)) |]
   | _ -> C.Nullary (Irtypes.Untranslated)
 
+(* FIXME: All these need implementing!  *)
+
 let convert_vstm addr minf insn ilist =
   ilist
 
 let convert_vldm addr minf insn ilist =
+  ilist
+
+let convert_vstr addr insn ilist =
+  ilist
+
+let convert_vldr addr insn ilist =
   ilist
 
 let convert_cbranch cond addr insn =
@@ -650,6 +658,8 @@ let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =
   | Vmov_rr2f -> append (convert_rr2f addr insn)
   | Vldm minf -> same_blk (convert_vldm addr minf insn ilist)
   | Vstm minf -> same_blk (convert_vstm addr minf insn ilist)
+  | Vldr -> same_blk (convert_vldr addr insn ilist)
+  | Vstr -> same_blk (convert_vstr addr insn ilist)
   | Bx -> append (convert_bx addr insn)
   | Bl -> append (convert_bl binf inforec addr insn)
   | B -> append (convert_branch binf inforec addr insn)
