@@ -12,6 +12,8 @@ module IrCT =
     type triop = ir_triop
     type extop = ir_extop
     type reg = Hard_reg of int
+	     | VFP_sreg of int
+	     | VFP_dreg of int
              | Stack of int
 	     | Temp of int
 	     | Status of ir_statusbits
@@ -71,6 +73,8 @@ module IrCT =
     | Uxth -> "uxth"
     | Sxtb -> "sxtb"
     | Uxtb -> "uxtb"
+    | Vcvt_d2f -> "vcvt_d2f"
+    | Vcvt_f2d -> "vcvt_f2d"
     | Aggr_member (typ, agr) ->
 	Printf.sprintf "aggregate_member.%s (%s)" (string_of_member_id agr)
 	  (Ctype.string_of_ctype typ)
@@ -90,6 +94,7 @@ module IrCT =
     | Asr -> "asr"
     | Ror -> "ror"
     | Rrx -> "rrx"
+    | Concat -> "concat"
 
     let string_of_triop = function
       Adc -> "adc"
@@ -109,6 +114,8 @@ module IrCT =
 
     let string_of_reg = function
       Hard_reg r -> Printf.sprintf "r%d" r
+    | VFP_sreg r -> Printf.sprintf "s%d" r
+    | VFP_dreg r -> Printf.sprintf "d%d" r
     | Stack s -> Printf.sprintf "stack%s%d" (if s < 0 then "" else "+") s
     | Temp t -> Printf.sprintf "tmp%d" t
     | Status sb -> Printf.sprintf "status(%s)" (string_of_status sb)

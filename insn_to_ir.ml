@@ -27,6 +27,8 @@ let convert_operand addr op =
   match op with
     Hard_reg 15 -> C.Entity (CT.PC (Int32.add addr 8l))
   | Hard_reg r -> C.Reg (CT.Hard_reg r)
+  | VFP_sreg r -> C.Reg (CT.VFP_sreg r)
+  | VFP_dreg r -> C.Reg (CT.VFP_dreg r)
   | Immediate i -> C.Immed i
   | Converted already -> already
   | _ -> failwith "convert_operand"
@@ -522,15 +524,12 @@ let convert_xt xtype addr insn =
   C.Set (dst, C.Unary (xtype, op))
 
 let convert_rr2f addr insn =
-  match insn.read_operands with
+  match insn.write_operands with
     [| VFP_dreg rm |] ->
-      C.Parallel
-        [| C.Set (convert_operand addr insn.write_operands.(0),
-		  C.Unary (Irtypes.Dreg_lopart,
-		    convert_operand addr insn.read_operands.(0)));
-	   C.Set (convert_operand addr insn.write_operands.(1),
-		  C.Unary (Irtypes.Dreg_hipart,
-		    convert_operand addr insn.read_operands.(0))) |]
+      C.Set (convert_operand addr insn.write_operands.(0),
+	     C.Binary (Irtypes.Concat,
+		       convert_operand addr insn.read_operands.(0),
+		       convert_operand addr insn.read_operands.(1)))
   | [| VFP_sreg rm1; VFP_sreg rm2 |] ->
       C.Parallel
         [| C.Set (convert_operand addr insn.write_operands.(0),
@@ -552,6 +551,11 @@ let convert_vstr addr insn ilist =
 
 let convert_vldr addr insn ilist =
   ilist
+
+let convert_vcvt ctype addr insn =
+  let op = convert_operand addr insn.read_operands.(0)
+  and dst = convert_operand addr insn.write_operands.(0) in
+  C.Set (dst, C.Unary (ctype, op))
 
 let convert_cbranch cond addr insn =
   let dest = insn.read_operands.(0) in
@@ -656,10 +660,14 @@ let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =
   | Uxth -> append (convert_xt Irtypes.Uxth addr insn)
   | Sxth -> append (convert_xt Irtypes.Sxth addr insn)
   | Vmov_rr2f -> append (convert_rr2f addr insn)
+  | Vmov_f2r -> append (convert_mov addr insn)
+  | Vmov_r2f -> append (convert_mov addr insn)
   | Vldm minf -> same_blk (convert_vldm addr minf insn ilist)
   | Vstm minf -> same_blk (convert_vstm addr minf insn ilist)
   | Vldr -> same_blk (convert_vldr addr insn ilist)
   | Vstr -> same_blk (convert_vstr addr insn ilist)
+  | Vcvt_d2f -> append (convert_vcvt Irtypes.Vcvt_d2f addr insn)
+  | Vcvt_f2d -> append (convert_vcvt Irtypes.Vcvt_f2d addr insn)
   | Bx -> append (convert_bx addr insn)
   | Bl -> append (convert_bl binf inforec addr insn)
   | B -> append (convert_branch binf inforec addr insn)

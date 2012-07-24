@@ -488,8 +488,8 @@ let scan_compunits ?(cu_select = fun _ -> true) ?(fun_select = fun _ -> true)
     binf.cu_hash
 
 let decompile_something () =
-  scan_compunits ~cu_select:((=) "glsl/icemul.c")
-    ~fun_select:((=) "ICInitOperandInfoWithSwiz") binf
+  scan_compunits ~cu_select:((=) "parser/symtab.c")
+    ~fun_select:((=) "AddSymbolToTable") binf
 
 let _ = decompile_something ()
 

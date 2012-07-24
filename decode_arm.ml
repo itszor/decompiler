@@ -116,6 +116,7 @@ let decode_misc cond bits22_0 =
       decode_bkpt cond bits22_0
   | { 0b110 : 3; _ : 12; 0b0111 : 4 } ->
       decode_smc cond bits22_0
+  | { _ } -> bad_insn
 
 let decode_halfword_mul_mac cond op1 bints19_8 op2 bits3_0 =
   bad_insn
