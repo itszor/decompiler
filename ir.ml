@@ -75,6 +75,12 @@ module IrCT =
     | Uxtb -> "uxtb"
     | Vcvt_d2f -> "vcvt_d2f"
     | Vcvt_f2d -> "vcvt_f2d"
+    | Vcvt_si2f -> "vcvt_si2f"
+    | Vcvt_ui2f -> "vcvt_ui2f"
+    | Vcvt_f2si -> "vcvt_f2si"
+    | Vcvt_f2ui -> "vcvt_f2ui"
+    | Vcvtr_f2si -> "vcvtr_f2si"
+    | Vcvtr_f2ui -> "vcvtr_f2ui"
     | Aggr_member (typ, agr) ->
 	Printf.sprintf "aggregate_member.%s (%s)" (string_of_member_id agr)
 	  (Ctype.string_of_ctype typ)
@@ -94,6 +100,9 @@ module IrCT =
     | Asr -> "asr"
     | Ror -> "ror"
     | Rrx -> "rrx"
+    | Vadd -> "vadd"
+    | Vcmp -> "vcmp"
+    | Vcmpe -> "vcmpe"
     | Concat -> "concat"
 
     let string_of_triop = function
@@ -111,6 +120,7 @@ module IrCT =
       Carry -> "carry"
     | CondFlags -> "condflags"
     | NZFlags -> "nzflags"
+    | VFPFlags -> "vfpflags"
 
     let string_of_reg = function
       Hard_reg r -> Printf.sprintf "r%d" r

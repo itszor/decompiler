@@ -1148,11 +1148,13 @@ let decode_vfp_word_transfer cond ibits =
 	read_flags = []; write_flags = []; clobber_flags = []
       }
   | { _ : 4; 0b111011110001 : 12; rt : 4; 0b101000010000 : 12 } ->
+      let write_reg = if rt = 0b1111 then [| |] else [| hard_reg rt |] in
+      let write_flags = if rt = 0b1111 then [C; V; N; Z] else [] in
       {
         opcode = conditionalise cond Vmrs;
 	read_operands = [| FPSCR |];
-	write_operands = [| hard_reg rt |];
-	read_flags = []; write_flags = []; clobber_flags = []
+	write_operands = write_reg;
+	read_flags = []; write_flags = write_flags; clobber_flags = []
       }
   | { _ : 4; 0b111000 : 6; hi : 1; true : 1; vn : 4; rt : 4; 0b1011 : 4; n : 1;
       0b0010000 : 7 } ->
@@ -1313,7 +1315,7 @@ let decode_vfp_dataproc cond ibits =
       and rm = decode_fpreg ~dreg:sz vm m in
       {
         opcode = conditionalise cond opc;
-	write_operands = [| |];
+	write_operands = [| FPSCR |];
 	read_operands = [| rd; rm |];
 	read_flags = []; write_flags = []; clobber_flags = []
       }
@@ -1323,7 +1325,7 @@ let decode_vfp_dataproc cond ibits =
       let rd = decode_fpreg ~dreg:sz vd d in
       {
         opcode = conditionalise cond opc;
-	write_operands = [| |];
+	write_operands = [| FPSCR |];
 	read_operands = [| rd; Immediate 0l |];
 	read_flags = []; write_flags = []; clobber_flags = []
       }

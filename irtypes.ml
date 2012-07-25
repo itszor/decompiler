@@ -31,6 +31,12 @@ type ir_unop =
   | Sxth
   | Vcvt_d2f
   | Vcvt_f2d
+  | Vcvt_si2f
+  | Vcvt_ui2f
+  | Vcvt_f2si
+  | Vcvt_f2ui
+  | Vcvtr_f2si
+  | Vcvtr_f2ui
   | Dreg_hipart
   | Dreg_lopart
 
@@ -60,6 +66,9 @@ type ir_binop =
   | Asr
   | Ror
   | Rrx
+  | Vadd
+  | Vcmp
+  | Vcmpe
   | Concat (* Implement in "Code"?  *)
 
 type ir_triop =
@@ -85,6 +94,7 @@ type ir_statusbits =
     Carry      (* Just the carry flag.  *)
   | CondFlags  (* All the condition flags: C, V, N & Z.  *)
   | NZFlags    (* Just the N & Z flags.  *)
+  | VFPFlags   (* VFP status flags.  *)
 
 type ir_blockref =
     BlockAddr of int32

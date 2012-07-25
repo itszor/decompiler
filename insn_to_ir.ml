@@ -29,6 +29,7 @@ let convert_operand addr op =
   | Hard_reg r -> C.Reg (CT.Hard_reg r)
   | VFP_sreg r -> C.Reg (CT.VFP_sreg r)
   | VFP_dreg r -> C.Reg (CT.VFP_dreg r)
+  | FPSCR -> C.Reg (CT.Status Irtypes.VFPFlags)
   | Immediate i -> C.Immed i
   | Converted already -> already
   | _ -> failwith "convert_operand"
@@ -557,6 +558,26 @@ let convert_vcvt ctype addr insn =
   and dst = convert_operand addr insn.write_operands.(0) in
   C.Set (dst, C.Unary (ctype, op))
 
+let convert_vcmp ctype addr insn =
+  let op1 = convert_operand addr insn.read_operands.(0)
+  and op2 = convert_operand addr insn.read_operands.(1)
+  and dst = convert_operand addr insn.write_operands.(0) in
+  C.Set (dst, C.Binary (ctype, op1, op2))
+
+let convert_vmrs addr insn =
+  let op1 = convert_operand addr insn.read_operands.(0) in
+  if flags_match insn.write_flags [C;V;N;Z] then
+    C.Set (C.Reg (CT.Status Irtypes.CondFlags), op1)
+  else
+    let dst = convert_operand addr insn.write_operands.(0) in
+    C.Set (dst, op1)
+
+let convert_vfp_binop code addr insn =
+  let op1 = convert_operand addr insn.read_operands.(0)
+  and op2 = convert_operand addr insn.read_operands.(1)
+  and dst = convert_operand addr insn.write_operands.(0) in
+  C.Set (dst, C.Binary (code, op1, op2))
+
 let convert_cbranch cond addr insn =
   let dest = insn.read_operands.(0) in
   match dest with
@@ -668,6 +689,16 @@ let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =
   | Vstr -> same_blk (convert_vstr addr insn ilist)
   | Vcvt_d2f -> append (convert_vcvt Irtypes.Vcvt_d2f addr insn)
   | Vcvt_f2d -> append (convert_vcvt Irtypes.Vcvt_f2d addr insn)
+  | Vcvt_f2si -> append (convert_vcvt Irtypes.Vcvt_f2si addr insn)
+  | Vcvt_f2ui -> append (convert_vcvt Irtypes.Vcvt_f2ui addr insn)
+  | Vcvtr_f2si -> append (convert_vcvt Irtypes.Vcvtr_f2si addr insn)
+  | Vcvtr_f2ui -> append (convert_vcvt Irtypes.Vcvtr_f2ui addr insn)
+  | Vcvt_si2f -> append (convert_vcvt Irtypes.Vcvt_si2f addr insn)
+  | Vcvt_ui2f -> append (convert_vcvt Irtypes.Vcvt_ui2f addr insn)
+  | Vcmp -> append (convert_vcmp Irtypes.Vcmp addr insn)
+  | Vcmpe -> append (convert_vcmp Irtypes.Vcmpe addr insn)
+  | Vmrs -> append (convert_vmrs addr insn)
+  | Vadd -> append (convert_vfp_binop Irtypes.Vadd addr insn)
   | Bx -> append (convert_bx addr insn)
   | Bl -> append (convert_bl binf inforec addr insn)
   | B -> append (convert_branch binf inforec addr insn)
