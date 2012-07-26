@@ -72,6 +72,7 @@ type ir_binop =
   | Vadd
   | Vsub
   | Vmul
+  | Vnmul
   | Vdiv
   | Vcmp
   | Vcmpe
@@ -85,6 +86,8 @@ type ir_triop =
   | Sbfx
   | Vmla
   | Vmls
+  | Vnmla
+  | Vnmls
 
 type ir_extop =
     Fnargs

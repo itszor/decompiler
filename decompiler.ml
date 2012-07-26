@@ -491,7 +491,10 @@ let decompile_something () =
   scan_compunits ~cu_select:((=) "glsl/glslfns.c")
     ~fun_select:((=) "EmulateBuiltInFunction") binf
 
-let _ = decompile_something ()
+let _ =
+  (*decompile_something ()*)
+  Log.loglevel := 1;
+  scan_compunits binf
 
 (*let pubnames = Dwarfreader.parse_all_pubname_data binf.debug_pubnames
 

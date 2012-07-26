@@ -1,7 +1,11 @@
 # Makefile for awesome decompiler project
 
 OCAMLFIND = ocamlfind
+ifeq ($(BUILD),opt)
+OCAMLC = ocamlopt
+else
 OCAMLC = ocamlc -g
+endif
 OCAMLLEX = ocamllex
 OCAMLYACC = ocamlyacc -v
 OCAMLMKTOP = ocamlmktop
@@ -29,9 +33,17 @@ OCAMLSRC := log.ml coverage.ml elfreader.ml dwarfreader.ml dwarfprint.ml \
 	    sptracking.ml resolve_section.ml jumptable.ml decompiler.ml
 
 # OCAMLOBJ := $(shell < .depend $(OCAMLDSORT) -byte $(OCAMLSRC))
+ifeq ($(BUILD),opt)
+OCAMLOBJ := $(OCAMLSRC:.ml=.cmx)
+else
 OCAMLOBJ := $(OCAMLSRC:.ml=.cmo)
+endif
 
+ifeq ($(BUILD),opt)
+OCAMLLIBS := nums.cmxa unix.cmxa -I +bitstring bitstring.cmxa
+else
 OCAMLLIBS := nums.cma unix.cma -I +bitstring bitstring.cma
+endif
 
 OCAMLINC := -I +bitstring
 
@@ -40,7 +52,7 @@ TARGET = decompiler
 all:	$(TARGET)
 
 clean:
-	rm -f *.cmo *.cmi $(TARGET)
+	rm -f *.cmo *.cmi *.cmx $(TARGET)
 
 cleaner: clean
 	rm -f .depend
@@ -51,17 +63,20 @@ ML_ERROR:
 
 # core compiler
 $(TARGET): $(OCAMLOBJ)
-	$(OCAMLFIND) ocamlc -g $(PACKAGES) -linkpkg $(OCAMLOBJ) -o $@
+	$(OCAMLFIND) $(OCAMLC) $(PACKAGES) -linkpkg $(OCAMLOBJ) -o $@
 
 # Also include (lex, yacc) generated files here.
 .depend:	$(OCAMLSRC)
 	$(OCAMLFIND) ocamldep $(SYNTAX) $(PACKAGES) $(OCAMLSRC) > .depend
 
 %.cmo: %.ml
-	$(OCAMLFIND) ocamlc -g $(SYNTAX) $(PACKAGES) $< -c -o $@
+	$(OCAMLFIND) $(OCAMLC) $(SYNTAX) $(PACKAGES) $< -c -o $@
+
+%.cmx: %.ml
+	$(OCAMLFIND) ocamlopt -inline 100 $(SYNTAX) $(PACKAGES) $< -c -o $@
 
 %.cmi: %.mli
-	$(OCAMLFIND) ocamlc -g $(SYNTAX) $(PACKAGES) $< -c -o $@
+	$(OCAMLFIND) $(OCAMLC) $(SYNTAX) $(PACKAGES) $< -c -o $@
 
 %.ml: %.mly
 	$(MENHIR) --infer $<

@@ -108,6 +108,7 @@ module IrCT =
     | Vadd -> "vadd"
     | Vsub -> "vsub"
     | Vmul -> "vmul"
+    | Vnmul -> "vnmul"
     | Vdiv -> "vdiv"
     | Vcmp -> "vcmp"
     | Vcmpe -> "vcmpe"
@@ -121,6 +122,8 @@ module IrCT =
     | Sbfx -> "sbfx"
     | Vmla -> "vmla"
     | Vmls -> "vmls"
+    | Vnmla -> "vnmla"
+    | Vnmls -> "vnmls"
     
     let string_of_extop = function
       Fnargs -> "fnargs"
