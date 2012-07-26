@@ -37,6 +37,9 @@ type ir_unop =
   | Vcvt_f2ui
   | Vcvtr_f2si
   | Vcvtr_f2ui
+  | Vneg
+  | Vabs
+  | Vsqrt
   | Dreg_hipart
   | Dreg_lopart
 
@@ -67,6 +70,9 @@ type ir_binop =
   | Ror
   | Rrx
   | Vadd
+  | Vsub
+  | Vmul
+  | Vdiv
   | Vcmp
   | Vcmpe
   | Concat (* Implement in "Code"?  *)
@@ -77,6 +83,8 @@ type ir_triop =
   | Mla
   | Ubfx
   | Sbfx
+  | Vmla
+  | Vmls
 
 type ir_extop =
     Fnargs

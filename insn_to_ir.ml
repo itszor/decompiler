@@ -213,8 +213,8 @@ let convert_ldm addr minf insn ilist =
       jump_to_tmp := Some reg
   done;
   if minf.mm_writeback then begin
-    let stored_regs = Array.length insn.write_operands - 1 in
-    let offset = if minf.increment then stored_regs * 4 else -stored_regs * 4 in
+    let loaded_regs = Array.length insn.write_operands - reglist_start in
+    let offset = if minf.increment then loaded_regs * 4 else -loaded_regs * 4 in
     let writeback = C.Set (base_reg,
 			   C.Binary (Irtypes.Add, base_reg,
 				     C.Immed (Int32.of_int offset))) in
@@ -329,6 +329,12 @@ let fn_args inforec callee_addr ft_args arglocs =
 	      C.With_id (id, C.Load (Irtypes.Word,
 			       C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
 					 C.Immed (Int32.of_int o))))
+	  | `DW_OP_regx r when r >= 64 && r < 96 ->
+	      let reg = CT.VFP_sreg (r - 64) in
+	      let id = C.create_id () in
+	      Typedb.record_reg_info_for_id inforec reg id
+	        (Typedb.Used_as_type ft_args.(i));
+	      C.With_id (id, C.Reg reg)
 	  | x -> failwith "fn_args/location"
 	  end
       | None ->
@@ -386,6 +392,15 @@ let add_real_incoming_args ft start_addr inforec codeseq =
 			   C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
 				     C.Immed (Int32.of_int o)),
 			   C.Nullary Irtypes.Arg_in)) in
+	      succ i, CS.snoc codeseq' insn
+	  | `DW_OP_regx r when r >= 64 && r < 96 ->
+	      let reg = CT.VFP_sreg (r - 64) in
+	      let id = C.create_id () in
+	      known_incoming_regs := r :: !known_incoming_regs;
+	      Typedb.record_reg_info_for_id inforec reg id
+		(Typedb.Type_known typ);
+	      let insn = C.Set (C.With_id (id, C.Reg reg),
+				C.Nullary Irtypes.Arg_in) in
 	      succ i, CS.snoc codeseq' insn
 	  | _ -> failwith "add_real_incoming_args/location"
 	  end
@@ -524,34 +539,138 @@ let convert_xt xtype addr insn =
   and dst = convert_operand addr insn.write_operands.(0) in
   C.Set (dst, C.Unary (xtype, op))
 
-let convert_rr2f addr insn =
+let convert_rr2f addr insn ilist =
   match insn.write_operands with
     [| VFP_dreg rm |] ->
-      C.Set (convert_operand addr insn.write_operands.(0),
-	     C.Binary (Irtypes.Concat,
-		       convert_operand addr insn.read_operands.(0),
-		       convert_operand addr insn.read_operands.(1)))
+      let insn = 
+	C.Set (convert_operand addr insn.write_operands.(0),
+	       C.Binary (Irtypes.Concat,
+			 convert_operand addr insn.read_operands.(0),
+			 convert_operand addr insn.read_operands.(1))) in
+      CS.snoc ilist insn
   | [| VFP_sreg rm1; VFP_sreg rm2 |] ->
-      C.Parallel
-        [| C.Set (convert_operand addr insn.write_operands.(0),
-		  convert_operand addr insn.read_operands.(0));
-	   C.Set (convert_operand addr insn.write_operands.(1),
-		  convert_operand addr insn.read_operands.(1)) |]
-  | _ -> C.Nullary (Irtypes.Untranslated)
+      let insn1 = C.Set (convert_operand addr insn.write_operands.(0),
+			 convert_operand addr insn.read_operands.(0))
+      and insn2 = C.Set (convert_operand addr insn.write_operands.(1),
+			 convert_operand addr insn.read_operands.(1)) in
+      let ilist' = CS.snoc ilist insn1 in
+      CS.snoc ilist insn2
+  | _ -> CS.snoc ilist (C.Nullary Irtypes.Untranslated)
 
-(* FIXME: All these need implementing!  *)
+let convert_f2rr addr insn ilist =
+  match insn.read_operands with
+    [| VFP_dreg rm |] ->
+      let insn =
+        (* Leave this as a single instruction because we don't really want it
+	   to be split -- it most likely represents a single transfer.
+	   FIXME: Allow concat on the LHS instead?  *)
+        C.Parallel
+          [| C.Set (convert_operand addr insn.write_operands.(0),
+		    C.Unary (Irtypes.Dreg_lopart,
+			     convert_operand addr insn.read_operands.(0)));
+	     C.Set (convert_operand addr insn.write_operands.(1),
+		    C.Unary (Irtypes.Dreg_hipart,
+			     convert_operand addr insn.read_operands.(0))) |] in
+      CS.snoc ilist insn
+  | [| VFP_sreg rm1; VFP_sreg rm2 |] ->
+      let insn1 = C.Set (convert_operand addr insn.write_operands.(0),
+			 convert_operand addr insn.read_operands.(0))
+      and insn2 = C.Set (convert_operand addr insn.write_operands.(1),
+			 convert_operand addr insn.read_operands.(1)) in
+      let ilist' = CS.snoc ilist insn1 in
+      CS.snoc ilist' insn2
+  | _ -> CS.snoc ilist (C.Nullary Irtypes.Untranslated)
+
+let vfp_reg_size = function
+    VFP_sreg _ -> 4
+  | VFP_dreg _ -> 8
+  | _ -> failwith "vfp_reg_size"
+
+let vfp_reg_xfer = function
+    VFP_sreg _ -> Irtypes.Word
+  | VFP_dreg _ -> Irtypes.Dword
+  | _ -> failwith "vfp_reg_xfer"
 
 let convert_vstm addr minf insn ilist =
-  ilist
+  let rsize = vfp_reg_size insn.read_operands.(1) in
+  let xfer = vfp_reg_xfer insn.read_operands.(1) in
+  let offset = ref 0 in
+  begin match minf.before, minf.increment with
+    false, _ -> offset := 0
+  | true, false -> offset := -rsize
+  | true, true -> offset := rsize
+  end;
+  let base_reg = convert_operand addr insn.read_operands.(0) in
+  let ilist_r = ref ilist in
+  for i = 1 to Array.length insn.read_operands - 1 do
+    let addr' = C.Binary (Irtypes.Add, base_reg,
+			  C.Immed (Int32.of_int !offset)) in
+    let store = C.Store (xfer, addr',
+			 convert_operand addr insn.read_operands.(i)) in
+    ilist_r := CS.snoc !ilist_r store;
+    if minf.increment then
+      offset := !offset + rsize
+    else
+      offset := !offset - rsize
+  done;
+  if minf.mm_writeback then begin
+    let stored_regs = Array.length insn.read_operands - 1 in
+    let offset = if minf.increment then stored_regs * rsize
+		 else -stored_regs * rsize in
+    let writeback = C.Set (base_reg,
+			   C.Binary (Irtypes.Add, base_reg,
+				     C.Immed (Int32.of_int offset))) in
+    ilist_r := CS.snoc !ilist_r writeback
+  end;
+  !ilist_r
 
 let convert_vldm addr minf insn ilist =
-  ilist
+  let reglist_start = if minf.mm_writeback then 1 else 0 in
+  let rsize = vfp_reg_size insn.write_operands.(reglist_start) in
+  let xfer = vfp_reg_xfer insn.write_operands.(reglist_start) in
+  let offset = ref 0 in
+  begin match minf.before, minf.increment with
+    false, _ -> offset := 0
+  | true, false -> offset := -rsize
+  | true, true -> offset := rsize
+  end;
+  let base_reg = convert_operand addr insn.read_operands.(0) in
+  let ilist_r = ref ilist in
+  for i = reglist_start to Array.length insn.write_operands - 1 do
+    let addr' = C.Binary (Irtypes.Add, base_reg,
+			  C.Immed (Int32.of_int !offset)) in
+    let reg = convert_operand addr insn.write_operands.(i) in
+    let load = C.Set (reg, C.Load (xfer, addr')) in
+    ilist_r := CS.snoc !ilist_r load;
+    if minf.increment then
+      offset := !offset + rsize
+    else
+      offset := !offset - rsize
+  done;
+  if minf.mm_writeback then begin
+    let loaded_regs = Array.length insn.write_operands - reglist_start in
+    let offset = if minf.increment then loaded_regs * rsize
+		 else -loaded_regs * rsize in
+    let writeback = C.Set (base_reg,
+			   C.Binary (Irtypes.Add, base_reg,
+				     C.Immed (Int32.of_int offset))) in
+    ilist_r := CS.snoc !ilist_r writeback
+  end;
+  !ilist_r
 
-let convert_vstr addr insn ilist =
-  ilist
+let convert_vstr addr insn =
+  let base = convert_operand addr insn.read_operands.(1)
+  and offset = convert_operand addr insn.read_operands.(2)
+  and stored_reg = convert_operand addr insn.read_operands.(0) in
+  let store_type = vfp_reg_xfer insn.read_operands.(0) in
+  C.Store (store_type, C.Binary (Irtypes.Add, base, offset), stored_reg)
 
-let convert_vldr addr insn ilist =
-  ilist
+let convert_vldr addr insn =
+  let base = convert_operand addr insn.read_operands.(0)
+  and offset = convert_operand addr insn.read_operands.(1)
+  and loaded_reg = convert_operand addr insn.write_operands.(0) in
+  let load_type = vfp_reg_xfer insn.write_operands.(0) in
+  C.Set (loaded_reg, C.Load (load_type, C.Binary (Irtypes.Add, base, offset)))
 
 let convert_vcvt ctype addr insn =
   let op = convert_operand addr insn.read_operands.(0)
@@ -572,11 +691,23 @@ let convert_vmrs addr insn =
     let dst = convert_operand addr insn.write_operands.(0) in
     C.Set (dst, op1)
 
+let convert_vfp_unop code addr insn =
+  let op1 = convert_operand addr insn.read_operands.(0)
+  and dst = convert_operand addr insn.write_operands.(0) in
+  C.Set (dst, C.Unary (code, op1))
+
 let convert_vfp_binop code addr insn =
   let op1 = convert_operand addr insn.read_operands.(0)
   and op2 = convert_operand addr insn.read_operands.(1)
   and dst = convert_operand addr insn.write_operands.(0) in
   C.Set (dst, C.Binary (code, op1, op2))
+
+let convert_vfp_triop code addr insn =
+  let op1 = convert_operand addr insn.read_operands.(0)
+  and op2 = convert_operand addr insn.read_operands.(1)
+  and op3 = convert_operand addr insn.read_operands.(2)
+  and dst = convert_operand addr insn.write_operands.(0) in
+  C.Set (dst, C.Trinary (code, op1, op2, op3))
 
 let convert_cbranch cond addr insn =
   let dest = insn.read_operands.(0) in
@@ -680,13 +811,16 @@ let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =
   | Sxtb -> append (convert_xt Irtypes.Sxtb addr insn)
   | Uxth -> append (convert_xt Irtypes.Uxth addr insn)
   | Sxth -> append (convert_xt Irtypes.Sxth addr insn)
-  | Vmov_rr2f -> append (convert_rr2f addr insn)
+  | Vmov_rr2f -> same_blk (convert_rr2f addr insn ilist)
+  | Vmov_f2rr -> same_blk (convert_f2rr addr insn ilist)
   | Vmov_f2r -> append (convert_mov addr insn)
   | Vmov_r2f -> append (convert_mov addr insn)
+  | Vmov_imm -> append (convert_mov addr insn)
+  | Vmov_reg -> append (convert_mov addr insn)
   | Vldm minf -> same_blk (convert_vldm addr minf insn ilist)
   | Vstm minf -> same_blk (convert_vstm addr minf insn ilist)
-  | Vldr -> same_blk (convert_vldr addr insn ilist)
-  | Vstr -> same_blk (convert_vstr addr insn ilist)
+  | Vldr -> append (convert_vldr addr insn)
+  | Vstr -> append (convert_vstr addr insn)
   | Vcvt_d2f -> append (convert_vcvt Irtypes.Vcvt_d2f addr insn)
   | Vcvt_f2d -> append (convert_vcvt Irtypes.Vcvt_f2d addr insn)
   | Vcvt_f2si -> append (convert_vcvt Irtypes.Vcvt_f2si addr insn)
@@ -698,7 +832,15 @@ let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =
   | Vcmp -> append (convert_vcmp Irtypes.Vcmp addr insn)
   | Vcmpe -> append (convert_vcmp Irtypes.Vcmpe addr insn)
   | Vmrs -> append (convert_vmrs addr insn)
+  | Vneg -> append (convert_vfp_unop Irtypes.Vneg addr insn)
+  | Vabs -> append (convert_vfp_unop Irtypes.Vabs addr insn)
+  | Vsqrt -> append (convert_vfp_unop Irtypes.Vsqrt addr insn)
   | Vadd -> append (convert_vfp_binop Irtypes.Vadd addr insn)
+  | Vsub -> append (convert_vfp_binop Irtypes.Vsub addr insn)
+  | Vmul -> append (convert_vfp_binop Irtypes.Vmul addr insn)
+  | Vdiv -> append (convert_vfp_binop Irtypes.Vdiv addr insn)
+  | Vmla -> append (convert_vfp_triop Irtypes.Vmla addr insn)
+  | Vmls -> append (convert_vfp_triop Irtypes.Vmls addr insn)
   | Bx -> append (convert_bx addr insn)
   | Bl -> append (convert_bl binf inforec addr insn)
   | B -> append (convert_branch binf inforec addr insn)

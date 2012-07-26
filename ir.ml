@@ -81,9 +81,14 @@ module IrCT =
     | Vcvt_f2ui -> "vcvt_f2ui"
     | Vcvtr_f2si -> "vcvtr_f2si"
     | Vcvtr_f2ui -> "vcvtr_f2ui"
+    | Vneg -> "vneg"
+    | Vabs -> "vabs"
+    | Vsqrt -> "vsqrt"
     | Aggr_member (typ, agr) ->
 	Printf.sprintf "aggregate_member.%s (%s)" (string_of_member_id agr)
 	  (Ctype.string_of_ctype typ)
+    | Dreg_hipart -> "dreg_hipart"
+    | Dreg_lopart -> "dreg_lopart"
 
     let string_of_binop = function
       Add -> "add"
@@ -101,6 +106,9 @@ module IrCT =
     | Ror -> "ror"
     | Rrx -> "rrx"
     | Vadd -> "vadd"
+    | Vsub -> "vsub"
+    | Vmul -> "vmul"
+    | Vdiv -> "vdiv"
     | Vcmp -> "vcmp"
     | Vcmpe -> "vcmpe"
     | Concat -> "concat"
@@ -111,6 +119,8 @@ module IrCT =
     | Mla -> "mla"
     | Ubfx -> "ubfx"
     | Sbfx -> "sbfx"
+    | Vmla -> "vmla"
+    | Vmls -> "vmls"
     
     let string_of_extop = function
       Fnargs -> "fnargs"
