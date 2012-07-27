@@ -2,7 +2,7 @@
 
 OCAMLFIND = ocamlfind
 ifeq ($(BUILD),opt)
-OCAMLC = ocamlopt
+OCAMLC = ocamlopt -p
 else
 OCAMLC = ocamlc -g
 endif
@@ -73,7 +73,7 @@ $(TARGET): $(OCAMLOBJ)
 	$(OCAMLFIND) $(OCAMLC) $(SYNTAX) $(PACKAGES) $< -c -o $@
 
 %.cmx: %.ml
-	$(OCAMLFIND) ocamlopt -inline 100 $(SYNTAX) $(PACKAGES) $< -c -o $@
+	$(OCAMLFIND) ocamlopt -p -inline 100 $(SYNTAX) $(PACKAGES) $< -c -o $@
 
 %.cmi: %.mli
 	$(OCAMLFIND) $(OCAMLC) $(SYNTAX) $(PACKAGES) $< -c -o $@

@@ -1,4 +1,4 @@
-ocamlfind ocamlmktop -syntax camlp4o -package camlp4.macro,num,unix,bitstring,bitstring.syntax \
+ocamlfind ocamlmktop -syntax camlp4o -package camlp4.macro,num,unix,bitstring,bitstring.syntax,FrontC \
   -linkpkg log.cmo coverage.cmo elfreader.cmo dwarfreader.cmo \
   dwarfprint.cmo line.cmo insn.cmo decode_arm.cmo symbols.cmo mapping.cmo \
   emit.cmo deque.cmo ranlist.cmo boolset.cmo getoption.cmo code.cmo \

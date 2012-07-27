@@ -423,7 +423,14 @@ let really_go () =
 
 let continue_after_error = ref false
 
-let find_sym_and_try_decompile binf sym_addr fun_select =
+type converted_cu =
+  {
+    cu_name : string;
+    fn_name : string;
+    cu_blkarr : C.code CS.t Block.block array
+  }
+
+let find_sym_and_try_decompile binf cu_name sym_addr fun_select =
   let sym = Symbols.find_symbol_by_addr
     ~filter:(fun sym -> Symbols.symbol_type sym = Symbols.STT_FUNC)
     binf.symbols
@@ -431,9 +438,11 @@ let find_sym_and_try_decompile binf sym_addr fun_select =
   try
     let name = Symbols.symbol_name sym binf.strtab in
     if fun_select name then begin
-      ignore (decompile_sym binf sym);
-      Log.printf 1 "PASS\n"
-    end
+      let blk_arr = decompile_sym binf sym in
+      Log.printf 1 "PASS\n";
+      { cu_name = cu_name; fn_name = name; cu_blkarr = blk_arr }
+    end else
+      { cu_name = cu_name; fn_name = "<skipped>"; cu_blkarr = [| |] }
   with x ->
     if not !continue_after_error then
       match x with
@@ -441,51 +450,88 @@ let find_sym_and_try_decompile binf sym_addr fun_select =
 	  Printf.fprintf stderr "Not found\n";
 	  failwith "Not found"
       | _ -> raise x
-    else
-      Log.printf 1 "FAIL\n"
+    else begin
+      Log.printf 1 "FAIL\n";
+      { cu_name = cu_name; fn_name ="<decompilation failed>";
+	cu_blkarr = [| |] }
+    end
 
 (* Scan the toplevel DIEs defined in a CU.  *)
 
-let scan_dietab_cu binf die fun_select =
-  let rec scan die =
+let scan_dietab_cu binf cu_name die fun_select prog =
+  let rec scan die prog' =
     match die with
       Die_tree ((DW_TAG_subprogram, attrs), children, sibl) ->
-        begin try
+	begin try
 	  let lowpc = get_attr_address attrs DW_AT_low_pc in
-	  ignore (find_sym_and_try_decompile binf lowpc fun_select)
-	with Not_found -> ()
-	end;
-	scan sibl
+          let conv_cu =
+	    find_sym_and_try_decompile binf cu_name lowpc fun_select in
+	  scan sibl (conv_cu :: prog')
+	with Not_found ->
+	  let inlined = get_attr_int attrs DW_AT_inline
+	  and name = get_attr_string attrs DW_AT_name in
+	  if inlined = 1 then begin
+	    Log.printf 1
+	      "*** not decompiling '%s' (no out-of-line instance) ***\n" name;
+	    prog'
+	  end else
+	    failwith ("No low pc for non-inlined function " ^ name)
+	end
     | Die_node ((DW_TAG_subprogram, attrs), sibl) ->
-        begin try
+	begin try
 	  let lowpc = get_attr_address attrs DW_AT_low_pc in
-	  ignore (find_sym_and_try_decompile binf lowpc fun_select)
-	with Not_found -> ()
-	end;
-	scan sibl
+          let conv_cu =
+	    find_sym_and_try_decompile binf cu_name lowpc fun_select in
+	  scan sibl (conv_cu :: prog')
+	with Not_found ->
+	  let inlined = get_attr_int attrs DW_AT_inline
+	  and name = get_attr_string attrs DW_AT_name in
+	  if inlined = 1 then begin
+	    Log.printf 1
+	      "*** not decompiling '%s' (no out-of-line instance) ***\n" name;
+	    prog'
+	  end else
+	    failwith ("no low pc for non-inlined function " ^ name)
+	end
     | Die_tree ((_, attrs), children, sibl) ->
-	scan sibl
+	scan sibl prog'
     | Die_node ((_, attrs), sibl) ->
-	scan sibl
-    | Die_empty -> () in
-  scan die
+	scan sibl prog'
+    | Die_empty -> prog' in
+  scan die prog
 
-let scan_dietab binf cu_inf cu_select fun_select =
+let scan_dietab binf cu_inf cu_select fun_select prog =
   match cu_inf.ci_dies with
     Die_node ((DW_TAG_compile_unit, attrs), children) ->
       let name = get_attr_string attrs DW_AT_name in
       if cu_select name then begin
 	Log.printf 1 "Compilation unit '%s'\n" name;
-	scan_dietab_cu binf children fun_select
-      end
-  | _ -> ()
+	scan_dietab_cu binf name children fun_select prog
+      end else
+        prog
+  | _ -> failwith "scan_dietab"
 
 let scan_compunits ?(cu_select = fun _ -> true) ?(fun_select = fun _ -> true)
 		   binf =
-  Hashtbl.iter
-    (fun cu_offset cu_inf ->
-      scan_dietab binf cu_inf cu_select fun_select)
-    binf.cu_hash
+  let converted_compunits =
+    Hashtbl.fold
+      (fun cu_offset cu_inf prog ->
+	scan_dietab binf cu_inf cu_select fun_select prog)
+      binf.cu_hash
+      [] in
+  let rodata_sec = get_section_number binf.elfbits binf.ehdr binf.shdr_arr
+		     ".rodata" in
+  Log.printf 1 "*** slice rodata section by symbols ***\n";
+  Slice_section.symbols binf.rodata_sliced binf.symbols binf.strtab rodata_sec;
+  Log.printf 1 "*** resolving rodata section references ***\n";
+  List.map
+    (fun conv_cu ->
+      Log.printf 2 "--- resolving %s:%s ---\n" conv_cu.cu_name conv_cu.fn_name;
+      let blk_arr' =
+        Resolve_section.resolve conv_cu.cu_blkarr binf.rodata
+				binf.rodata_sliced in
+      { conv_cu with cu_blkarr = blk_arr' })
+    converted_compunits
 
 let decompile_something () =
   scan_compunits ~cu_select:((=) "glsl/glslfns.c")
@@ -493,8 +539,8 @@ let decompile_something () =
 
 let _ =
   (*decompile_something ()*)
-  Log.loglevel := 1;
-  scan_compunits binf
+  (*Log.loglevel := 2;
+  scan_compunits binf *) ()
 
 (*let pubnames = Dwarfreader.parse_all_pubname_data binf.debug_pubnames
 
