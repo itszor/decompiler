@@ -15,8 +15,8 @@ type ctype =
   | C_pointer of ctype
   | C_const of ctype
   | C_volatile of ctype
-  | C_struct of aggregate_member list
-  | C_union of aggregate_member list
+  | C_struct of string * aggregate_member list
+  | C_union of string * aggregate_member list
   | C_array of int * ctype
   | C_enum (* of ... *)
   | C_funtype of ctype * ctype list
@@ -63,16 +63,16 @@ let string_of_ctype ctyp =
   | C_typedef nm -> Printf.sprintf "typedef %s" nm
   | C_typetag nm -> Printf.sprintf "incomplete type %s" nm
   | C_array (num, typ) -> Printf.sprintf "%s[%d]" (scan typ) num
-  | C_struct agg ->
-      Printf.sprintf "struct { %s }"
+  | C_struct (nm, agg) ->
+      Printf.sprintf "struct %s { %s }" nm
         (String.concat ";"
 	  (List.map
 	    (fun ag ->
 	      Printf.sprintf "%s %s; /* offset=%d, size=%d */" (scan ag.typ)
 			     ag.name ag.offset ag.size)
 	    agg))
-  | C_union agg ->
-      Printf.sprintf "union { %s }"
+  | C_union (nm, agg) ->
+      Printf.sprintf "union %s { %s }" nm
         (String.concat ";"
 	  (List.map
 	    (fun ag ->
@@ -152,12 +152,13 @@ let rec resolve_type die die_hash ctypes_for_cu =
 	else begin
 	  Hashtbl.add ctypes_for_cu.ct_typetags tag_name (C_typetag tag_name);
 	  let styp =
-	    C_struct (resolve_aggregate child die_hash ctypes_for_cu) in
+	    C_struct (tag_name,
+		      resolve_aggregate child die_hash ctypes_for_cu) in
 	  Hashtbl.replace ctypes_for_cu.ct_typetags tag_name styp;
 	  styp
 	end
       with Not_found ->
-        C_struct (resolve_aggregate child die_hash ctypes_for_cu)
+        C_struct ("", resolve_aggregate child die_hash ctypes_for_cu)
       end
   | Die_node ((DW_TAG_structure_type, attrs), _)
   | Die_node ((DW_TAG_union_type, attrs), _) ->
@@ -178,12 +179,13 @@ let rec resolve_type die die_hash ctypes_for_cu =
 	else begin
 	  Hashtbl.add ctypes_for_cu.ct_typetags tag_name (C_typetag tag_name);
 	  let utyp =
-	    C_union (resolve_aggregate child die_hash ctypes_for_cu) in
+	    C_union (tag_name,
+		     resolve_aggregate child die_hash ctypes_for_cu) in
 	  Hashtbl.replace ctypes_for_cu.ct_typetags tag_name utyp;
 	  utyp
 	end
       with Not_found ->
-	C_union (resolve_aggregate child die_hash ctypes_for_cu)
+	C_union ("", resolve_aggregate child die_hash ctypes_for_cu)
       end
   | Die_tree ((DW_TAG_enumeration_type, attrs), _, _) ->
       C_enum

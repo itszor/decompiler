@@ -936,8 +936,8 @@ let rec resolve_aggregate_access typ offset ctypes_for_cu =
   Log.printf 4 "resolve_aggregate_access, type %s, offset %d\n"
     (Ctype.string_of_ctype typ) offset;
   match typ with
-    Ctype.C_struct agmem
-  | Ctype.C_union agmem ->
+    Ctype.C_struct (_, agmem)
+  | Ctype.C_union (_, agmem) ->
       let found_mem =
         List.find
 	  (fun mem ->

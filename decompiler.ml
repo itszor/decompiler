@@ -391,7 +391,7 @@ let decompile_sym binf sym =
   IrPhiPlacement.eliminate blk_arr'';
   dump_blockarr blk_arr'';
   (*stack_coverage*)
-  blk_arr''
+  ft, blk_arr''
 
 let go symname =
   let sym = Symbols.find_named_symbol binf.symbols binf.strtab symname in
@@ -402,7 +402,7 @@ let really_go () =
   (*go "InitAccumUSECodeBlocks"*)
   (*;go "AddComparisonToUFCode"*)
   (*go "ProcessICInstIFNOT"*)
-  let blk_arr1 = go "main" in
+  let _, blk_arr1 = go "main" in
   (*let blk_arr2 = go "main2" in*)
   let rodata_sec = get_section_number binf.elfbits binf.ehdr binf.shdr_arr
 				      ".rodata" in
@@ -427,6 +427,7 @@ type converted_cu =
   {
     cu_name : string;
     fn_name : string;
+    fn_type : Function.function_info;
     cu_blkarr : C.code CS.t Block.block array
   }
 
@@ -438,11 +439,15 @@ let find_sym_and_try_decompile binf cu_name sym_addr fun_select =
   try
     let name = Symbols.symbol_name sym binf.strtab in
     if fun_select name then begin
-      let blk_arr = decompile_sym binf sym in
+      let ftype, blk_arr = decompile_sym binf sym in
+      let cvt = Ctree.convert_function name ftype blk_arr in
+      Cprint.print stdout [cvt];
       Log.printf 1 "PASS\n";
-      { cu_name = cu_name; fn_name = name; cu_blkarr = blk_arr }
+      { cu_name = cu_name; fn_name = name; fn_type = ftype;
+	cu_blkarr = blk_arr }
     end else
-      { cu_name = cu_name; fn_name = "<skipped>"; cu_blkarr = [| |] }
+      { cu_name = cu_name; fn_name = "<skipped>";
+	fn_type = Function.dummy_fn_info; cu_blkarr = [| |] }
   with x ->
     if not !continue_after_error then
       match x with
@@ -453,12 +458,30 @@ let find_sym_and_try_decompile binf cu_name sym_addr fun_select =
     else begin
       Log.printf 1 "FAIL\n";
       { cu_name = cu_name; fn_name ="<decompilation failed>";
-	cu_blkarr = [| |] }
+	fn_type = Function.dummy_fn_info; cu_blkarr = [| |] }
     end
+
+let try_emit_decl binf cu_inf dwcode ?children attrs =
+  try
+    let name = get_attr_string attrs DW_AT_name
+    and file = get_attr_int attrs DW_AT_decl_file in
+    let filename =
+      cu_inf.Binary_info.ci_lines.Line.file_names.(file - 1).Line.filename in
+    Log.printf 1 "file: '%s', decl: '%s'\n"
+      filename name;
+    begin match dwcode with
+      DW_TAG_typedef ->
+        let typ = get_attr_deref attrs DW_AT_type cu_inf.ci_dietab in
+	let ctyp = Ctype.resolve_type typ cu_inf.ci_dietab cu_inf.ci_ctypes in
+        let typedef = Ctree.convert_typedef name ctyp in
+	Cprint.print stdout [typedef]
+    | _ -> ()
+    end
+  with Not_found -> ()
 
 (* Scan the toplevel DIEs defined in a CU.  *)
 
-let scan_dietab_cu binf cu_name die fun_select prog =
+let scan_dietab_cu binf cu_inf cu_name die fun_select prog =
   let rec scan die prog' =
     match die with
       Die_tree ((DW_TAG_subprogram, attrs), children, sibl) ->
@@ -493,9 +516,11 @@ let scan_dietab_cu binf cu_name die fun_select prog =
 	  end else
 	    failwith ("no low pc for non-inlined function " ^ name)
 	end
-    | Die_tree ((_, attrs), children, sibl) ->
+    | Die_tree ((dwcode, attrs), children, sibl) ->
+        try_emit_decl binf cu_inf dwcode ~children attrs;
 	scan sibl prog'
-    | Die_node ((_, attrs), sibl) ->
+    | Die_node ((dwcode, attrs), sibl) ->
+        try_emit_decl binf cu_inf dwcode attrs;
 	scan sibl prog'
     | Die_empty -> prog' in
   scan die prog
@@ -506,7 +531,7 @@ let scan_dietab binf cu_inf cu_select fun_select prog =
       let name = get_attr_string attrs DW_AT_name in
       if cu_select name then begin
 	Log.printf 1 "Compilation unit '%s'\n" name;
-	scan_dietab_cu binf name children fun_select prog
+	scan_dietab_cu binf cu_inf name children fun_select prog
       end else
         prog
   | _ -> failwith "scan_dietab"
@@ -538,9 +563,9 @@ let decompile_something () =
     ~fun_select:((=) "EmulateBuiltInFunction") binf
 
 let _ =
-  (*decompile_something ()*)
+  (*decompile_something*) ()
   (*Log.loglevel := 2;
-  scan_compunits binf *) ()
+  scan_compunits binf *)
 
 (*let pubnames = Dwarfreader.parse_all_pubname_data binf.debug_pubnames
 

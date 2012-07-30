@@ -12,6 +12,17 @@ type function_info =
     prototyped : bool
   }
 
+let dummy_fn_info =
+  {
+    args = [||];
+    arg_locs = [||];
+    arg_names = [||];
+    framebase_loc = None;
+    return = C_void;
+    local = true;
+    prototyped = false
+  }
+
 let function_args debug_loc die die_hash ctypes_for_cu ~compunit_baseaddr =
   let rec makelist die acc argno =
     match die with
