@@ -291,8 +291,8 @@ let graphviz blk_arr =
 
 (*let binf = open_file "libGLESv2.so"*)
 (*let binf = open_file "foo"*)
-let binf = open_file "libglslcompiler.so"
-(*let binf = open_file "tests/hello"*)
+(*let binf = open_file "libglslcompiler.so"*)
+let binf = open_file "tests/hello"
 (*let binf = open_file "tests/rodata"*)
 (*let binf = open_file "tests/fnargs"*)
 (*let binf = open_file "tests/structs"*)
@@ -387,11 +387,13 @@ let decompile_sym binf sym =
   Log.printf 2 "--- removing prologue/epilogue code ---\n";
   let blk_arr'' = Ce.remove_prologue_and_epilogue blk_arr' in
   dump_blockarr blk_arr'';
+  Log.printf 2 "--- choose variable names and types ---\n";
+  let vars = Vartypes.choose_vartypes blk_arr'' cu_inf.ci_ctypes inforec in
   Log.printf 2 "--- eliminate phi nodes ---\n";
   IrPhiPlacement.eliminate blk_arr'';
   dump_blockarr blk_arr'';
   (*stack_coverage*)
-  ft, blk_arr''
+  ft, vars, blk_arr''
 
 let go symname =
   let sym = Symbols.find_named_symbol binf.symbols binf.strtab symname in
@@ -402,7 +404,7 @@ let really_go () =
   (*go "InitAccumUSECodeBlocks"*)
   (*;go "AddComparisonToUFCode"*)
   (*go "ProcessICInstIFNOT"*)
-  let _, blk_arr1 = go "main" in
+  let _, _, blk_arr1 = go "main" in
   (*let blk_arr2 = go "main2" in*)
   let rodata_sec = get_section_number binf.elfbits binf.ehdr binf.shdr_arr
 				      ".rodata" in
@@ -428,7 +430,8 @@ type converted_cu =
     cu_name : string;
     fn_name : string;
     fn_type : Function.function_info;
-    cu_blkarr : C.code CS.t Block.block array
+    cu_blkarr : C.code CS.t Block.block array;
+    cu_vars : (CT.reg * int, string * Ctype.ctype) Hashtbl.t
   }
 
 let find_sym_and_try_decompile binf cu_name sym_addr fun_select =
@@ -439,15 +442,16 @@ let find_sym_and_try_decompile binf cu_name sym_addr fun_select =
   try
     let name = Symbols.symbol_name sym binf.strtab in
     if fun_select name then begin
-      let ftype, blk_arr = decompile_sym binf sym in
-      let cvt = Ctree.convert_function name ftype blk_arr in
-      Cprint.print stdout [cvt];
+      let ftype, vars, blk_arr = decompile_sym binf sym in
+      (*let cvt = Ctree.convert_function name ftype vars blk_arr in
+      Cprint.print stdout [cvt];*)
       Log.printf 1 "PASS\n";
       { cu_name = cu_name; fn_name = name; fn_type = ftype;
-	cu_blkarr = blk_arr }
+	cu_blkarr = blk_arr; cu_vars = vars }
     end else
       { cu_name = cu_name; fn_name = "<skipped>";
-	fn_type = Function.dummy_fn_info; cu_blkarr = [| |] }
+	fn_type = Function.dummy_fn_info; cu_blkarr = [| |];
+	cu_vars = Hashtbl.create 1 }
   with x ->
     if not !continue_after_error then
       match x with
@@ -458,7 +462,8 @@ let find_sym_and_try_decompile binf cu_name sym_addr fun_select =
     else begin
       Log.printf 1 "FAIL\n";
       { cu_name = cu_name; fn_name ="<decompilation failed>";
-	fn_type = Function.dummy_fn_info; cu_blkarr = [| |] }
+	fn_type = Function.dummy_fn_info; cu_blkarr = [| |];
+	cu_vars = Hashtbl.create 1 }
     end
 
 let try_emit_decl binf cu_inf dwcode ?children attrs =
@@ -556,6 +561,12 @@ let scan_compunits ?(cu_select = fun _ -> true) ?(fun_select = fun _ -> true)
         Resolve_section.resolve conv_cu.cu_blkarr binf.rodata
 				binf.rodata_sliced in
       { conv_cu with cu_blkarr = blk_arr' })
+    converted_compunits;
+  List.iter
+    (fun conv_cu ->
+      let cvt = Ctree.convert_function conv_cu.fn_name conv_cu.fn_type
+				       conv_cu.cu_vars conv_cu.cu_blkarr in
+      Cprint.print stdout [cvt])
     converted_compunits
 
 let decompile_something () =
@@ -566,6 +577,15 @@ let _ =
   (*decompile_something*) ()
   (*Log.loglevel := 2;
   scan_compunits binf *)
+
+let parse_string str =
+  let fname, chan =
+    Filename.open_temp_file ~mode:[Open_text; Open_trunc] "cc" ".c" in
+  output_string chan str;
+  close_out chan;
+  let result = Frontc.parse_file fname stdout in
+  Sys.remove fname;
+  result
 
 (*let pubnames = Dwarfreader.parse_all_pubname_data binf.debug_pubnames
 

@@ -6,12 +6,12 @@ let convert_basetype ctyp =
   let rec convert = function
     Ctype.C_void -> VOID
   | Ctype.C_longlong -> INT (LONG_LONG, SIGNED)
-  | Ctype.C_int
+  | Ctype.C_int -> INT (NO_SIZE, NO_SIGN)
   | Ctype.C_signed Ctype.C_int -> INT (NO_SIZE, SIGNED)
   | Ctype.C_unsigned Ctype.C_int -> INT (NO_SIZE, UNSIGNED)
-  | Ctype.C_short
+  | Ctype.C_short -> INT (SHORT, NO_SIGN)
   | Ctype.C_signed Ctype.C_short -> INT (SHORT, SIGNED)
-  | Ctype.C_char
+  | Ctype.C_char -> CHAR NO_SIGN
   | Ctype.C_unsigned Ctype.C_char -> CHAR UNSIGNED
   | Ctype.C_signed Ctype.C_char -> CHAR SIGNED
   | Ctype.C_float -> FLOAT false
@@ -39,7 +39,27 @@ let convert_basetype ctyp =
     base_type, storage, [name] in
   convert ctyp
 
-let convert_function fname ftype blk_arr =
+let rec basetype_for_type = function
+    Ctype.C_pointer x -> basetype_for_type x
+  | Ctype.C_array (_, x) -> basetype_for_type x
+  | Ctype.C_const (Ctype.C_pointer x) -> basetype_for_type x
+  | Ctype.C_volatile (Ctype.C_pointer x) -> basetype_for_type x
+  | x -> x
+
+(* Make a Cabs.definition list for a Hashtbl (from ssa names to) variables,
+   VARS.  *)
+
+let convert_vardecls vars =
+  Hashtbl.fold
+    (fun _ (name, ctype) decllist ->
+      let basetype = basetype_for_type ctype in
+      let name = name, convert_basetype ctype, [], NOTHING in
+      let decl = DECDEF (convert_basetype basetype, NO_STORAGE, [name]) in
+      decl :: decllist)
+    vars
+    []
+
+let convert_function fname ftype vars blk_arr =
   let return_type = convert_basetype ftype.Function.return in
   let args = ref [] in
   let nargs = Array.length ftype.Function.args in
@@ -52,7 +72,8 @@ let convert_function fname ftype blk_arr =
   let proto = return_type, !args, false in
   let return_name = fname, PROTO proto, [], NOTHING in
   let return_singlename = return_type, NO_STORAGE, return_name in
-  let body = [], NOP in
+  let vardecls = convert_vardecls vars in
+  let body = vardecls, NOP in
   FUNDEF (return_singlename, body)
   
 let convert_typedef typename dtype =
