@@ -765,8 +765,8 @@ let finish_block block_id ?chain insnlist bseq bseq_cons =
 	  let fallthru = C.Control (C.Jump chain) in
 	  CS.snoc insnlist fallthru
     end in
-  let name = name_for_block_id block_id in
-  let blk = Block.make_block name insnlist' in
+  (*let name = name_for_block_id block_id in*)
+  let blk = Block.make_block block_id insnlist' in
   bseq_cons block_id blk bseq
 
 let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =

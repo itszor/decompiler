@@ -137,7 +137,7 @@ let eabi_pre_prologue ft start_addr inforec real_entry_point =
     else
       Insn_to_ir.add_real_incoming_args ft start_addr inforec cs in
   let cs = CS.snoc cs (C.Control (C.Jump real_entry_point)) in
-  Block.make_block "entry block" cs
+  Block.make_block Irtypes.Virtual_entry cs
 
 let eabi_post_epilogue () =
   let insns =
@@ -155,7 +155,7 @@ let eabi_post_epilogue () =
      C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 11));
      C.Control C.Virtual_exit] in
   let cs = CS.of_list insns in
-  Block.make_block "exit block" cs
+  Block.make_block Irtypes.Virtual_exit cs
 
 let cons_and_add_to_index blk bseq ht blockref idx =
   Hashtbl.add ht blockref !idx;
@@ -207,7 +207,7 @@ let print_blockseq_dfsinfo bseq =
     let blk = bseq.(i) in
     Log.printf 3 "blk %d, id '%s', dfnum %d, pred [%s], succ [%s], parent %s, idom %s, idomchild [%s], domfront [%s]\n"
       i
-      blk.Block.id
+      (BS.string_of_blockref blk.Block.id)
       blk.Block.dfnum
       (String.concat ", " 
 	(List.map
@@ -234,14 +234,14 @@ let print_blockseq_dfsinfo bseq =
 let dump_blockseq bs =
   BS.iter
     (fun block ->
-      Log.printf 3 "block id \"%s\":\n" block.Block.id;
-      Log.printf 3 "%s\n" (Ir.Ir.string_of_codeseq block.Block.code))
+      Log.printf 3 "block id \"%s\":\n" (BS.string_of_blockref block.Block.id);
+      Log.printf 3 "%s\n" (C.string_of_codeseq block.Block.code))
     bs
 
 let dump_blockarr bs =
   Array.iter
     (fun block ->
-      Log.printf 3 "block id \"%s\":\n" block.Block.id;
+      Log.printf 3 "block id \"%s\":\n" (BS.string_of_blockref block.Block.id);
       Log.printf 3 "%s\n" (Ir.Ir.string_of_codeseq block.Block.code))
     bs
 
@@ -275,7 +275,8 @@ let graphviz blk_arr =
   let fh = open_out "func.gv" in
   Printf.fprintf fh "digraph func {\n";
   for i = 0 to Array.length blk_arr - 1 do
-    Printf.fprintf fh "n%d [label=\"%s\"];\n" i blk_arr.(i).Block.id;
+    Printf.fprintf fh "n%d [label=\"%s\"];\n" i
+      (BS.string_of_blockref blk_arr.(i).Block.id);
     List.iter
       (fun successor ->
 	Printf.fprintf fh "n%d -> n%d;\n" i successor.Block.dfnum)
@@ -430,7 +431,7 @@ type converted_cu =
     cu_name : string;
     fn_name : string;
     fn_type : Function.function_info;
-    cu_blkarr : C.code CS.t Block.block array;
+    cu_blkarr : (Irtypes.ir_blockref, C.code CS.t) Block.block array;
     cu_vars : (CT.reg * int, string * Ctype.ctype) Hashtbl.t
   }
 

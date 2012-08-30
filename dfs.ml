@@ -97,7 +97,8 @@ module Dfs (CT : Code.CODETYPES) (CS : Code.CODESEQ) (BS : Code.BLOCKSEQ) =
 	  if blk.dfnum <> -1 then
 	    BS.cons blk blks
 	  else begin
-	    Log.printf 3 "Removing unreachable block with id: '%s'\n" blk.id;
+	    Log.printf 3 "Removing unreachable block with id: '%s'\n"
+	      (BS.string_of_blockref blk.id);
 	    blks
 	  end)
 	blks

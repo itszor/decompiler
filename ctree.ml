@@ -59,6 +59,11 @@ let convert_vardecls vars =
     vars
     []
 
+(* Convert a block of code.  *)
+
+let convert_block blk =
+  ()
+
 let convert_function fname ftype vars blk_arr =
   let return_type = convert_basetype ftype.Function.return in
   let args = ref [] in

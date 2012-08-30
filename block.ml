@@ -1,10 +1,10 @@
-type 'code block =
+type ('idtype, 'code) block =
   {
     mutable code : 'code;
-    id : string;
-    mutable predecessors : 'code block list;
-    mutable successors : 'code block list;
-    mutable parent : 'code block option;
+    id : 'idtype;
+    mutable predecessors : ('idtype, 'code) block list;
+    mutable successors : ('idtype, 'code) block list;
+    mutable parent : ('idtype, 'code) block option;
     mutable dfnum : int;
     mutable ancestor : int option;
     mutable semi : int option;
