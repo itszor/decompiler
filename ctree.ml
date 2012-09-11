@@ -59,10 +59,25 @@ let convert_vardecls vars =
     vars
     []
 
+let seq_append seq comp =
+  match seq with
+    NOP -> comp
+  | cur -> SEQUENCE (cur, comp)
+
 (* Convert a block of code.  *)
 
-let convert_block blk =
-  ()
+let convert_block blk seq =
+  seq_append seq (LABEL (Ir.IrBS.string_of_blockref blk.Block.id, NOP))
+
+let convert_blocks blk_arr =
+  Array.fold_left
+    (fun seq blk ->
+      match blk.Block.id with
+        Irtypes.Virtual_entry
+      | Irtypes.Virtual_exit -> seq
+      | _ -> convert_block blk seq)
+    NOP
+    blk_arr
 
 let convert_function fname ftype vars blk_arr =
   let return_type = convert_basetype ftype.Function.return in
@@ -78,7 +93,8 @@ let convert_function fname ftype vars blk_arr =
   let return_name = fname, PROTO proto, [], NOTHING in
   let return_singlename = return_type, NO_STORAGE, return_name in
   let vardecls = convert_vardecls vars in
-  let body = vardecls, NOP in
+  let fn_body = convert_blocks blk_arr in
+  let body = vardecls, fn_body in
   FUNDEF (return_singlename, body)
   
 let convert_typedef typename dtype =
