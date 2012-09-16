@@ -428,6 +428,7 @@ let continue_after_error = ref false
 
 type converted_cu =
   {
+    cu_info : cu_info;
     cu_name : string;
     fn_name : string;
     fn_type : Function.function_info;
@@ -435,7 +436,7 @@ type converted_cu =
     cu_vars : (CT.reg * int, string * Ctype.ctype) Hashtbl.t
   }
 
-let find_sym_and_try_decompile binf cu_name sym_addr fun_select =
+let find_sym_and_try_decompile binf cu_inf cu_name sym_addr fun_select =
   let sym = Symbols.find_symbol_by_addr
     ~filter:(fun sym -> Symbols.symbol_type sym = Symbols.STT_FUNC)
     binf.symbols
@@ -447,10 +448,10 @@ let find_sym_and_try_decompile binf cu_name sym_addr fun_select =
       (*let cvt = Ctree.convert_function name ftype vars blk_arr in
       Cprint.print stdout [cvt];*)
       Log.printf 1 "PASS\n";
-      { cu_name = cu_name; fn_name = name; fn_type = ftype;
+      { cu_info = cu_inf; cu_name = cu_name; fn_name = name; fn_type = ftype;
 	cu_blkarr = blk_arr; cu_vars = vars }
     end else
-      { cu_name = cu_name; fn_name = "<skipped>";
+      { cu_info = cu_inf; cu_name = cu_name; fn_name = "<skipped>";
 	fn_type = Function.dummy_fn_info; cu_blkarr = [| |];
 	cu_vars = Hashtbl.create 1 }
   with x ->
@@ -462,7 +463,7 @@ let find_sym_and_try_decompile binf cu_name sym_addr fun_select =
       | _ -> raise x
     else begin
       Log.printf 1 "FAIL\n";
-      { cu_name = cu_name; fn_name ="<decompilation failed>";
+      { cu_info = cu_inf; cu_name = cu_name; fn_name ="<decompilation failed>";
 	fn_type = Function.dummy_fn_info; cu_blkarr = [| |];
 	cu_vars = Hashtbl.create 1 }
     end
@@ -494,7 +495,7 @@ let scan_dietab_cu binf cu_inf cu_name die fun_select prog =
 	begin try
 	  let lowpc = get_attr_address attrs DW_AT_low_pc in
           let conv_cu =
-	    find_sym_and_try_decompile binf cu_name lowpc fun_select in
+	    find_sym_and_try_decompile binf cu_inf cu_name lowpc fun_select in
 	  scan sibl (conv_cu :: prog')
 	with Not_found ->
 	  let inlined = get_attr_int attrs DW_AT_inline
@@ -510,7 +511,7 @@ let scan_dietab_cu binf cu_inf cu_name die fun_select prog =
 	begin try
 	  let lowpc = get_attr_address attrs DW_AT_low_pc in
           let conv_cu =
-	    find_sym_and_try_decompile binf cu_name lowpc fun_select in
+	    find_sym_and_try_decompile binf cu_inf cu_name lowpc fun_select in
 	  scan sibl (conv_cu :: prog')
 	with Not_found ->
 	  let inlined = get_attr_int attrs DW_AT_inline
@@ -555,18 +556,19 @@ let scan_compunits ?(cu_select = fun _ -> true) ?(fun_select = fun _ -> true)
   Log.printf 1 "*** slice rodata section by symbols ***\n";
   Slice_section.symbols binf.rodata_sliced binf.symbols binf.strtab rodata_sec;
   Log.printf 1 "*** resolving rodata section references ***\n";
-  List.map
+  let converted_compunits = List.map
     (fun conv_cu ->
       Log.printf 2 "--- resolving %s:%s ---\n" conv_cu.cu_name conv_cu.fn_name;
       let blk_arr' =
         Resolve_section.resolve conv_cu.cu_blkarr binf.rodata
 				binf.rodata_sliced in
       { conv_cu with cu_blkarr = blk_arr' })
-    converted_compunits;
+    converted_compunits in
   List.iter
     (fun conv_cu ->
       let cvt = Ctree.convert_function conv_cu.fn_name conv_cu.fn_type
-				       conv_cu.cu_vars conv_cu.cu_blkarr in
+				       conv_cu.cu_vars conv_cu.cu_info.ci_ctypes
+				       conv_cu.cu_blkarr in
       Cprint.print stdout [cvt])
     converted_compunits
 
@@ -575,9 +577,9 @@ let decompile_something () =
     ~fun_select:((=) "EmulateBuiltInFunction") binf
 
 let _ =
-  (*decompile_something*) ()
-  (*Log.loglevel := 2;
-  scan_compunits binf *)
+  (*decompile_something*)
+  (*Log.loglevel := 2; *)
+  scan_compunits binf
 
 let parse_string str =
   let fname, chan =

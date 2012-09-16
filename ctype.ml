@@ -5,6 +5,7 @@ open Dwarfreader
 type ctype =
     C_void
   | C_longlong
+  | C_long
   | C_int
   | C_short
   | C_char
@@ -30,6 +31,46 @@ and aggregate_member = {
   size : int
 }
 
+exception Non_integer
+
+let rec int_type_rank = function
+    C_char -> 1
+  | C_short -> 2
+  | C_int -> 3
+  | C_long -> 4
+  | C_longlong -> 5
+  | C_signed x -> int_type_rank x
+  | C_unsigned x -> int_type_rank x
+  | C_enum (*...*) -> int_type_rank C_int
+  | C_const x -> int_type_rank x
+  | C_volatile x -> int_type_rank x
+  | _ -> raise Non_integer
+
+let rec unsigned_int_type = function
+    C_unsigned _ -> true
+  | C_signed _ -> false
+  | C_const x -> unsigned_int_type x
+  | C_volatile x -> unsigned_int_type x
+  | C_int | C_short | C_longlong -> false
+  | C_char -> true
+  | _ -> raise Non_integer
+
+let rec promote_int_type = function
+    C_signed C_int -> C_int
+  | C_signed C_short -> C_int
+  | C_signed C_long -> C_int
+  | C_unsigned C_char -> C_int
+  | C_int -> C_int
+  | C_short -> C_int
+  | C_char -> C_int
+  | C_longlong -> C_longlong
+  | C_signed C_longlong -> C_longlong
+  | C_unsigned x -> C_unsigned (promote_int_type x)
+  | C_signed x -> C_signed (promote_int_type x)
+  | C_const x -> promote_int_type x
+  | C_volatile x -> promote_int_type x
+  | _ -> raise Non_integer
+
 type ctype_info = {
   ct_typedefs : (string, ctype) Hashtbl.t;
   ct_typetags : (string, ctype) Hashtbl.t
@@ -45,12 +86,63 @@ let rec pointer_type ct_for_cu ctyp =
       pointer_type ct_for_cu (Hashtbl.find ct_for_cu.ct_typetags tt)
   | _ -> false
 
+exception Non_pointer
+
+let rec pointed_to_type ct_for_cu ctyp =
+  match ctyp with
+    C_const c | C_volatile c -> pointed_to_type ct_for_cu c
+  | C_pointer x -> x
+  | C_typedef td ->
+      pointed_to_type ct_for_cu (Hashtbl.find ct_for_cu.ct_typedefs td)
+  | _ -> raise Non_pointer
+
+let rec type_size ct_for_cu ctyp =
+  match ctyp with
+    C_void -> 1
+  | C_char -> 1
+  | C_short -> 2
+  | C_int | C_long -> 4
+  | C_longlong -> 8
+  | C_float -> 4
+  | C_double -> 8
+  | C_const x | C_volatile x -> type_size ct_for_cu x
+  | C_pointer _ -> 4
+  | C_struct (_, agl) -> List.fold_right (fun am acc -> acc + am.size) agl 0
+  | C_union (_, agl) -> List.fold_right (fun am acc -> max acc am.size) agl 0
+  | C_array (num, els) -> num * type_size ct_for_cu els
+  | C_enum (*...*) -> 4
+  | C_funtype _ -> 4
+  | C_typedef name ->
+      type_size ct_for_cu (Hashtbl.find ct_for_cu.ct_typedefs name)
+  | C_typetag name ->
+      type_size ct_for_cu (Hashtbl.find ct_for_cu.ct_typetags name)
+
+let type_kind ct_for_cu typ =
+  if pointer_type ct_for_cu typ then
+    `ptr
+  else
+    let deref = match typ with
+      C_typedef name ->
+        Hashtbl.find ct_for_cu.ct_typedefs name
+    | C_typetag name ->
+        Hashtbl.find ct_for_cu.ct_typetags name
+    | x -> x in
+    match deref with
+      C_float -> `float
+    | C_double -> `double
+    | x ->
+        if unsigned_int_type x then
+	  `unsigned
+	else
+	  `signed
+
 let string_of_ctype ctyp =
   let rec scan = function
     C_void -> "void"
   | C_longlong -> "long long"
   | C_int -> "int"
   | C_short -> "short"
+  | C_long -> "long"
   | C_char -> "char"
   | C_float -> "float"
   | C_double -> "double"
