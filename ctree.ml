@@ -184,32 +184,60 @@ let convert_args ct_for_cu vars args =
   match args with
     C.Nary (Irtypes.Fnargs, arglist) ->
       List.map (fun arg -> convert_expr ct_for_cu vars arg) arglist
+  | _ -> failwith "unexpected"
 
-let convert_extcall ct_for_cu vars callee args returnto ret acc =
+let convert_extcall ct_for_cu vars callee args returnto ret fallthru acc =
   match callee with
     CT.Symbol (name, _)
   | CT.Finf_sym (name, _, _) ->
+      let ret_var =
+        match ret with
+	  C.Nullary Irtypes.Nop -> None
+	| C.Set (dst, C.Entity CT.Arg_out) ->
+	    Some (convert_expr ct_for_cu vars dst)
+	| _ -> failwith "unexpected" in
       let call_insn =
-        Cabs.COMPUTATION (Cabs.CALL (Cabs.VARIABLE name,
-	  convert_args ct_for_cu vars args)) in
-      seq_append acc call_insn
+        Cabs.CALL (Cabs.VARIABLE name, convert_args ct_for_cu vars args) in
+      let call_expr =
+        match ret_var with
+          None -> Cabs.COMPUTATION call_insn
+	| Some dst ->
+            Cabs.COMPUTATION (Cabs.BINARY (Cabs.ASSIGN, dst, call_insn)) in
+      let acc' = seq_append acc call_expr in
+      begin match fallthru with
+        Some fallthru when fallthru.Block.id = returnto ->
+          Log.printf 3 "fallthru matches ret";
+	  acc'
+      | _ ->
+          Log.printf 3 "fallthru doesn't match ret";
+	  let goto = Cabs.GOTO (Ir.IrBS.string_of_blockref returnto) in
+	  seq_append acc' goto
+      end
   | CT.Absolute _ -> failwith "unimplemented"
 
 let convert_return ct_for_cu vars retcode acc =
   seq_append acc (Cabs.RETURN (convert_expr ct_for_cu vars retcode))
 
+let convert_control ct_for_cu vars ctl fallthru acc =
+  match ctl with
+    C.Call_ext (_, callee, args, returnto, ret) ->
+      convert_extcall ct_for_cu vars callee args returnto ret fallthru acc
+  | C.Return retcode ->
+      convert_return ct_for_cu vars retcode acc
+  | _ ->
+      failwith (Printf.sprintf "unsupported control: %s"
+        (C.string_of_control ctl))
+
 (* Convert a block of code.  *)
 
-let convert_block blk ct_for_cu vars seq =
+let convert_block blk fallthru ct_for_cu vars seq =
   let block_seq = CS.fold_left
     (fun acc insn ->
       match insn with
         C.Set (dst, src) ->
           convert_move ct_for_cu vars dst (convert_expr ct_for_cu vars src) acc
-      | C.Control (C.Call_ext (_, callee, args, returnto, ret)) ->
-          convert_extcall ct_for_cu vars callee args returnto ret acc
-      | C.Control (C.Return retcode) ->
-          convert_return ct_for_cu vars retcode acc
+      | C.Control ctl ->
+          convert_control ct_for_cu vars ctl fallthru acc
       | C.Entity (CT.Insn_address _) -> acc
       | _ ->
           Log.printf 1 "unsupported: %s\n" (C.string_of_code insn);
@@ -219,14 +247,23 @@ let convert_block blk ct_for_cu vars seq =
   seq_append seq (LABEL (Ir.IrBS.string_of_blockref blk.Block.id, block_seq))
 
 let convert_blocks blk_arr ct_for_cu vars =
-  Array.fold_left
-    (fun seq blk ->
-      match blk.Block.id with
-        Irtypes.Virtual_entry
-      | Irtypes.Virtual_exit -> seq
-      | _ -> convert_block blk ct_for_cu vars seq)
-    NOP
-    blk_arr
+  let _, seq =
+    Array.fold_left
+      (fun (idx, seq) blk ->
+        let fallthru =
+	  if idx < Array.length blk_arr - 1 then
+	    Some blk_arr.(idx + 1)
+	  else
+	    None in
+	match blk.Block.id with
+          Irtypes.Virtual_entry
+	| Irtypes.Virtual_exit -> succ idx, seq
+	| _ ->
+	    let seq' = convert_block blk fallthru ct_for_cu vars seq in
+	    succ idx, seq')
+      (0, NOP)
+      blk_arr in
+  seq
 
 let convert_function fname ftype vars ct_for_cu blk_arr =
   let return_type = convert_basetype ftype.Function.return in
