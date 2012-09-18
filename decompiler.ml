@@ -388,13 +388,16 @@ let decompile_sym binf sym =
   Log.printf 2 "--- removing prologue/epilogue code ---\n";
   let blk_arr'' = Ce.remove_prologue_and_epilogue blk_arr' in
   dump_blockarr blk_arr'';
+  Log.printf 2 "--- remove dead code ---\n";
+  let blk_arr'3 = Dce.remove_dead_code blk_arr'' in
+  dump_blockarr blk_arr'3;
   Log.printf 2 "--- choose variable names and types ---\n";
-  let vars = Vartypes.choose_vartypes blk_arr'' cu_inf.ci_ctypes inforec in
+  let vars = Vartypes.choose_vartypes blk_arr'3 cu_inf.ci_ctypes inforec in
   Log.printf 2 "--- eliminate phi nodes ---\n";
-  IrPhiPlacement.eliminate blk_arr'';
-  dump_blockarr blk_arr'';
+  IrPhiPlacement.eliminate blk_arr'3;
+  dump_blockarr blk_arr'3;
   (*stack_coverage*)
-  ft, vars, blk_arr''
+  ft, vars, blk_arr'3
 
 let go symname =
   let sym = Symbols.find_named_symbol binf.symbols binf.strtab symname in
