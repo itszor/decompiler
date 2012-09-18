@@ -206,10 +206,10 @@ let convert_extcall ct_for_cu vars callee args returnto ret fallthru acc =
       let acc' = seq_append acc call_expr in
       begin match fallthru with
         Some fallthru when fallthru.Block.id = returnto ->
-          Log.printf 3 "fallthru matches ret";
+          Log.printf 3 "fallthru matches ret\n";
 	  acc'
       | _ ->
-          Log.printf 3 "fallthru doesn't match ret";
+          Log.printf 3 "fallthru doesn't match ret\n";
 	  let goto = Cabs.GOTO (Ir.IrBS.string_of_blockref returnto) in
 	  seq_append acc' goto
       end

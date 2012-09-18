@@ -86,7 +86,7 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
   struct
     type code =
         Reg of CT.reg
-      | SSAReg of CT.reg * int
+      | SSAReg of (CT.reg * int)
       | Load of CT.mem * code
       | Store of CT.mem * code * code
       | Immed of CT.immed

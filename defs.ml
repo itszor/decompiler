@@ -23,9 +23,9 @@ let count_uses blk_arr defs =
 	    (fun node ->
 	      match node with
 		C.Set (dst, src) -> C.Set (C.Protect dst, src)
-	      | C.SSAReg (rs, rsn) ->
+	      | C.SSAReg regid ->
 	          begin try
-		    let dinf = Hashtbl.find defs (rs, rsn) in
+		    let dinf = Hashtbl.find defs regid in
 		    dinf.num_uses <- dinf.num_uses + 1;
 		    node
 		  with Not_found ->
@@ -44,7 +44,7 @@ let get_defs blk_arr =
         (fun stmt ->
 	  C.iter
 	    (function
-	      C.Set (C.SSAReg (rd, rdn), src) ->
+	      C.Set (C.SSAReg regid, src) ->
 		let classify =
 		  match src with
 		    C.Immed imm -> Constant
@@ -56,7 +56,7 @@ let get_defs blk_arr =
 		  orig_name = None;
 		  num_uses = 0
 		} in
-		Hashtbl.add ht (rd, rdn) di
+		Hashtbl.add ht regid di
 	    | _ -> ())
 	  (C.strip_ids stmt))
 	blk.Block.code)
