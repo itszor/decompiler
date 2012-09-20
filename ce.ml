@@ -19,7 +19,34 @@ let rec def_chain defs x =
   with Not_found ->
     raise Unsafe_for_deletion
 
-let remove_prologue_and_epilogue blk_arr =
+let find_return_reg blk_arr ret_blk regno =
+  List.fold_right
+    (fun blk found ->
+      if blk.Block.id = Irtypes.Virtual_exit then
+	CS.fold_right
+          (fun stmt found' ->
+	    match stmt with
+	      C.Set (C.Entity CT.Arg_out, (C.SSAReg (r, _) as ssareg))
+	        when r = regno ->
+	        Some ssareg
+	    | _ -> found')
+	  blk.Block.code
+	  found
+      else
+        found)
+    ret_blk.Block.successors
+    None
+
+let fn_ret_out blk_arr returntype ret_blk =
+  match returntype with
+    Ctype.C_void -> C.Nullary Irtypes.Nop
+  | _ ->
+    begin match find_return_reg blk_arr ret_blk (CT.Hard_reg 0) with
+      Some ssareg -> ssareg
+    | None -> raise Not_found
+    end
+
+let remove_prologue_and_epilogue blk_arr functype =
   let defs = get_defs blk_arr in
   let defs_for_deletion = Hashtbl.create 10 in
   Array.iter
@@ -69,7 +96,9 @@ let remove_prologue_and_epilogue blk_arr =
 		  (C.string_of_code orig_src.src);
 		match orig_src.src with
 		  C.Nullary Irtypes.Special ->
-		    let ret = C.Control (C.Return (C.Nullary Irtypes.Nop)) in
+		    let rval =
+		      fn_ret_out blk_arr functype.Function.return blk in
+		    let ret = C.Control (C.Return rval) in
 		    CS.cons ret acc
 		| _ ->
 		    CS.cons stmt acc

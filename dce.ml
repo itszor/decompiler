@@ -20,8 +20,8 @@ let remove_dead_code_once blk_arr =
 		    if def.num_uses > 0 then
 		      C.Protect node
 		    else begin
-		      Log.printf 3 "Deleting stmt: %s\n"
-			(C.string_of_code stmt);
+		      Log.printf 3 "Deleting set: %s\n"
+			(C.string_of_code node);
 		      made_change := true;
 		      C.Nullary Irtypes.Nop
 		    end

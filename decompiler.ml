@@ -386,7 +386,7 @@ let decompile_sym binf sym =
   Slice_section.slice blk_arr' binf.rodata_sliced
     binf.shdr_arr.(rodata_sec).sh_addr ".rodata" symname;
   Log.printf 2 "--- removing prologue/epilogue code ---\n";
-  let blk_arr'' = Ce.remove_prologue_and_epilogue blk_arr' in
+  let blk_arr'' = Ce.remove_prologue_and_epilogue blk_arr' ft in
   dump_blockarr blk_arr'';
   Log.printf 2 "--- remove dead code ---\n";
   let blk_arr'3 = Dce.remove_dead_code blk_arr'' in
