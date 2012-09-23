@@ -130,6 +130,8 @@ let type_kind ct_for_cu typ =
     match deref with
       C_float -> `float
     | C_double -> `double
+    | C_void -> `void
+    | C_enum _ -> `unsigned
     | x ->
         if unsigned_int_type x then
 	  `unsigned

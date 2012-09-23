@@ -15,7 +15,6 @@ done
 ledit ocaml -init <(cat << EOF
 #use "topfind";;
 #camlp4o;;
-#require "camlp4.macro";;
 #require "num";;
 #require "unix";;
 #require "bitstring";;

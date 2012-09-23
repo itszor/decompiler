@@ -293,10 +293,11 @@ let graphviz blk_arr =
 (*let binf = open_file "libGLESv2.so"*)
 (*let binf = open_file "foo"*)
 (*let binf = open_file "libglslcompiler.so"*)
-let binf = open_file "tests/hello"
+(*let binf = open_file "tests/hello"*)
 (*let binf = open_file "tests/rodata"*)
 (*let binf = open_file "tests/fnargs"*)
 (*let binf = open_file "tests/structs"*)
+let binf = open_file "tests/add"
 
 let decompile_sym binf sym =
   let symname = Symbols.symbol_name sym binf.strtab in
@@ -573,16 +574,23 @@ let scan_compunits ?(cu_select = fun _ -> true) ?(fun_select = fun _ -> true)
 				       conv_cu.cu_vars conv_cu.cu_info.ci_ctypes
 				       conv_cu.cu_blkarr in
       Cprint.print stdout [cvt])
-    converted_compunits
+    (List.rev converted_compunits)
 
 let decompile_something () =
   scan_compunits ~cu_select:((=) "glsl/glslfns.c")
     ~fun_select:((=) "EmulateBuiltInFunction") binf
 
 let _ =
+  let do_all = ref false in
+  let argspec =
+    ["-a", Arg.Set do_all,
+       "Decompile all functions from all compilation units"] in
+  Arg.parse argspec (fun _ -> ()) "Usage: decompile [options]";
+  if !do_all then
+    scan_compunits binf
   (*decompile_something*)
-  (*Log.loglevel := 2; *)
-  scan_compunits binf
+  (*Log.loglevel := 2; 
+  scan_compunits binf*)
 
 let parse_string str =
   let fname, chan =

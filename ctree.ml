@@ -15,6 +15,7 @@ let convert_basetype ctyp =
   | Ctype.C_unsigned Ctype.C_int -> INT (NO_SIZE, UNSIGNED)
   | Ctype.C_short -> INT (SHORT, NO_SIGN)
   | Ctype.C_signed Ctype.C_short -> INT (SHORT, SIGNED)
+  | Ctype.C_unsigned Ctype.C_short -> INT (SHORT, UNSIGNED)
   | Ctype.C_char -> CHAR NO_SIGN
   | Ctype.C_unsigned Ctype.C_char -> CHAR UNSIGNED
   | Ctype.C_signed Ctype.C_char -> CHAR SIGNED
@@ -87,28 +88,6 @@ let operand_type vars op =
       Log.printf 1 "Warning, unsupported operand %s\n" (C.string_of_code op);
       Ctype.C_void
 
-let convert_operand vars op =
-  match op with
-    C.Immed imm ->
-      Cabs.CONSTANT (Cabs.CONST_INT (Int32.to_string imm))
-  | C.SSAReg (r, rn) ->
-      begin try
-        let name, typ = Hashtbl.find vars (r, rn) in
-	Cabs.VARIABLE name
-      with Not_found ->
-	Cabs.VARIABLE (Printf.sprintf
-	  "(unknown var %s)" (Typedb.string_of_ssa_reg r rn))
-      end
-  | C.Entity (CT.Section name) ->
-      Cabs.VARIABLE ("SECTION_" ^ name)
-  | C.Entity (CT.String_constant str) ->
-      Cabs.CONSTANT (Cabs.CONST_STRING str)
-  | C.Nullary Irtypes.Nop ->
-      Cabs.NOTHING
-  | _ ->
-      Log.printf 1 "unsupported: %s\n" (C.string_of_code op);
-      failwith "unsupported"
-
 let typesize_scale typesize op =
   match op with
     C.Immed imm ->
@@ -119,24 +98,57 @@ let typesize_scale typesize op =
         Log.printf 1 "typesize: %d, op %s\n" typesize (C.string_of_code op);
         assert false
       end
+  | C.SSAReg regid ->
+      C.Binary (Irtypes.Div, op, C.Immed (Int32.of_int typesize))
   | _ ->
       Log.printf 1 "typesize_scale: unsupported: %s\n" (C.string_of_code op);
       failwith "unsupported"
 
-let convert_binop ct_for_cu vars binop op1 op2 =
+let rec convert_expr ct_for_cu vars op =
+  match op with
+    C.Binary (binop, op1, op2) ->
+      convert_binop ct_for_cu vars binop op1 op2
+  | C.Unary (unop, op1) ->
+      convert_unop ct_for_cu vars unop op1
+  | C.Immed imm ->
+      Cabs.CONSTANT (Cabs.CONST_INT (Int32.to_string imm))
+  | C.SSAReg (r, rn) ->
+      begin try
+        let name, typ = Hashtbl.find vars (r, rn) in
+	Cabs.VARIABLE name
+      with Not_found ->
+	Cabs.VARIABLE (Printf.sprintf
+	  "(unknown var %s)" (Typedb.string_of_ssa_reg r rn))
+      end
+  | C.Load (accsz, addr) ->
+      let conv_addr = convert_expr ct_for_cu vars addr in
+      Cabs.UNARY (Cabs.MEMOF, conv_addr)
+  | C.Entity (CT.Section name) ->
+      Cabs.VARIABLE ("SECTION_" ^ name)
+  | C.Entity (CT.String_constant str) ->
+      Cabs.CONSTANT (Cabs.CONST_STRING str)
+  | C.Entity (CT.Symbol_addr (nm, elfsym)) ->
+      Cabs.UNARY (Cabs.ADDROF, Cabs.VARIABLE nm)
+  | C.Nullary Irtypes.Nop ->
+      Cabs.NOTHING
+  | _ ->
+      Log.printf 1 "convert_expr: unsupported: %s\n" (C.string_of_code op);
+      Cabs.NOTHING
+
+and convert_binop ct_for_cu vars binop op1 op2 =
   let ot1 = operand_type vars op1
   and ot2 = operand_type vars op2 in
   let tk1 = Ctype.type_kind ct_for_cu ot1
   and tk2 = Ctype.type_kind ct_for_cu ot2 in
-  let op1' = convert_operand vars op1
-  and op2' = convert_operand vars op2 in
+  let op1' = convert_expr ct_for_cu vars op1
+  and op2' = convert_expr ct_for_cu vars op2 in
   match binop, tk1, tk2 with
     Irtypes.Add, (`signed|`unsigned), (`signed|`unsigned) ->
       Cabs.BINARY (Cabs.ADD, op1', op2')
   | Irtypes.Add, `ptr, (`signed|`unsigned) ->
       let ptt = Ctype.pointed_to_type ct_for_cu ot1 in
       let typesize = Ctype.type_size ct_for_cu ptt in
-      let mod_op2 = convert_operand vars (typesize_scale typesize op2) in
+      let mod_op2 = convert_expr ct_for_cu vars (typesize_scale typesize op2) in
       Cabs.BINARY (Cabs.ADD, op1', mod_op2)
   | Irtypes.Add, (`signed|`unsigned), `ptr ->
       Cabs.BINARY (Cabs.ADD, op1', op2')
@@ -145,48 +157,48 @@ let convert_binop ct_for_cu vars binop op1 op2 =
   | Irtypes.Sub, `ptr, (`signed|`unsigned) ->
       let ptt = Ctype.pointed_to_type ct_for_cu ot1 in
       let typesize = Ctype.type_size ct_for_cu ptt in
-      let mod_op2 = convert_operand vars (typesize_scale typesize op2) in
+      let mod_op2 = convert_expr ct_for_cu vars (typesize_scale typesize op2) in
       Cabs.BINARY (Cabs.SUB, op1', mod_op2)
   | Irtypes.Sub, `ptr, `ptr ->
       Cabs.BINARY (Cabs.SUB, op1', op2')
+  | Irtypes.Lsl, (`signed|`unsigned), (`signed|`unsigned) ->
+      Cabs.BINARY (Cabs.SHL, op1', op2')
+  | Irtypes.Lsr, (`signed|`unsigned), (`signed|`unsigned) ->
+      let op1'' = Cabs.CAST (Cabs.INT (Cabs.NO_SIZE, Cabs.UNSIGNED), op1') in
+      Cabs.BINARY (Cabs.SHR, op1'', op2')
+  | Irtypes.Asr, (`signed|`unsigned), (`signed|`unsigned) ->
+      let op1'' = Cabs.CAST (Cabs.INT (Cabs.NO_SIZE, Cabs.SIGNED), op1') in
+      Cabs.BINARY (Cabs.SHR, op1'', op2')
   | _ ->
       Log.printf 1 "unsupported binop: %s (%s, %s)\n"
 	(CT.string_of_binop binop) (Ctype.string_of_ctype ot1)
 	(Ctype.string_of_ctype ot2);
       Cabs.NOTHING
 
-let convert_unop ct_for_cu vars unop op1 =
+and convert_unop ct_for_cu vars unop op1 =
   let ot1 = operand_type vars op1 in
   let tk1 = Ctype.type_kind ct_for_cu ot1 in
-  let op1' = convert_operand vars op1 in
+  let op1' = convert_expr ct_for_cu vars op1 in
   match unop, tk1 with
     _ ->
       Log.printf 1 "unsupported unop: %s (%s)\n"
 	(CT.string_of_unop unop) (Ctype.string_of_ctype ot1);
       Cabs.NOTHING
 
-let convert_move ct_for_cu vars dst conv_rhs acc =
-  let dst' = convert_operand vars dst in
+and convert_move ct_for_cu vars dst conv_rhs acc =
+  let dst' = convert_expr ct_for_cu vars dst in
   let move_insn = Cabs.COMPUTATION
 		    (Cabs.BINARY (Cabs.ASSIGN, dst', conv_rhs)) in
   seq_append acc move_insn
-
-let convert_expr ct_for_cu vars expr =
-  match expr with
-    C.Binary (binop, op1, op2) ->
-      convert_binop ct_for_cu vars binop op1 op2
-  | C.Unary (unop, op1) ->
-      convert_unop ct_for_cu vars unop op1
-  | src ->
-      convert_operand vars src
       
-let convert_args ct_for_cu vars args =
+and convert_args ct_for_cu vars args =
   match args with
     C.Nary (Irtypes.Fnargs, arglist) ->
       List.map (fun arg -> convert_expr ct_for_cu vars arg) arglist
+  | C.Nullary Irtypes.Nop -> []
   | _ -> failwith "unexpected"
 
-let convert_extcall ct_for_cu vars callee args returnto ret fallthru acc =
+and convert_extcall ct_for_cu vars callee args returnto ret fallthru acc =
   match callee with
     CT.Symbol (name, _)
   | CT.Finf_sym (name, _, _) ->
@@ -206,24 +218,69 @@ let convert_extcall ct_for_cu vars callee args returnto ret fallthru acc =
       let acc' = seq_append acc call_expr in
       begin match fallthru with
         Some fallthru when fallthru.Block.id = returnto ->
-          Log.printf 3 "fallthru matches ret\n";
 	  acc'
       | _ ->
-          Log.printf 3 "fallthru doesn't match ret\n";
 	  let goto = Cabs.GOTO (Ir.IrBS.string_of_blockref returnto) in
 	  seq_append acc' goto
       end
   | CT.Absolute _ -> failwith "unimplemented"
 
-let convert_return ct_for_cu vars retcode acc =
+and convert_return ct_for_cu vars retcode acc =
   seq_append acc (Cabs.RETURN (convert_expr ct_for_cu vars retcode))
 
-let convert_control ct_for_cu vars ctl fallthru acc =
+and convert_branch ct_for_cu vars cond trueblk falseblk fallthru acc =
+  let cond' = convert_expr ct_for_cu vars cond in
+  let ifstmt =
+    match fallthru with
+      Some fallthru when fallthru.Block.id = trueblk ->
+	Cabs.IF (cond', Cabs.BLOCK ([], Cabs.NOP),
+		 Cabs.GOTO (Ir.IrBS.string_of_blockref falseblk))
+    | Some fallthru when fallthru.Block.id = falseblk ->
+	Cabs.IF (cond', Cabs.GOTO (Ir.IrBS.string_of_blockref trueblk),
+		 Cabs.NOP)
+    | _ ->
+	Cabs.IF (cond', Cabs.GOTO (Ir.IrBS.string_of_blockref trueblk),
+		 Cabs.GOTO (Ir.IrBS.string_of_blockref falseblk)) in
+  seq_append acc ifstmt
+
+and convert_jump ct_for_cu vars dst fallthru acc =
+  match fallthru with
+    Some fallthru when fallthru.Block.id = dst ->
+      acc
+  | _ ->
+      Cabs.GOTO (Ir.IrBS.string_of_blockref dst)
+
+and convert_compjump ct_for_cu vars swval dests fallthru acc =
+  let caseseq, _ =
+    List.fold_left
+      (fun (acc, num) which ->
+        let thiscase =
+	  Cabs.CASE (Cabs.CONSTANT (Cabs.CONST_INT (string_of_int num)),
+		     Cabs.GOTO (Ir.IrBS.string_of_blockref which)) in
+	seq_append acc thiscase, succ num)
+      (Cabs.NOP, 0)
+      dests in
+  (* Redundant...  *)
+  (* let caseseq =
+    match fallthru with
+      Some fallthru ->
+        seq_append caseseq (Cabs.DEFAULT (Cabs.GOTO 
+	  (Ir.IrBS.string_of_blockref fallthru.Block.id)))
+    | _ -> caseseq in *)
+  Cabs.SWITCH (convert_expr ct_for_cu vars swval, Cabs.BLOCK ([], caseseq))
+
+and convert_control ct_for_cu vars ctl fallthru acc =
   match ctl with
     C.Call_ext (_, callee, args, returnto, ret) ->
       convert_extcall ct_for_cu vars callee args returnto ret fallthru acc
   | C.Return retcode ->
       convert_return ct_for_cu vars retcode acc
+  | C.Branch (cond, trueblk, falseblk) ->
+      convert_branch ct_for_cu vars cond trueblk falseblk fallthru acc
+  | C.Jump dst ->
+      convert_jump ct_for_cu vars dst fallthru acc
+  | C.CompJump (swval, dests) ->
+      convert_compjump ct_for_cu vars swval dests fallthru acc
   | _ ->
       failwith (Printf.sprintf "unsupported control: %s"
         (C.string_of_control ctl))
@@ -236,6 +293,12 @@ let convert_block blk fallthru ct_for_cu vars seq =
       match insn with
         C.Set (dst, src) ->
           convert_move ct_for_cu vars dst (convert_expr ct_for_cu vars src) acc
+      | C.Store (accsz, addr, valu) ->
+	  let conv_addr = convert_expr ct_for_cu vars addr in
+	  let store =
+	    Cabs.BINARY (Cabs.ASSIGN, Cabs.UNARY (Cabs.MEMOF, conv_addr),
+			 convert_expr ct_for_cu vars valu) in
+	  seq_append acc (Cabs.COMPUTATION store)
       | C.Control ctl ->
           convert_control ct_for_cu vars ctl fallthru acc
       | C.Entity (CT.Insn_address _) -> acc

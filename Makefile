@@ -21,7 +21,8 @@ BITSTRING_PP := -pp "camlp4of bitstring/bitstring.cma \
 
 SYNTAX := -syntax camlp4o
 
-PACKAGES := -package camlp4.macro,bitstring,bitstring.syntax,num,unix,FrontC
+#PACKAGES := -package camlp4.macro,bitstring,bitstring.syntax,num,unix,FrontC
+PACKAGES := -package bitstring,bitstring.syntax,num,unix,FrontC
 
 # Source plus generated files.
 OCAMLSRC := log.ml coverage.ml elfreader.ml dwarfreader.ml dwarfprint.ml \

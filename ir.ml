@@ -113,6 +113,7 @@ module IrCT =
     | Vcmp -> "vcmp"
     | Vcmpe -> "vcmpe"
     | Concat -> "concat"
+    | Div -> "div"
 
     let string_of_triop = function
       Adc -> "adc"
