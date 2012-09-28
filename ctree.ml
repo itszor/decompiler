@@ -350,4 +350,4 @@ let convert_typedef typename dtype =
   let basetype = convert_basetype dtype in
   let name = typename, basetype, [], NOTHING in
   let namegroup = basetype, NO_STORAGE, [name] in 
-  TYPEDEF namegroup
+  TYPEDEF (namegroup, [])

@@ -76,8 +76,7 @@ let string_of_tag = function
   | DW_TAG_imported_unit -> "imported_unit"
   | DW_TAG_condition -> "condition"
   | DW_TAG_shared_type -> "shared_type"
-  | DW_TAG_lo_user -> "lo_user"
-  | DW_TAG_hi_user -> "hi_user"
+  | DW_TAG_lo_user x -> "lo_user+" ^ (string_of_int x)
 
 let is_inlined_aggregate = function
     Die_tree ((DW_TAG_structure_type, attrs), _, _)

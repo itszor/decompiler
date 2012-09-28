@@ -441,10 +441,14 @@ type converted_cu =
   }
 
 let find_sym_and_try_decompile binf cu_inf cu_name sym_addr fun_select =
-  let sym = Symbols.find_symbol_by_addr
-    ~filter:(fun sym -> Symbols.symbol_type sym = Symbols.STT_FUNC)
-    binf.symbols
-    sym_addr in
+  let sym = try
+    Symbols.find_symbol_by_addr
+      ~filter:(fun sym -> Symbols.symbol_type sym = Symbols.STT_FUNC)
+      binf.symbols
+      sym_addr
+  with Not_found ->
+    Log.printf 1 "Symbol at addr %lx not found\n" sym_addr;
+    raise Not_found in
   try
     let name = Symbols.symbol_name sym binf.strtab in
     if fun_select name then begin
@@ -502,7 +506,10 @@ let scan_dietab_cu binf cu_inf cu_name die fun_select prog =
 	    find_sym_and_try_decompile binf cu_inf cu_name lowpc fun_select in
 	  scan sibl (conv_cu :: prog')
 	with Not_found ->
-	  let inlined = get_attr_int attrs DW_AT_inline
+	  let inlined =
+	    try
+	      get_attr_int attrs DW_AT_inline
+	    with Not_found -> 0
 	  and name = get_attr_string attrs DW_AT_name in
 	  if inlined = 1 then begin
 	    Log.printf 1

@@ -119,8 +119,7 @@ type dwarf_tag =
   | DW_TAG_imported_unit
   | DW_TAG_condition
   | DW_TAG_shared_type
-  | DW_TAG_lo_user
-  | DW_TAG_hi_user
+  | DW_TAG_lo_user of int
 
 let parse_tag = function
     0x01 -> DW_TAG_array_type
@@ -180,8 +179,7 @@ let parse_tag = function
   | 0x3d -> DW_TAG_imported_unit
   | 0x3f -> DW_TAG_condition
   | 0x40 -> DW_TAG_shared_type
-  | 0x4080 -> DW_TAG_lo_user
-  | 0xffff -> DW_TAG_hi_user
+  | x when x >= 0x4080 && x <= 0xffff -> DW_TAG_lo_user (x - 0x4080)
   | _ -> raise (Dwarf_parse_error "parse_tag")
 
 let parse_child_determination dwbits =
@@ -277,8 +275,7 @@ type dwarf_attribute =
   | DW_AT_elemental
   | DW_AT_pure
   | DW_AT_recursive
-  | DW_AT_lo_user
-  | DW_AT_hi_user
+  | DW_AT_lo_user of int
 
 let parse_attribute = function
     0x01 -> DW_AT_sibling
@@ -367,8 +364,7 @@ let parse_attribute = function
   | 0x66 -> DW_AT_elemental
   | 0x67 -> DW_AT_pure
   | 0x68 -> DW_AT_recursive
-  | 0x2000 -> DW_AT_lo_user
-  | 0x3fff -> DW_AT_hi_user
+  | x when x >= 0x2000 && x <= 0x3fff -> DW_AT_lo_user (x - 0x2000)
   | _ -> raise (Dwarf_parse_error "parse_attribute")
 
 type dwarf_form =
@@ -514,7 +510,8 @@ let parse_abbrevs dwbits =
   List.rev (build [] dwbits)*)
 
 type dwarf_op = [
-    `DW_OP_abs
+    `DW_OP_obsolete of int
+  | `DW_OP_abs
   | `DW_OP_addr of int64
   | `DW_OP_and
   | `DW_OP_bit_piece of Big_int.big_int * Big_int.big_int
@@ -545,10 +542,9 @@ type dwarf_op = [
   | `DW_OP_form_tls_address
   | `DW_OP_ge
   | `DW_OP_gt
-  | `DW_OP_hi_user
   | `DW_OP_le
   | `DW_OP_lit of int
-  | `DW_OP_lo_user
+  | `DW_OP_lo_user of int
   | `DW_OP_lt
   | `DW_OP_minus
   | `DW_OP_mod
@@ -584,7 +580,8 @@ let sign_extend x bit =
 let parse_operation dwbits ~addr_size =
   let next_byte = Bitstring.dropbits 8 dwbits in
   bitmatch dwbits with
-    { 0x03 : 8 : littleendian;
+    { 0x00 : 8 : littleendian } -> `DW_OP_obsolete 0, next_byte
+  | { 0x03 : 8 : littleendian;
       addr : addr_size : littleendian;
       rest : -1 : bitstring } -> `DW_OP_addr addr, rest
   | { 0x06 : 8 : littleendian } -> `DW_OP_deref, next_byte
@@ -713,9 +710,9 @@ let parse_operation dwbits ~addr_size =
         let st, en_rest = parse_uleb128 st_en_rest in
 	let en, rest = parse_uleb128 en_rest in
         `DW_OP_bit_piece (st, en), rest
-  | { 0xe0 : 8 : littleendian } -> `DW_OP_lo_user, next_byte
-  | { 0xff : 8 : littleendian } -> `DW_OP_hi_user, next_byte
-  | { x : 8 : littleendian } -> raise (Dwarf_parse_error "parse_operation")
+  | { x : 8 : littleendian } when x >= 0xe0 && x <= 0xff ->
+      `DW_OP_lo_user (x - 0xe0), next_byte
+  | { x : 8 : littleendian } -> raise (Dwarf_parse_error ("parse_operation " ^ string_of_int x))
 
 type comp_unit_header =
   {
