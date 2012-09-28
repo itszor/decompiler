@@ -297,7 +297,7 @@ let graphviz blk_arr =
 (*let binf = open_file "tests/rodata"*)
 (*let binf = open_file "tests/fnargs"*)
 (*let binf = open_file "tests/structs"*)
-let binf = open_file "tests/add"
+(*let binf = open_file "tests/add"*)
 
 let decompile_sym binf sym =
   let symname = Symbols.symbol_name sym binf.strtab in
@@ -400,11 +400,11 @@ let decompile_sym binf sym =
   (*stack_coverage*)
   ft, vars, blk_arr'3
 
-let go symname =
+(*let go symname =
   let sym = Symbols.find_named_symbol binf.symbols binf.strtab symname in
-  decompile_sym binf sym
+  decompile_sym binf sym*)
 
-let really_go () =
+(*let really_go () =
   Log.loglevel := 4;
   (*go "InitAccumUSECodeBlocks"*)
   (*;go "AddComparisonToUFCode"*)
@@ -420,7 +420,7 @@ let really_go () =
   dump_blockarr blk_arr1'
   (*let blk_arr2' =
     Resolve_section.resolve blk_arr2 binf.rodata binf.rodata_sliced in
-  dump_blockarr blk_arr2'*)
+  dump_blockarr blk_arr2'*) *)
 
 (*let _ = really_go ()*)
 
@@ -547,6 +547,12 @@ let scan_dietab binf cu_inf cu_select fun_select prog =
         prog
   | _ -> failwith "scan_dietab"
 
+let get_cu_name cu_inf =
+  match cu_inf.ci_dies with
+    Die_node ((DW_TAG_compile_unit, attrs), children) ->
+      get_attr_string attrs DW_AT_name
+  | _ -> raise Not_found
+
 let scan_compunits ?(cu_select = fun _ -> true) ?(fun_select = fun _ -> true)
 		   binf =
   let converted_compunits =
@@ -576,18 +582,45 @@ let scan_compunits ?(cu_select = fun _ -> true) ?(fun_select = fun _ -> true)
       Cprint.print stdout [cvt])
     (List.rev converted_compunits)
 
-let decompile_something () =
+(*let decompile_something () =
   scan_compunits ~cu_select:((=) "glsl/glslfns.c")
-    ~fun_select:((=) "EmulateBuiltInFunction") binf
+    ~fun_select:((=) "EmulateBuiltInFunction") binf*)
 
 let _ =
-  let do_all = ref false in
+  let do_all = ref false
+  and list_compunits = ref false
+  and selected_compunits = ref []
+  and infile = ref "" in
   let argspec =
     ["-a", Arg.Set do_all,
-       "Decompile all functions from all compilation units"] in
+       "Decompile all functions from all compilation units";
+     "-i", Arg.Set_string infile, "Input file (ARM binary w/ debug info)";
+     "-l", Arg.Set list_compunits, "List compilation units";
+     "-s", Arg.String
+             (fun sel -> selected_compunits := sel :: !selected_compunits),
+	     "Select a compilation unit to decompile (add to list)" ] in
   Arg.parse argspec (fun _ -> ()) "Usage: decompile [options]";
+  if !infile = "" then begin
+    prerr_endline "No input file";
+    exit 1
+  end;
+  let binf = open_file !infile in
+  if !list_compunits then begin
+    Printf.printf "Compilation units:\n";
+    Hashtbl.iter
+      (fun cu_offset cu_info ->
+        let cu_name = get_cu_name cu_info in
+	Printf.printf "  %s\n" cu_name)
+      binf.cu_hash;
+    exit 0
+  end;
+  let select_cu =
+    if !selected_compunits = [] then
+      (fun _ -> true)
+    else
+      (fun name -> List.mem name !selected_compunits) in
   if !do_all then
-    scan_compunits binf
+    scan_compunits ~cu_select:select_cu binf
   (*decompile_something*)
   (*Log.loglevel := 2; 
   scan_compunits binf*)
