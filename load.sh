@@ -22,4 +22,5 @@ ledit ocaml -init <(cat << EOF
 #require "FrontC";;
 ${loads[@]}
 open Decompiler;;
-EOF)
+EOF
+)

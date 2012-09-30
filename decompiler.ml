@@ -607,27 +607,29 @@ let _ =
              (fun sel -> selected_compunits := sel :: !selected_compunits),
 	     "Select a compilation unit to decompile (add to list)" ] in
   Arg.parse argspec (fun _ -> ()) "Usage: decompile [options]";
-  if !infile = "" then begin
-    prerr_endline "No input file";
-    exit 1
-  end;
-  let binf = open_file !infile in
-  if !list_compunits then begin
-    Printf.printf "Compilation units:\n";
-    Hashtbl.iter
-      (fun cu_offset cu_info ->
-        let cu_name = get_cu_name cu_info in
-	Printf.printf "  %s\n" cu_name)
-      binf.cu_hash;
-    exit 0
-  end;
-  let select_cu =
-    if !selected_compunits = [] then
-      (fun _ -> true)
-    else
-      (fun name -> List.mem name !selected_compunits) in
-  if !do_all then
-    scan_compunits ~cu_select:select_cu binf
+  if not !Sys.interactive then begin
+    if !infile = "" then begin
+      prerr_endline "No input file";
+      exit 1
+    end;
+    let binf = open_file !infile in
+    if !list_compunits then begin
+      Printf.printf "Compilation units:\n";
+      Hashtbl.iter
+	(fun cu_offset cu_info ->
+          let cu_name = get_cu_name cu_info in
+	  Printf.printf "  %s\n" cu_name)
+	binf.cu_hash;
+      exit 0
+    end;
+    let select_cu =
+      if !selected_compunits = [] then
+	(fun _ -> true)
+      else
+	(fun name -> List.mem name !selected_compunits) in
+    if !do_all then
+      scan_compunits ~cu_select:select_cu binf
+  end
   (*decompile_something*)
   (*Log.loglevel := 2; 
   scan_compunits binf*)
