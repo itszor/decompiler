@@ -95,7 +95,7 @@ let track_pointer defs use =
       | C.Nullary Irtypes.Caller_saved
       | C.Nullary Irtypes.Special
       | C.Nullary Irtypes.Incoming_sp
-      | C.Nullary Irtypes.Arg_in
+      | C.Nullary (Irtypes.Arg_in _)
       | C.Entity CT.Arg_out
       | C.Phi _
       | C.Load _

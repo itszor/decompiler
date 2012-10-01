@@ -2,7 +2,7 @@ type ir_nulop =
     Nop
   | Untranslated
   | Caller_saved
-  | Arg_in
+  | Arg_in of int
   | Special
   | Incoming_sp
   | Declaration of Ctype.ctype

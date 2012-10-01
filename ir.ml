@@ -41,7 +41,7 @@ module IrCT =
     let string_of_nulop = function
       Nop -> "nop"
     | Untranslated -> "**UNTRANSLATED**"
-    | Arg_in -> "arg_in"
+    | Arg_in n -> Printf.sprintf "arg_in(%d)" n
     | Caller_saved -> "caller_saved"
     | Special -> "special"
     | Incoming_sp -> "incoming_sp"

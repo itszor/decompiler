@@ -358,7 +358,7 @@ let add_incoming_args ft code =
           let arg_in = C.Store (Irtypes.Word,
 	    C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
 		      C.Immed (Int32.of_int ((n - 4) * 4))),
-	    C.Nullary Irtypes.Arg_in) in
+	    C.Nullary (Irtypes.Arg_in argn)) in
 	  succ argn, CS.snoc code arg_in)
     (0, code)
     ft.Function.args in
@@ -381,7 +381,7 @@ let add_real_incoming_args ft start_addr inforec codeseq =
 	      Typedb.record_reg_info_for_id inforec reg id
 	        (Typedb.Type_known typ);
 	      let insn = C.Set (C.With_id (id, C.Reg reg),
-				C.Nullary Irtypes.Arg_in) in
+				C.Nullary (Irtypes.Arg_in i)) in
 	      succ i, CS.snoc codeseq' insn
 	  | `DW_OP_fbreg o ->
 	      let stackreg = CT.Stack o in
@@ -391,7 +391,7 @@ let add_real_incoming_args ft start_addr inforec codeseq =
 	      let insn = C.With_id (id, C.Store (Irtypes.Word,
 			   C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
 				     C.Immed (Int32.of_int o)),
-			   C.Nullary Irtypes.Arg_in)) in
+			   C.Nullary (Irtypes.Arg_in i))) in
 	      succ i, CS.snoc codeseq' insn
 	  | `DW_OP_regx r when r >= 64 && r < 96 ->
 	      let reg = CT.VFP_sreg (r - 64) in
@@ -400,7 +400,7 @@ let add_real_incoming_args ft start_addr inforec codeseq =
 	      Typedb.record_reg_info_for_id inforec reg id
 		(Typedb.Type_known typ);
 	      let insn = C.Set (C.With_id (id, C.Reg reg),
-				C.Nullary Irtypes.Arg_in) in
+				C.Nullary (Irtypes.Arg_in i)) in
 	      succ i, CS.snoc codeseq' insn
 	  | _ -> failwith "add_real_incoming_args/location"
 	  end
@@ -413,7 +413,7 @@ let add_real_incoming_args ft start_addr inforec codeseq =
         codeseq'
       else
         CS.snoc codeseq' (C.Set (C.Reg (CT.Hard_reg regnum),
-				 C.Nullary Irtypes.Arg_in)))
+				 C.Nullary (Irtypes.Arg_in regnum))))
     added_args
     [0; 1; 2; 3]
 
