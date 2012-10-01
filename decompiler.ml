@@ -499,41 +499,29 @@ let try_emit_decl binf cu_inf dwcode ?children attrs =
 let scan_dietab_cu binf cu_inf cu_name die fun_select prog =
   let rec scan die prog' =
     match die with
-      Die_tree ((DW_TAG_subprogram, attrs), children, sibl) ->
-	begin try
-	  let lowpc = get_attr_address attrs DW_AT_low_pc in
-          let conv_cu =
-	    find_sym_and_try_decompile binf cu_inf cu_name lowpc fun_select in
-	  scan sibl (conv_cu :: prog')
-	with Not_found ->
-	  let inlined =
-	    try
-	      get_attr_int attrs DW_AT_inline
-	    with Not_found -> 0
-	  and name = get_attr_string attrs DW_AT_name in
-	  if inlined = 1 then begin
-	    Log.printf 1
-	      "*** not decompiling '%s' (no out-of-line instance) ***\n" name;
-	    prog'
-	  end else
-	    failwith ("No low pc for non-inlined function " ^ name)
-	end
+      Die_tree ((DW_TAG_subprogram, attrs), _, sibl)
     | Die_node ((DW_TAG_subprogram, attrs), sibl) ->
-	begin try
-	  let lowpc = get_attr_address attrs DW_AT_low_pc in
-          let conv_cu =
-	    find_sym_and_try_decompile binf cu_inf cu_name lowpc fun_select in
-	  scan sibl (conv_cu :: prog')
-	with Not_found ->
-	  let inlined = get_attr_int attrs DW_AT_inline
-	  and name = get_attr_string attrs DW_AT_name in
-	  if inlined = 1 then begin
-	    Log.printf 1
-	      "*** not decompiling '%s' (no out-of-line instance) ***\n" name;
-	    prog'
-	  end else
-	    failwith ("no low pc for non-inlined function " ^ name)
-	end
+	let is_declaration = get_attr_bool_present attrs DW_AT_declaration in
+	if not is_declaration then begin
+	  try
+	    let lowpc = get_attr_address attrs DW_AT_low_pc in
+            let conv_cu =
+	      find_sym_and_try_decompile binf cu_inf cu_name lowpc fun_select in
+	    scan sibl (conv_cu :: prog')
+	  with Not_found ->
+	    let inlined =
+	      try
+		get_attr_int attrs DW_AT_inline
+	      with Not_found -> 0
+	    and name = get_attr_string attrs DW_AT_name in
+	    if inlined = 1 then begin
+	      Log.printf 1
+		"*** not decompiling '%s' (no out-of-line instance) ***\n" name;
+	      prog'
+	    end else
+	      failwith ("No low pc for non-inlined function " ^ name)
+	end else
+	  scan sibl prog'
     | Die_tree ((dwcode, attrs), children, sibl) ->
         try_emit_decl binf cu_inf dwcode ~children attrs;
 	scan sibl prog'
