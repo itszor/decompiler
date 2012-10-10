@@ -7,8 +7,8 @@ for x in log.cmo coverage.cmo elfreader.cmo dwarfreader.cmo \
   block.cmo ctype.cmo irtypes.cmo ir.cmo typedb.cmo ctype.cmo function.cmo \
   builtin.cmo slice_section.cmo binary_info.cmo insn_to_ir.cmo plt.cmo \
   dfs.cmo dominator.cmo phi.cmo defs.cmo ce.cmo dce.cmo minipool.cmo \
-  ptrtracking.cmo sptracking.cmo resolve_section.cmo jumptable.cmo \
-  vartypes.cmo ctree.cmo decompiler.cmo; do
+  ptrtracking.cmo resolve_section.cmo jumptable.cmo \
+  vartypes.cmo ctree.cmo args_in.cmo decompiler.cmo; do
   loads=("${loads[@]}" "#load \"$x\";;")
 done
 

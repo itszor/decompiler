@@ -38,7 +38,7 @@ let known_var vars sp_offset =
 
 module IrPhiPlacement = Phi.PhiPlacement (Ir.IrCT) (Ir.IrCS) (Ir.IrBS)
 
-let try_rewrite_var vars offset stack_vars insn rewrite_as ctypes_for_cu =
+let try_rewrite_stack_var vars offset stack_vars insn rewrite_as ctypes_for_cu =
   try
     let kvar, var_ofs = known_var vars offset in
     Log.printf 3 "Offset %d looks like variable %s (+%d)\n"
@@ -72,7 +72,15 @@ let try_rewrite_var vars offset stack_vars insn rewrite_as ctypes_for_cu =
 						   aggr_access),
 			      C.Reg sv)))
   with Not_found | Insn_to_ir.Non_aggregate ->
+    Log.printf 3 "Not found/non-aggregate at offset %d\n" offset;
     insn
+
+let try_rewrite_var vars base offset stack_vars insn rewrite_as ctypes_for_cu =
+  match base with
+    C.Nullary Irtypes.Incoming_sp ->
+      try_rewrite_stack_var vars offset stack_vars insn rewrite_as
+			    ctypes_for_cu
+  | _ -> insn
 
 exception Untrackable
 
@@ -186,7 +194,7 @@ let pointer_tracking blk_arr inforec vars ctypes_for_cu =
 	  | C.Set (dst, C.Load (accsz, addr)) ->
 	      begin try
 		let base, offset = ptr_plus_offset addr vars defs inforec in
-		let new_stmt = try_rewrite_var vars (Int32.to_int offset)
+		let new_stmt = try_rewrite_var vars base (Int32.to_int offset)
 					       stack_vars stmt
 					       (`load (accsz, dst))
 					       ctypes_for_cu in
@@ -197,7 +205,7 @@ let pointer_tracking blk_arr inforec vars ctypes_for_cu =
 	  | C.Store (accsz, addr, src) ->
 	      begin try
 		let base, offset = ptr_plus_offset addr vars defs inforec in
-		let new_stmt = try_rewrite_var vars (Int32.to_int offset)
+		let new_stmt = try_rewrite_var vars base (Int32.to_int offset)
 					       stack_vars stmt
 					       (`store (accsz, src))
 					       ctypes_for_cu in
@@ -217,7 +225,8 @@ let pointer_tracking blk_arr inforec vars ctypes_for_cu =
 		      begin try
 			let base, offset =
 		          ptr_plus_offset addr vars defs inforec in
-			let new_var = try_rewrite_var vars (Int32.to_int offset)
+			let new_var = try_rewrite_var vars base
+						      (Int32.to_int offset)
 						      stack_vars addr `ssa_reg
 						      ctypes_for_cu in
 			new_var

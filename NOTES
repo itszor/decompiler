@@ -1,0 +1,188 @@
+Notes on Debug-Assisted Decompiler
+==================================
+
+Introduction
+------------
+
+This document contains notes on my decompiler project. It currently runs to around 10,000 lines of Ocaml source code, and is the result of several months of spare-time work -- not continuous -- mostly done over the last 1.5 years or so, though various parts are older than that. It has reached the stage where it can be said to work a little, though only in extremely limited circumstances!
+
+The motivating example for the project was originally the OpenGL ES 2.0 driver library for an extremely common embedded graphics architecture, available only in binary form, though a commonly-available version of which happens to have been compiled with debugging information enabled. Such graphics hardware is a processor in its own right, and has its own ISA: discovering details of this ISA and the other workings of the chip for the purposes of creating a free driver is currently a high-priority project for the Free Software Foundation, though very little progress has actually been made to date.
+
+Goals, non-goals
+----------------
+
+Goals:
+
+* To decompile binary code (ARM Linux EABI) to C, using whatever structured information is available -- particularly ELF sections and symbols, and Dwarf debug information.
+
+* To automatically produce code which can be fed back into a compiler, and have the resulting binary produce the same results as the original binary. Ideally, do this without any additional annotations from the user. It ought to be possible to create a source tree with C source and header files, mirroring the layout of the original source tree.
+
+* To allow the decompiled source code to be edited by the user before such recompilation takes place.
+
+Non-goals:
+
+* Recovering high-level control flow structures (to start with at least).
+
+* Recovering the "original" source code, or anything remotely resembling it.
+
+* Having bit-identical code on recompiling.
+
+* Decompiling languages other than C, or decompiling for different architectures.
+
+Why is this hard?
+-----------------
+
+Debug info is of course designed for debugging, not for decompilation. Nevertheless there is definitely information useful for decompilation in debug info as well.
+
+Certain types of debug information for a binary are not necessarily entirely reliable though, particularly in optimised code (e.g. locations/tracking of variables, mappings of line numbers to addresses). Other parts are highly reliable, e.g. descriptions of function prototypes, aggregate types, enumeration values and so forth. We need to figure out which bits can be used, and which are best ignored or used merely as hints -- and to figure out if this metadata, though being designed for a completely different purpose, is sufficient to allow automated decompilation of binaries which are described by it.
+
+Even if we aim to produce the simplest possible C code -- corresponding to an instruction-by-instruction translation of the binary code, operating on variables which are named after machine registers -- there are still two major ways that decompilation is non-trivial. The first is that compiled code will directly reference the stack, which is impossible from C. The second is that compiled code will contain hard-wired references to addresses in the compiled binary, and those addresses will certainly not stay the same if the decompiled source is rebuilt.
+
+Relatedly, Dwarf debug information fully describes the aggregate data types used in a binary: it is highly desirable to turn "base+offset" addresses referring to members of aggregates into "real" member accesses, instead of leaving them as raw pointer arithmetic. Clearly, this would allow the compiler to potentially use a different aggregate layout, or allow the user to edit structure definitions and have the code still work, neither of which would be possible if the transformation was not done.
+
+ARM/EABI particulars
+--------------------
+
+Some features of ARM code and the standardised ABI (EABI) make it interesting from a decompilation perspective:
+
+* Mapping symbols ("$a", "$t", "$d"), designed to aid debugging/disassembly (amongst other things) describe exactly what is code and what is data in text sections. This means we can determine that without attempting to discover it ourselves, e.g. by walking over the code, which is not generally very reliable. This is an ELF feature, not a Dwarf feature, so these symbols are present even when debugging is not enabled.
+
+* Large constants are typically stored in constant pools (minipools in GCC terminology) inline in binary code, and loaded using PC-relative load instructions.
+
+Assumptions
+-----------
+
+One assumption that we're making is that the source program is reasonably well behaved: some of the algorithms outlined below may fail if the user regularly uses integers in place of pointers or vice versa, or "puns" one type of pointer as another, or does other strange pointer arithmetic. In practice, I suspect that most C code is reasonably well-behaved in that regard. Ideally of course, the decompiler should be able to handle arbitrary input.
+
+We should probably assume that the input program is valid ANSI C.
+
+Outline of algorithm
+--------------------
+
+Decompilation primarily happens one compilation unit at a time, and then one function at a time. This corresponds to the layout of Dwarf information. The stages are:
+
+1. The binary is loaded into memory, and ELF symbol tables and various Dwarf information are parsed.
+
+2. For each function:
+
+ 2a. The ARM instructions are scanned in two passes (using ELF mapping symbols to separate ARM instructions from data). The first pass discovers branch targets and builds a set of labels. The second pass builds a graph of basic blocks with these labels as headers, and decodes instructions into the first -- flat -- intermediate form (called "Insn").
+
+ 2b. We find the type of the function (the return type, and the types of arguments) using Dwarf information, and store it for later.
+
+ 2c. We translate the "Insn" form into a second intermediate representation, call this "IR". This is a tree-structured form, stored as a graph of basic blocks.
+
+  i. If we find calls to other functions in the same binary, look up the names and types of those functions using ELF & Dwarf information. (Types of outgoing arguments are also recorded for SSA names corresponding to those arguments here.)
+  
+  ii. Look up references to functions in shared libraries used by the binary by decoding the PLT and cross-referencing with relocations applied to the corresponding entries in the GOT.
+  
+  iii. Turn ARM conditional execution into explicit control flow.
+  
+  iv. Turn ARM flag-setting instructions into IR code which sets a "fake" flags register explicitly.
+  
+ 2d. We add blocks to the IR corresponding to "virtual entry" and "virtual exit" blocks: these contain definitions for variables (one per ARM register), and encode information about the ABI. Types for incoming arguments are attached to the corresponding SSA names, and the mapping of arguments to SSA names is recorded in the virtual entry block.
+
+ 2e. We scan the IR for sequences which look like jump tables (compiled switch statements), and fix up the IR so that they are joined up properly: this is a weak point at present, and will only handle GCC output correctly (much of the information which would help do better with this has not been calculated at this stage).
+
+ 2f. Remove any blocks which happen to be unreachable at this point.
+
+ 2g. Build a DFS graph of the IR, and reorder the blocks into DFS order.
+
+ 2h. Compute dominators using Lengaur/Tarjan's algorithm.
+
+ 2i. Convert IR (still containing ARM register references) into SSA form.
+
+ 2j. Perform a pass which attempts to gather information for each SSA name by scanning code: e.g. those which are used as base addresses will be considered to be pointers. Those which are loaded as half-words (for example) will be considered to be shorts. Information is propagated amongst SSA names which are used together in instructions, e.g.
+
+  i. For an add instruction, we might have:
+
+     pointer + int -> pointer   or
+     int + int -> int
+
+  ii. For a multiply instruction, we can only have:
+
+     int * int -> int
+
+So, if a variable is used in both, it's probably going to be an integer. The information gleaned during this pass (called the "type database") is used by subsequent passes: particularly for disambiguating scalars from pointers, but also when choosing C types for SSA names.
+
+ 2k. Perform minipool resolution. PC-relative loads might be used as pointers, or just as large constant integers. We can use various information to figure out how to handle these:
+
+  i. We can check the ELF sections to make sure that the load comes from a read-only section. (This wouldn't be possible for completely unstructured input code!).
+
+  ii. Use the type database to see if the loaded value is used as a pointer. If it's only used as a scalar, turn the load into an immediate-move.
+  
+  iii. If the loaded value is used as a pointer, scan the symbol table to see if we can find a symbol corresponding to the loaded address. If we can, replace the PC-relative load with a move from that symbol's address.
+  
+  iv. If there's no corresponding symbol, see if the address is contained within a known section (e.g. rodata). Replace the PC-relative load with a move from an offset into that section.
+  
+ 2l. Code is scanned to find stack references -- anything which forms an address relative to the stack pointer (actually, the canonical frame pointer), or loads or stores relative to such an adddress. Create a coverage structure, noting where such accesses take place (again relative to the CFP). Use the access size to delimit ranges where possible (loads and stores). Store this coverage structure for later.
+
+ 2m. Perform pointer tracking/resolution for aggregates, using Dwarf information: locations of aggregates on the stack are assumed to be described quite reliably by debug information, relative to locations of "POD" integer/pointer types (which are quite often described incompletely or not at all -- at least in GCC output). Loads, stores and instructions which look like they're forming the address of structure member accesses are rewritten into member accesses ("base.foo").
+
+ 2n. Any remaining stack references are turned into references to "local variables" -- created from the coverage information derived in stage (2l). The assumption is that these will mostly be integers or pointers, not larger aggregates. 
+
+ 2o. SSA conversion is performed for a second time -- converting the local variables from stage (2n) into SSA names.
+
+ 2p. The information-gathering stage from stage (2j) is performed again, so that we have type information about the new SSA names we just created.
+
+ 2q. Incoming function argument names are substituted into the IR.
+
+ 2r. The IR is scanned for references to the read-only data section (rodata). Any pointers that are formed are considered to be half-open intervals. This coverage information is global to the whole binary (as is the rodata section), and is stored for later.
+
+ 2s. Prologue/epilogue code is removed (using ABI information encoded in the virtual entry/exit blocks for the function), and other dead code is removed.
+
+ 2t. Types and names (for the C output) are chosen for the SSA names used in the function.
+
+ 2u. Phi nodes are eliminated, by inserting copies as appropriate.
+
+3. Once all functions are decompiled, the coverage info for the read-only data section is augmented with any symbols which refer to the section. We know the size of those symbols.
+
+4. References to the rodata section are resolved: at present, this consists of extracing closed ranges from the coverage information for the rodata section above, and attempting to turn them into string constants (in the IR). This is only done if the range looks like a string, whose padded length is exactly the same size as that of the range.
+
+5. Functions are converted one at a time into C, using the IR and the names and types chosen in step (2t). We use the AST representation and pretty-printer from FrontC (an Ocaml library).
+
+ 5a. Translation happens a block at a time. The virtual entry and virtual exit blocks are ignored. Control flow is implemented using goto and labels.
+
+ 5b. Care must be taken when performing pointer arithmetic, since the semantics of "pointer+integer" scale the integer depending on the type of the pointer.
+
+This pass is still in early stages, but works for very simple test code.
+
+Discussion, ongoing work
+------------------------
+
+The algorithm as outlined attempts to solve the problems with translating binary code instruction-by-instruction back into C -- so far, resolving references to the stack, resolving PC-relative references to minipools (for constant loads), including those which reference symbolic addresses, and resolving some types of references into the read-only data section (string constants) -- the latter must be done globally, since there are generally no symbols corresponding to such string constants.
+
+Currently only (very simple) functions can be decompiled -- most of the translation from IR to C AST is not yet implemented. The translation from ARM code to Insn form is maybe 80% complete, and the translation from Insn form to IR form is somewhat less complete than that.
+
+Conditions are currently handled by setting a "virtual" condition-code register (just a local variable in the function), and explicitly testing the bits of that register to determine the condition's outcome. A relatively simple pass could turn the vast majority (probably all, from compiled code) of such tests into normal comparisons.
+
+It might be sensible to (eventually) add another intermediate representation between the IR and the C AST form, tuned for easier manipulation of high-level control flow, and with a better-defined type system.
+
+We can do better wrt. recovering names and types for local variables by using more of the debug information. We can probably also recover more of the original program's lexical structure by using yet more debug information (although it remains to be seen how reliable or useful such information is).
+
+Some kind of "register allocation", taking place when converting back from SSA form, could be used to minimise the number of local variables created (which can currently grow quite high).
+
+A lot could be done to "prettify" generated C code, by e.g. turning the relatively-flat IR into more complex expressions. We could almost certainly do something to infer high-level control structures instead of gotos, which would be helpful to aid understanding of decompiled code.
+
+Nothing is done to emit static data definitions or (properly) emit type declarations, so far.
+
+References to functions called via the PLT (in shared libraries) are currently resolved to a function name, but the target function's type is completely faked (e.g. "puts" works, but nothing else). This can be fixed by loading e.g. versions of libraries the binary depends on with debug information present, and finding the correct type information from those. (At least for libc, such library versions should be quite easily obtainable.)
+
+Mapping ARM code semantics onto C
+---------------------------------
+
+This is an area which needs some work! E.g. in C, signed arithmetic is not guaranteed to have wrap-around semantics, but in compiled C code an int "+" will almost always be compiled into an ARM ADD instruction. So the obvious and desirable thing to do (translating an ADD back into "+") is technically wrong, and might even break in some circumstances when the code is recompiled (loop optimisations?) -- though in practice, most of the time it'll be fine.
+
+Similarly some ARM instructions have strange corner cases (register-specified shifts come to mind), so are probably best handled by out-of-line functions (or inline functions, or macros, or whatever). Again most of the time just using C shifts will probably work, but is unfortunately not technically correct.
+
+Volatile accesses in the original C code may pose another issue -- although as long as the volatility of a variable is recorded in the Dwarf information, we should be OK. If it is not, we have no way of knowing that a particular load or store should be translated to a volatile access (some heuristic may be possible).
+
+Scavenging information from elsewhere
+-------------------------------------
+
+One possibly-interesting future direction for the decompiler might be obtaining information from sources other than Dwarf debug information, since obviously such information isn't always available. E.g.:
+
+* Linked shared libraries, such as the libc-with-debug-info mentioned above. Any function which calls into libc can use function argument types as hints, and attempt to propagate type information further through the function.
+
+* Public APIs, such as header files distributed with proprietary shared libraries. Again, knowing the prototypes for (at least the public) functions in a shared library might allow us to propagate information.
+
+* Multi-stage decompilation: partially decompiling into a form which gathers profile information, then using that information to guide subsequent decompilation passes. E.g. the recompiled binary could be loaded at a different address, then pointer dereferences could be redirected via functions which check the address of accesses which lie within the original binary: finding such an access would mean that we failed to abstract the pointer successfully.
