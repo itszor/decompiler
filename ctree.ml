@@ -56,11 +56,15 @@ let rec basetype_for_type = function
 
 let convert_vardecls vars =
   Hashtbl.fold
-    (fun _ (name, ctype) decllist ->
-      let basetype = basetype_for_type ctype in
-      let name = name, convert_basetype ctype, [], NOTHING in
-      let decl = DECDEF (convert_basetype basetype, NO_STORAGE, [name]) in
-      decl :: decllist)
+    (fun _ vtyp decllist ->
+      if vtyp.Vartypes.vt_needs_prototype then
+	let basetype = basetype_for_type vtyp.Vartypes.vt_type in
+	let name = vtyp.Vartypes.vt_name,
+		     convert_basetype vtyp.Vartypes.vt_type, [], NOTHING in
+	let decl = DECDEF (convert_basetype basetype, NO_STORAGE, [name]) in
+	decl :: decllist
+      else
+        decllist)
     vars
     []
 
@@ -74,12 +78,21 @@ let operand_type vars op =
     C.Immed _ -> Ctype.C_int
   | C.SSAReg (r, rn) ->
       begin try
-        let _, typ = Hashtbl.find vars (r, rn) in
-	typ
+        let vtyp = Hashtbl.find vars (Vartypes.T_ssareg (r, rn)) in
+	vtyp.Vartypes.vt_type
       with Not_found ->
-        Log.printf 1 "No type for variable %s\n"
+        Log.printf 1 "No type for SSA variable %s\n"
 	  (Typedb.string_of_ssa_reg r rn);
         Ctype.C_void
+      end
+  | C.Reg r ->
+      begin try
+        let vtyp = Hashtbl.find vars (Vartypes.T_reg r) in
+	vtyp.Vartypes.vt_type
+      with Not_found ->
+        Log.printf 1 "No type for variable %s\n"
+	  (CT.string_of_reg r);
+	Ctype.C_void
       end
   | C.Entity (CT.Section nm) ->
       Log.printf 1 "Warning, unresolved section ref for %s\n" nm;
@@ -91,9 +104,9 @@ let operand_type vars op =
 let typesize_scale typesize op =
   match op with
     C.Immed imm ->
-      let lomask = Int32.of_int (typesize - 1) in
-      if Int32.logand lomask imm = 0l then
-        C.Immed (Int32.div imm (Int32.of_int typesize))
+      let i32typesize = Int32.of_int typesize in
+      if Int32.rem imm i32typesize = 0l then
+        C.Immed (Int32.div imm i32typesize)
       else begin
         Log.printf 1 "typesize: %d, op %s\n" typesize (C.string_of_code op);
         assert false
@@ -114,12 +127,14 @@ let rec convert_expr ct_for_cu vars op =
       Cabs.CONSTANT (Cabs.CONST_INT (Int32.to_string imm))
   | C.SSAReg (r, rn) ->
       begin try
-        let name, typ = Hashtbl.find vars (r, rn) in
-	Cabs.VARIABLE name
+        let vtyp = Hashtbl.find vars (Vartypes.T_ssareg (r, rn)) in
+	Cabs.VARIABLE vtyp.Vartypes.vt_name
       with Not_found ->
 	Cabs.VARIABLE (Printf.sprintf
 	  "(unknown var %s)" (Typedb.string_of_ssa_reg r rn))
       end
+  | C.Reg (CT.Stack_var sv) ->
+      Cabs.VARIABLE sv
   | C.Load (accsz, addr) ->
       let conv_addr = convert_expr ct_for_cu vars addr in
       Cabs.UNARY (Cabs.MEMOF, conv_addr)

@@ -381,6 +381,9 @@ let decompile_sym binf sym =
   Typedb.gather_info blk_arr' inforec;
   Typedb.print_info inforec.Typedb.infotag;
   Typedb.print_implied_info inforec.Typedb.implications;
+  let ht = Args_in.find_args blk_arr' 0 in
+  let arg_vars = Hashtbl.create 10 in
+  let blk_arr' = Args_in.substitute_args blk_arr' ht ft arg_vars in
   Log.printf 2 "--- slicing rodata ---\n";
   let rodata_sec = get_section_number binf.elfbits binf.ehdr binf.shdr_arr
 				      ".rodata" in
@@ -394,6 +397,8 @@ let decompile_sym binf sym =
   dump_blockarr blk_arr'3;
   Log.printf 2 "--- choose variable names and types ---\n";
   let vars = Vartypes.choose_vartypes blk_arr'3 cu_inf.ci_ctypes inforec in
+  Log.printf 3 "--- add arg types to vars hash ---\n";
+  Hashtbl.iter (fun k v -> Hashtbl.add vars k v) arg_vars;
   Log.printf 2 "--- eliminate phi nodes ---\n";
   IrPhiPlacement.eliminate blk_arr'3;
   dump_blockarr blk_arr'3;
@@ -437,7 +442,7 @@ type converted_cu =
     fn_name : string;
     fn_type : Function.function_info;
     cu_blkarr : (Irtypes.ir_blockref, C.code CS.t) Block.block array;
-    cu_vars : (CT.reg * int, string * Ctype.ctype) Hashtbl.t
+    cu_vars : (Vartypes.reg_or_ssareg, Vartypes.vartype_info) Hashtbl.t
   }
 
 let find_sym_and_try_decompile binf cu_inf cu_name sym_addr fun_select =
@@ -585,15 +590,20 @@ let _ =
   let do_all = ref false
   and list_compunits = ref false
   and selected_compunits = ref []
+  and selected_funs = ref []
   and infile = ref "" in
   let argspec =
     ["-a", Arg.Set do_all,
        "Decompile all functions from all compilation units";
      "-i", Arg.Set_string infile, "Input file (ARM binary w/ debug info)";
      "-l", Arg.Set list_compunits, "List compilation units";
+     "-g", Arg.Set_int Log.loglevel, "Set logging level";
      "-s", Arg.String
              (fun sel -> selected_compunits := sel :: !selected_compunits),
-	     "Select a compilation unit to decompile (add to list)" ] in
+	     "Add compilation unit to selection to decompile (default: all)";
+     "-f", Arg.String
+	     (fun sel -> selected_funs := sel :: !selected_funs),
+	     "Add function to selection to decompile (default: all)" ] in
   Arg.parse argspec (fun _ -> ()) "Usage: decompile [options]";
   if not !Sys.interactive then begin
     if !infile = "" then begin
@@ -614,9 +624,14 @@ let _ =
       if !selected_compunits = [] then
 	(fun _ -> true)
       else
-	(fun name -> List.mem name !selected_compunits) in
+	(fun name -> List.mem name !selected_compunits)
+    and select_fn =
+      if !selected_funs = [] then
+        (fun _ -> true)
+      else
+        (fun name -> List.mem name !selected_funs) in
     if !do_all then
-      scan_compunits ~cu_select:select_cu binf
+      scan_compunits ~cu_select:select_cu ~fun_select:select_fn binf
   end
   (*decompile_something*)
   (*Log.loglevel := 2; 

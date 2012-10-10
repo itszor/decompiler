@@ -104,6 +104,17 @@ let choose_type ct_for_cu ssaname inforec =
     else
       Ctype.C_int
 
+type reg_or_ssareg =
+    T_ssareg of (CT.reg * int)
+  | T_reg of CT.reg
+
+type vartype_info =
+  {
+    vt_name : string;
+    vt_type : Ctype.ctype;
+    mutable vt_needs_prototype : bool
+  }
+
 let choose_vartypes blk_arr ct_for_cu inforec =
   let ht = Hashtbl.create 10 in
   let defs = Defs.get_defs blk_arr in
@@ -113,6 +124,7 @@ let choose_vartypes blk_arr ct_for_cu inforec =
 	let name = choose_name ssaname
 	and typ = choose_type ct_for_cu ssaname inforec in
 	Log.printf 3 "decl: %s %s\n" (Ctype.string_of_ctype typ) name;
-	Hashtbl.add ht ssaname (name, typ))
+	Hashtbl.add ht (T_ssareg ssaname)
+	  { vt_name = name; vt_type = typ; vt_needs_prototype = true })
     defs;
   ht
