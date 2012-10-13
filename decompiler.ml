@@ -381,6 +381,7 @@ let decompile_sym binf sym =
   Typedb.gather_info blk_arr' inforec;
   Typedb.print_info inforec.Typedb.infotag;
   Typedb.print_implied_info inforec.Typedb.implications;
+  Log.printf 2 "--- finding & substituting incoming args ---\n";
   let ht = Args_in.find_args blk_arr' 0 in
   let arg_vars = Hashtbl.create 10 in
   let blk_arr' = Args_in.substitute_args blk_arr' ht ft arg_vars in
@@ -399,6 +400,7 @@ let decompile_sym binf sym =
   let vars = Vartypes.choose_vartypes blk_arr'3 cu_inf.ci_ctypes inforec in
   Log.printf 3 "--- add arg types to vars hash ---\n";
   Hashtbl.iter (fun k v -> Hashtbl.add vars k v) arg_vars;
+  (* Convert more aggregate/array accesses here.  *)
   Log.printf 2 "--- eliminate phi nodes ---\n";
   IrPhiPlacement.eliminate blk_arr'3;
   dump_blockarr blk_arr'3;

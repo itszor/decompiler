@@ -109,7 +109,7 @@ let typesize_scale typesize op =
         C.Immed (Int32.div imm i32typesize)
       else begin
         Log.printf 1 "typesize: %d, op %s\n" typesize (C.string_of_code op);
-        assert false
+        C.Immed imm
       end
   | C.SSAReg regid ->
       C.Binary (Irtypes.Div, op, C.Immed (Int32.of_int typesize))
