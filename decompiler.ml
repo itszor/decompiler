@@ -132,10 +132,10 @@ let eabi_pre_prologue ft start_addr inforec real_entry_point =
      C.Set (C.Reg (CT.Status Irtypes.Carry), C.Nullary Irtypes.Special)] in
   let cs = CS.of_list insns in
   let cs =
-    if false then
+    (*if false then
       Insn_to_ir.add_incoming_args ft cs
-    else
-      Insn_to_ir.add_real_incoming_args ft start_addr inforec cs in
+    else*)
+    Insn_to_ir.add_real_incoming_args ft start_addr inforec cs in
   let cs = CS.snoc cs (C.Control (C.Jump real_entry_point)) in
   Block.make_block Irtypes.Virtual_entry cs
 
@@ -315,8 +315,10 @@ let decompile_sym binf sym =
     Function.function_type binf.debug_loc symname die cu_inf.ci_dietab
 			   cu_inf.ci_ctypes
 			   ~compunit_baseaddr:base_addr_for_cu in
-  let vars = Function.function_vars die cu_inf.ci_dietab binf.debug_loc
-	       ~compunit_baseaddr:base_addr_for_cu cu_inf.ci_ctypes in
+  let dwarf_vars =
+    Function.function_vars die cu_inf.ci_dietab binf.debug_loc
+			   ~compunit_baseaddr:base_addr_for_cu
+			   cu_inf.ci_ctypes in
   let inforec = Typedb.create_info () in
   let blockseq, ht =
     bs_of_code_hash ft binf inforec code entry_point entry_point_ba in
@@ -351,61 +353,67 @@ let decompile_sym binf sym =
   Log.printf 2 "--- strip ids ---\n";
   let blk_arr = strip_ids blk_arr in
   Log.printf 2 "--- minipool resolution ---\n";
-  let blk_arr' =
+  let blk_arr =
     Minipool.minipool_resolve binf.elfbits binf.ehdr binf.shdr_arr binf.symbols
 			      binf.mapping_syms binf.strtab blk_arr inforec
 			      cu_inf.ci_ctypes in
-  dump_blockarr blk_arr';
+  dump_blockarr blk_arr;
   (*Log.printf 1 "--- sp tracking ---\n";
   let sp_var_set = Sptracking.sp_track blk_arr' vars cu_inf.ci_ctypes in
   add_stackvars_to_entry_block blk_arr' 0 sp_var_set;
   dump_blockarr blk_arr';*)
   Log.printf 2 "--- gather sp refs ---\n";
   let stack_coverage =
-    Ptrtracking.find_stack_references blk_arr' inforec vars cu_inf.ci_ctypes in
+    Ptrtracking.find_stack_references blk_arr inforec dwarf_vars
+				      cu_inf.ci_ctypes in
   Log.printf 2 "--- ptr tracking ---\n";
-  let blk_arr', sp_var_set =
-    Ptrtracking.pointer_tracking blk_arr' inforec vars cu_inf.ci_ctypes in
-  add_stackvars_to_entry_block blk_arr' 0 sp_var_set;
-  dump_blockarr blk_arr';
+  let blk_arr, sp_var_set =
+    Ptrtracking.pointer_tracking blk_arr inforec dwarf_vars cu_inf.ci_ctypes in
+  add_stackvars_to_entry_block blk_arr 0 sp_var_set;
+  dump_blockarr blk_arr;
   Log.printf 2 "--- rewrite sp refs ---\n";
-  let blk_arr', sp_ref_set =
-    Ptrtracking.replace_stack_references blk_arr' stack_coverage vars inforec in
-  add_stackvars_to_entry_block blk_arr' 0 sp_ref_set;
-  dump_blockarr blk_arr';
+  let blk_arr, sp_ref_set =
+    Ptrtracking.replace_stack_references blk_arr stack_coverage dwarf_vars
+					 inforec in
+  add_stackvars_to_entry_block blk_arr 0 sp_ref_set;
+  dump_blockarr blk_arr;
   Log.printf 2 "--- SSA conversion (2) ---\n";
-  let regset2 = IrPhiPlacement.place blk_arr' in
-  IrPhiPlacement.rename blk_arr' 0 regset2;
-  dump_blockarr blk_arr';
+  let regset2 = IrPhiPlacement.place blk_arr in
+  IrPhiPlacement.rename blk_arr 0 regset2;
+  dump_blockarr blk_arr;
   Log.printf 2 "--- gather info (2) ---\n";
-  Typedb.gather_info blk_arr' inforec;
+  Typedb.gather_info blk_arr inforec;
   Typedb.print_info inforec.Typedb.infotag;
   Typedb.print_implied_info inforec.Typedb.implications;
-  Log.printf 2 "--- finding & substituting incoming args ---\n";
-  let ht = Args_in.find_args blk_arr' 0 in
+  (*Log.printf 2 "--- finding & substituting incoming args ---\n";
+  let ht = Args_in.find_args blk_arr 0 in
   let arg_vars = Hashtbl.create 10 in
-  let blk_arr' = Args_in.substitute_args blk_arr' ht ft arg_vars in
+  let blk_arr = Args_in.substitute_args blk_arr ht ft arg_vars in*)
   Log.printf 2 "--- slicing rodata ---\n";
   let rodata_sec = get_section_number binf.elfbits binf.ehdr binf.shdr_arr
 				      ".rodata" in
-  Slice_section.slice blk_arr' binf.rodata_sliced
+  Slice_section.slice blk_arr binf.rodata_sliced
     binf.shdr_arr.(rodata_sec).sh_addr ".rodata" symname;
   Log.printf 2 "--- removing prologue/epilogue code ---\n";
-  let blk_arr'' = Ce.remove_prologue_and_epilogue blk_arr' ft in
-  dump_blockarr blk_arr'';
+  let blk_arr = Ce.remove_prologue_and_epilogue blk_arr ft in
+  dump_blockarr blk_arr;
   Log.printf 2 "--- remove dead code ---\n";
-  let blk_arr'3 = Dce.remove_dead_code blk_arr'' in
-  dump_blockarr blk_arr'3;
+  let blk_arr = Dce.remove_dead_code blk_arr in
+  dump_blockarr blk_arr;
   Log.printf 2 "--- choose variable names and types ---\n";
-  let vars = Vartypes.choose_vartypes blk_arr'3 cu_inf.ci_ctypes inforec in
-  Log.printf 3 "--- add arg types to vars hash ---\n";
-  Hashtbl.iter (fun k v -> Hashtbl.add vars k v) arg_vars;
+  let vars = Vartypes.choose_vartypes blk_arr cu_inf.ci_ctypes inforec in
+  (*Log.printf 3 "--- add arg types to vars hash ---\n";
+  Hashtbl.iter (fun k v -> Hashtbl.add vars k v) arg_vars;*)
   (* Convert more aggregate/array accesses here.  *)
+  Log.printf 3 "--- convert aggregate/array accesses ---\n";
+  let blk_arr, _ =
+    Ptrtracking.pointer_tracking blk_arr inforec dwarf_vars ~vartype_hash:vars
+				 cu_inf.ci_ctypes in
   Log.printf 2 "--- eliminate phi nodes ---\n";
-  IrPhiPlacement.eliminate blk_arr'3;
-  dump_blockarr blk_arr'3;
+  IrPhiPlacement.eliminate blk_arr;
+  dump_blockarr blk_arr;
   (*stack_coverage*)
-  ft, vars, blk_arr'3
+  ft, vars, blk_arr
 
 (*let go symname =
   let sym = Symbols.find_named_symbol binf.symbols binf.strtab symname in

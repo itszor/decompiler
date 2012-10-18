@@ -38,49 +38,69 @@ let known_var vars sp_offset =
 
 module IrPhiPlacement = Phi.PhiPlacement (Ir.IrCT) (Ir.IrCS) (Ir.IrBS)
 
-let try_rewrite_stack_var vars offset stack_vars insn rewrite_as ctypes_for_cu =
-  try
-    let kvar, var_ofs = known_var vars offset in
-    Log.printf 3 "Offset %d looks like variable %s (+%d)\n"
-      offset kvar.Function.var_name var_ofs;
-    let sv = CT.Stack_var kvar.Function.var_name in
-    stack_vars := IrPhiPlacement.R.add sv !stack_vars;
-    let aggr_access, _ =
-      Insn_to_ir.resolve_aggregate_access kvar.Function.var_type var_ofs
-					  ctypes_for_cu in
-    (*let blk = {
-      Irtypes.ctype = kvar.Function.var_type;
-      block_size = kvar.Function.var_size;
-      access_size = Irtypes.Word
-    } in*)
-    match rewrite_as with
-      `load (accsz, dst) ->
-	C.Protect (C.Set (dst,
-		     C.Load (accsz,
-		       C.Unary (Irtypes.Aggr_member (kvar.Function.var_type,
-		        			     aggr_access),
-				C.Reg sv))))
-    | `store (accsz, src) ->
-        C.Protect (C.Store (accsz,
-		     C.Unary (Irtypes.Aggr_member (kvar.Function.var_type,
-						   aggr_access),
-			      C.Reg sv),
-		     src))
-    | `ssa_reg ->
-        C.Protect (C.Unary (Irtypes.Address_of,
-	             C.Unary (Irtypes.Aggr_member (kvar.Function.var_type,
-						   aggr_access),
-			      C.Reg sv)))
-  with Not_found | Insn_to_ir.Non_aggregate ->
-    Log.printf 3 "Not found/non-aggregate at offset %d\n" offset;
-    insn
+let try_rewrite_access var_reg var_type aggr_access rewrite_as =
+  match rewrite_as with
+    `load (_, dst) -> (* FIXME: Verify access size!  *)
+      C.Set (dst, C.Unary (Irtypes.Aggr_member (var_type, aggr_access),
+			   var_reg))
+  | `store (_, src) -> (* FIXME: Verify access size!  *)
+      C.Set (C.Unary (Irtypes.Aggr_member (var_type, aggr_access),
+		      var_reg), src)
+  | `ssa_reg ->
+      C.Unary (Irtypes.Address_of,
+	       C.Unary (Irtypes.Aggr_member (var_type, aggr_access), var_reg))
 
-let try_rewrite_var vars base offset stack_vars insn rewrite_as ctypes_for_cu =
-  match base with
-    C.Nullary Irtypes.Incoming_sp ->
-      try_rewrite_stack_var vars offset stack_vars insn rewrite_as
-			    ctypes_for_cu
-  | _ -> insn
+let try_rewrite_var vars base offset stack_vars vartype_hash insn rewrite_as
+		    ctypes_for_cu =
+  match base, vartype_hash with
+    C.Nullary Irtypes.Incoming_sp, _ ->
+      begin try
+	let kvar, var_ofs = known_var vars offset in
+	Log.printf 3 "Offset %d looks like variable %s (+%d)\n"
+	  offset kvar.Function.var_name var_ofs;
+	let sv = CT.Stack_var kvar.Function.var_name in
+	stack_vars := IrPhiPlacement.R.add sv !stack_vars;
+	let aggr_access, _ =
+	  Insn_to_ir.resolve_aggregate_access kvar.Function.var_type var_ofs
+					      ctypes_for_cu in
+	(*let blk = {
+	  Irtypes.ctype = kvar.Function.var_type;
+	  block_size = kvar.Function.var_size;
+	  access_size = Irtypes.Word
+	} in*)
+      try_rewrite_access (C.Reg sv) kvar.Function.var_type aggr_access
+			 rewrite_as
+      with Not_found | Insn_to_ir.Non_aggregate ->
+	Log.printf 3 "Not found/non-aggregate at offset %d\n" offset;
+	insn
+      end
+  | C.SSAReg regid, Some vh ->
+      begin try
+        let vti = Hashtbl.find vh (Vartypes.T_ssareg regid) in
+	let aggr_access, _ =
+	  Insn_to_ir.resolve_aggregate_access vti.Vartypes.vt_type offset
+					      ctypes_for_cu in
+	try_rewrite_access base vti.Vartypes.vt_type aggr_access rewrite_as
+      with Not_found | Insn_to_ir.Non_aggregate ->
+        Log.printf 3 "Type missing or non-aggregate for %s\n"
+	  (Typedb.string_of_ssa_reg (fst regid) (snd regid));
+	insn
+      end
+  | C.Reg reg, Some vh ->
+      begin try
+        let vti = Hashtbl.find vh (Vartypes.T_reg reg) in
+	Log.printf 3 "Type for %s is %s\n" (C.string_of_code base)
+	  (Ctype.string_of_ctype vti.Vartypes.vt_type);
+	let aggr_access, _ =
+	  Insn_to_ir.resolve_aggregate_access vti.Vartypes.vt_type offset
+					      ctypes_for_cu in
+	try_rewrite_access base vti.Vartypes.vt_type aggr_access rewrite_as
+      with Not_found | Insn_to_ir.Non_aggregate ->
+        Log.printf 3 "Type missing or non-aggregate for %s\n"
+	  (CT.string_of_reg reg);
+	insn
+      end
+  | _, _ -> insn
 
 exception Untrackable
 
@@ -103,7 +123,7 @@ let track_pointer defs use =
       | C.Nullary Irtypes.Caller_saved
       | C.Nullary Irtypes.Special
       | C.Nullary Irtypes.Incoming_sp
-      | C.Nullary (Irtypes.Arg_in _)
+      (*| C.Nullary (Irtypes.Arg_in _)*)
       | C.Entity CT.Arg_out
       | C.Phi _
       | C.Load _
@@ -125,11 +145,13 @@ let track_pointer defs use =
      * anything else?
 *)
 
-let improve_pointer vars defs ptr offset =
-  let p, pn = ptr in
-  Log.printf 3 "Try to improve %s+%lx\n" (Typedb.string_of_ssa_reg p pn) offset;
+let improve_pointer vars defs ptr_reg offset =
+  Log.printf 3 "Try to improve %s+%lx\n" (C.string_of_code ptr_reg) offset;
   try
-    let def_chain = track_pointer defs ptr in
+    let def_chain =
+      match ptr_reg with
+        C.SSAReg regid -> track_pointer defs regid
+      | C.Reg ptr -> [ptr_reg, 0l] in
     List.fold_left
       (fun best (src, def_offset) ->
         let offset_from_def = Int32.add def_offset offset in
@@ -137,21 +159,21 @@ let improve_pointer vars defs ptr offset =
 	match src with
 	  C.Nullary Irtypes.Incoming_sp -> src, offset_from_def
 	| _ -> best)
-      (C.SSAReg (p, pn), offset)
+      (ptr_reg, offset)
       def_chain
   with Untrackable ->
-    C.SSAReg (p, pn), offset
+    ptr_reg, offset
 
 exception Non_constant_offset
 
 let ptr_plus_offset addr vars defs inforec =
   match addr with
-    C.SSAReg (r, rn) ->
-      improve_pointer vars defs (r, rn) 0l
-  | C.Binary (Irtypes.Add, C.SSAReg (r, rn), C.Immed imm) ->
-      improve_pointer vars defs (r, rn) imm
-  | C.Binary (Irtypes.Sub, C.SSAReg (r, rn), C.Immed imm) ->
-      improve_pointer vars defs (r, rn) (Int32.neg imm)
+    (C.SSAReg _ | C.Reg _ as ptr_reg) ->
+      improve_pointer vars defs ptr_reg 0l
+  | C.Binary (Irtypes.Add, (C.SSAReg _ | C.Reg _ as base), C.Immed imm) ->
+      improve_pointer vars defs base imm
+  | C.Binary (Irtypes.Sub, (C.SSAReg _ | C.Reg _ as base), C.Immed imm) ->
+      improve_pointer vars defs base (Int32.neg imm)
   | _ -> raise Non_constant_offset
 
 (* Try to build a snapshot of the stack at a given address (from debug
@@ -179,7 +201,19 @@ let stack_for_addr vars addr =
     vars;
   cov
 
-let pointer_tracking blk_arr inforec vars ctypes_for_cu =
+let reg_or_ssareg_probably_pointer regid ct_for_cu inforec vartype_hash =
+  match regid with
+    C.SSAReg regid -> Typedb.probably_pointer ct_for_cu regid inforec
+  | C.Reg reg ->
+      begin match vartype_hash with
+        Some vh ->
+	  let vti = Hashtbl.find vh (Vartypes.T_reg reg) in
+	  Ctype.pointer_type ct_for_cu vti.Vartypes.vt_type
+      | None -> false
+      end
+  | _ -> failwith "Not reg or ssa reg"
+
+let pointer_tracking blk_arr inforec dwarf_vars ?vartype_hash ctypes_for_cu =
   let defs = get_defs blk_arr in
   let stack_vars = ref IrPhiPlacement.R.empty in
   let blk_arr' = Array.map
@@ -193,22 +227,24 @@ let pointer_tracking blk_arr inforec vars ctypes_for_cu =
 	      CS.snoc codeseq stmt
 	  | C.Set (dst, C.Load (accsz, addr)) ->
 	      begin try
-		let base, offset = ptr_plus_offset addr vars defs inforec in
-		let new_stmt = try_rewrite_var vars base (Int32.to_int offset)
-					       stack_vars stmt
-					       (`load (accsz, dst))
-					       ctypes_for_cu in
+		let base, offset =
+		  ptr_plus_offset addr dwarf_vars defs inforec in
+		let new_stmt =
+		  try_rewrite_var dwarf_vars base (Int32.to_int offset)
+				  stack_vars vartype_hash stmt
+				  (`load (accsz, dst)) ctypes_for_cu in
 		CS.snoc codeseq new_stmt
 	      with Non_constant_offset ->
 	        CS.snoc codeseq stmt
 	      end
 	  | C.Store (accsz, addr, src) ->
 	      begin try
-		let base, offset = ptr_plus_offset addr vars defs inforec in
-		let new_stmt = try_rewrite_var vars base (Int32.to_int offset)
-					       stack_vars stmt
-					       (`store (accsz, src))
-					       ctypes_for_cu in
+		let base, offset =
+		  ptr_plus_offset addr dwarf_vars defs inforec in
+		let new_stmt =
+		  try_rewrite_var dwarf_vars base (Int32.to_int offset)
+				  stack_vars vartype_hash stmt
+				  (`store (accsz, src)) ctypes_for_cu in
 		CS.snoc codeseq new_stmt
 	      with Non_constant_offset ->
 	        CS.snoc codeseq stmt
@@ -217,18 +253,20 @@ let pointer_tracking blk_arr inforec vars ctypes_for_cu =
 	      let src' = C.map
 	        (fun addr ->
 		  match addr with
-		    C.SSAReg (r, rn)
-		  | C.Binary (Irtypes.Add, C.SSAReg (r, rn), C.Immed _)
-		  | C.Binary (Irtypes.Sub, C.SSAReg (r, rn), C.Immed _)
-		      when Typedb.probably_pointer ctypes_for_cu (r, rn)
-						   inforec ->
+		    (C.SSAReg _ | C.Reg _ as base)
+		  | C.Binary (Irtypes.Add, (C.SSAReg _ | C.Reg _ as base),
+			      C.Immed _)
+		  | C.Binary (Irtypes.Sub, (C.SSAReg _ | C.Reg _ as base),
+			      C.Immed _)
+		      when reg_or_ssareg_probably_pointer base ctypes_for_cu
+			     inforec vartype_hash ->
 		      begin try
 			let base, offset =
-		          ptr_plus_offset addr vars defs inforec in
-			let new_var = try_rewrite_var vars base
-						      (Int32.to_int offset)
-						      stack_vars addr `ssa_reg
-						      ctypes_for_cu in
+		          ptr_plus_offset addr dwarf_vars defs inforec in
+			let new_var =
+			  try_rewrite_var dwarf_vars base (Int32.to_int offset)
+					  stack_vars vartype_hash addr `ssa_reg
+					  ctypes_for_cu in
 			new_var
 		      with Non_constant_offset ->
 		        addr

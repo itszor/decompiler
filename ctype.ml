@@ -132,6 +132,7 @@ let type_kind ct_for_cu typ =
     | C_double -> `double
     | C_void -> `void
     | C_enum _ -> `unsigned
+    | C_struct _ | C_union _ -> `aggregate
     | x ->
         if unsigned_int_type x then
 	  `unsigned
@@ -340,3 +341,8 @@ and resolve_aggregate die die_hash ctypes_for_cu =
   | _ -> raise Unknown_type in
   build die
 
+let base_type_p = function
+    C_struct _
+  | C_union _
+  | C_array _ -> false
+  | _ -> true

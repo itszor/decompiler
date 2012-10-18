@@ -349,7 +349,7 @@ let fn_args inforec callee_addr ft_args arglocs =
     ft_args in
   C.Nary (Irtypes.Fnargs, Array.to_list args_from_ctype)
 
-let add_incoming_args ft code =
+(*let add_incoming_args ft code =
   let (_, code') = Array.fold_left
     (fun (argn, code) arg ->
       match argn with
@@ -362,7 +362,7 @@ let add_incoming_args ft code =
 	  succ argn, CS.snoc code arg_in)
     (0, code)
     ft.Function.args in
-  code'
+  code'*)
 
 (* FT is a function_info record from function.ml.  INFOREC is an info record.
    CODESEQ is a code sequence for the virtual entry block for a function.  *)
@@ -371,6 +371,11 @@ let add_real_incoming_args ft start_addr inforec codeseq =
   let known_incoming_regs = ref [] in
   let _, added_args = Array.fold_left
     (fun (i, codeseq') typ ->
+      let argname =
+        if Ctype.base_type_p ft.Function.args.(i) then
+	  C.Entity (CT.Arg_var ft.Function.arg_names.(i))
+	else
+          C.Nullary Irtypes.Nop in
       match ft.Function.arg_locs.(i) with
         Some loc ->
 	  begin match Dwarfreader.loc_for_addr start_addr loc with
@@ -380,8 +385,7 @@ let add_real_incoming_args ft start_addr inforec codeseq =
 	      known_incoming_regs := r :: !known_incoming_regs;
 	      Typedb.record_reg_info_for_id inforec reg id
 	        (Typedb.Type_known typ);
-	      let insn = C.Set (C.With_id (id, C.Reg reg),
-				C.Nullary (Irtypes.Arg_in i)) in
+	      let insn = C.Set (C.With_id (id, C.Reg reg), argname) in
 	      succ i, CS.snoc codeseq' insn
 	  | `DW_OP_fbreg o ->
 	      let stackreg = CT.Stack o in
@@ -390,8 +394,7 @@ let add_real_incoming_args ft start_addr inforec codeseq =
 	        (Typedb.Type_known typ);
 	      let insn = C.With_id (id, C.Store (Irtypes.Word,
 			   C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
-				     C.Immed (Int32.of_int o)),
-			   C.Nullary (Irtypes.Arg_in i))) in
+				     C.Immed (Int32.of_int o)), argname)) in
 	      succ i, CS.snoc codeseq' insn
 	  | `DW_OP_regx r when r >= 64 && r < 96 ->
 	      let reg = CT.VFP_sreg (r - 64) in
@@ -399,8 +402,7 @@ let add_real_incoming_args ft start_addr inforec codeseq =
 	      known_incoming_regs := r :: !known_incoming_regs;
 	      Typedb.record_reg_info_for_id inforec reg id
 		(Typedb.Type_known typ);
-	      let insn = C.Set (C.With_id (id, C.Reg reg),
-				C.Nullary (Irtypes.Arg_in i)) in
+	      let insn = C.Set (C.With_id (id, C.Reg reg), argname) in
 	      succ i, CS.snoc codeseq' insn
 	  | _ -> failwith "add_real_incoming_args/location"
 	  end
@@ -413,7 +415,7 @@ let add_real_incoming_args ft start_addr inforec codeseq =
         codeseq'
       else
         CS.snoc codeseq' (C.Set (C.Reg (CT.Hard_reg regnum),
-				 C.Nullary (Irtypes.Arg_in regnum))))
+				 C.Nullary Irtypes.Undefined)))
     added_args
     [0; 1; 2; 3]
 
@@ -920,12 +922,6 @@ let convert_block binf inforec block_id bseq bseq_cons addr insn_list
 
 exception Out_of_range
 
-let base_type_p = function
-    Ctype.C_struct _
-  | Ctype.C_union _
-  | Ctype.C_array _ -> false
-  | _ -> true
-
 exception Non_aggregate
 
 (* Return aggr_member_id, type of member.  FIXME: We don't necessarily always
@@ -947,13 +943,16 @@ let rec resolve_aggregate_access typ offset ctypes_for_cu =
 	    offset >= mem.Ctype.offset
 		      && offset < mem.Ctype.offset + mem.Ctype.size)
 	  agmem in
-      if base_type_p found_mem.Ctype.typ then
+      if Ctype.base_type_p found_mem.Ctype.typ then
         Irtypes.Aggr_leaf found_mem.Ctype.name, found_mem.Ctype.typ
       else
         let sub, inner_type =
 	  resolve_aggregate_access found_mem.Ctype.typ
 	    (offset - found_mem.Ctype.offset) ctypes_for_cu in
 	Irtypes.Aggr_sub (found_mem.Ctype.name, sub), inner_type
+  | Ctype.C_pointer ptt ->
+      let deref, inner = resolve_aggregate_access ptt offset ctypes_for_cu in
+      Irtypes.Aggr_deref deref, inner
   | Ctype.C_typedef typename ->
       let targ = Hashtbl.find ctypes_for_cu.Ctype.ct_typedefs typename in
       resolve_aggregate_access targ offset ctypes_for_cu

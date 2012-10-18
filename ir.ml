@@ -21,6 +21,7 @@ module IrCT =
     type mem = ir_mem
     type entity = PC of int32
 		| Symbol_addr of string * Elfreader.elf_sym
+		| Arg_var of string
 		| Section of string
 		| Arg_out
 		| Caller_restored
@@ -41,9 +42,10 @@ module IrCT =
     let string_of_nulop = function
       Nop -> "nop"
     | Untranslated -> "**UNTRANSLATED**"
-    | Arg_in n -> Printf.sprintf "arg_in(%d)" n
+    (*| Arg_in n -> Printf.sprintf "arg_in(%d)" n*)
     | Caller_saved -> "caller_saved"
     | Special -> "special"
+    | Undefined -> "undefined"
     | Incoming_sp -> "incoming_sp"
     | Declaration ct -> Printf.sprintf "declaration(%s)"
 	(Ctype.string_of_ctype ct)
@@ -51,6 +53,7 @@ module IrCT =
     let rec string_of_member_id = function
       Aggr_leaf x -> x
     | Aggr_sub (x, subid) -> x ^ "." ^ (string_of_member_id subid)
+    | Aggr_deref x -> "(*" ^ (string_of_member_id x) ^ ")"
     
     let string_of_unop = function
       Not -> "not"
@@ -159,6 +162,7 @@ module IrCT =
     let string_of_entity = function
       PC loc -> Printf.sprintf "pc(0x%lx)" loc
     | Symbol_addr (name, _) -> Printf.sprintf "&%s" name
+    | Arg_var name -> Printf.sprintf "arg(%s)" name
     | Section name -> Printf.sprintf "section(%s)" name
     | Arg_out -> "arg_out"
     | Caller_restored -> "caller_restored"

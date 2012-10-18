@@ -2,7 +2,8 @@ type ir_nulop =
     Nop
   | Untranslated
   | Caller_saved
-  | Arg_in of int
+  (*| Arg_in of int*)
+  | Undefined
   | Special
   | Incoming_sp
   | Declaration of Ctype.ctype
@@ -53,6 +54,7 @@ type ir_unop =
 and aggr_member_id =
     Aggr_leaf of string
   | Aggr_sub of string * aggr_member_id
+  | Aggr_deref of aggr_member_id
 
 type ir_binop =
     Add

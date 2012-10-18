@@ -190,12 +190,26 @@ and convert_binop ct_for_cu vars binop op1 op2 =
 	(Ctype.string_of_ctype ot2);
       Cabs.NOTHING
 
+and convert_aggrmem ct_for_cu vars op ag =
+  match ag with
+    Irtypes.Aggr_deref (Irtypes.Aggr_leaf x) ->
+      Cabs.MEMBEROFPTR (op, x)
+  | Irtypes.Aggr_leaf x ->
+      Cabs.MEMBEROF (op, x)
+  | Irtypes.Aggr_sub (x, sub) ->
+      Cabs.MEMBEROF (convert_aggrmem ct_for_cu vars op sub, x)
+  | Irtypes.Aggr_deref x ->
+      let deref_op = Cabs.UNARY (Cabs.MEMOF, op) in
+      convert_aggrmem ct_for_cu vars deref_op x
+
 and convert_unop ct_for_cu vars unop op1 =
   let ot1 = operand_type vars op1 in
   let tk1 = Ctype.type_kind ct_for_cu ot1 in
   let op1' = convert_expr ct_for_cu vars op1 in
   match unop, tk1 with
-    _ ->
+    Irtypes.Aggr_member (_, ag), _ ->
+      convert_aggrmem ct_for_cu vars op1' ag
+  | _ ->
       Log.printf 1 "unsupported unop: %s (%s)\n"
 	(CT.string_of_unop unop) (Ctype.string_of_ctype ot1);
       Cabs.NOTHING
