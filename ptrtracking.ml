@@ -298,12 +298,23 @@ let maybe_stack_use cov ?accsz base offset =
       end
   | _ -> ()
 
+let maybe_addressable base offset addr =
+  match base with
+    C.Nullary Irtypes.Incoming_sp ->
+      let at_addr =
+        match addr with
+	  Some a -> Printf.sprintf " at %lx" a
+	| None -> "" in
+      Log.printf 3 "Addressable%s: %s+%ld\n" at_addr (C.string_of_code base)
+		 offset;
+  | _ -> ()
+
 (* FIXME: Phi-node arguments might be classed as "escaping" too.  *)
 
 let find_stack_references blk_arr inforec vars ctypes_for_cu =
   let defs = get_defs blk_arr in
   let cov = Coverage.create_coverage Int32.min_int Int32.max_int in
-  let escaping_ref node =
+  let escaping_ref node addr =
     match node with
       C.Load (_, _) -> C.Protect node
     | C.Store (_, _, _) -> C.Protect node
@@ -311,6 +322,7 @@ let find_stack_references blk_arr inforec vars ctypes_for_cu =
     | C.Binary (Irtypes.Sub, C.SSAReg (r, rn), C.Immed _)
     | C.SSAReg (r, rn) ->
 	let base, offset = ptr_plus_offset node vars defs inforec in
+	maybe_addressable base offset addr;
 	maybe_stack_use cov base offset;
 	C.Protect node
     | _ -> node in
@@ -333,11 +345,11 @@ let find_stack_references blk_arr inforec vars ctypes_for_cu =
 		| C.Store (accsz, addr, src) ->
 		    let base, offset = ptr_plus_offset addr vars defs inforec in
 		    maybe_stack_use cov ~accsz base offset;
-		    ignore (escaping_ref src);
+		    ignore (escaping_ref src !insn_addr);
 		    C.Protect node
 		| C.Set (dst, C.Phi phiargs) ->
 		    Array.iter
-		      (fun phiarg -> ignore (escaping_ref phiarg))
+		      (fun phiarg -> ignore (escaping_ref phiarg !insn_addr))
 		      phiargs;
 		    C.Protect node
 		| _ -> node
@@ -349,7 +361,7 @@ let find_stack_references blk_arr inforec vars ctypes_for_cu =
 	          (* Note any stack var which escapes (by having its address
 		     taken) via being a function argument.  *)
 	          ignore (C.map
-		    (fun node -> escaping_ref node)
+		    (fun node -> escaping_ref node !insn_addr)
 		    args);
 		  ctlnode
 	      | _ -> ctlnode)

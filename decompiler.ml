@@ -400,6 +400,8 @@ let decompile_sym binf sym =
   Log.printf 2 "--- remove dead code ---\n";
   let blk_arr = Dce.remove_dead_code blk_arr in
   dump_blockarr blk_arr;
+  Log.printf 2 "--- restructuring ---\n";
+  let rstr = Restructure.restructure blk_arr ft cu_inf.ci_ctypes in
   Log.printf 2 "--- choose variable names and types ---\n";
   let vars = Vartypes.choose_vartypes blk_arr cu_inf.ci_ctypes inforec in
   (*Log.printf 3 "--- add arg types to vars hash ---\n";

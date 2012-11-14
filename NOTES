@@ -186,3 +186,126 @@ One possibly-interesting future direction for the decompiler might be obtaining 
 * Public APIs, such as header files distributed with proprietary shared libraries. Again, knowing the prototypes for (at least the public) functions in a shared library might allow us to propagate information.
 
 * Multi-stage decompilation: partially decompiling into a form which gathers profile information, then using that information to guide subsequent decompilation passes. E.g. the recompiled binary could be loaded at a different address, then pointer dereferences could be redirected via functions which check the address of accesses which lie within the original binary: finding such an access would mean that we failed to abstract the pointer successfully.
+
+Stack resolution again
+----------------------
+
+Attempt to determine stack variables which have their address taken.
+
+Need to do this rather than blindly rewrite stack references into "register-like" forms, else when those are converted to SSA form, taking the address of those forms would yield different values at different points in the function.
+
+Consider,
+
+  {
+    int x[2];
+    foo (x);
+  }
+
+  mov r0, r13
+  bl foo
+
+  {
+    struct { int x, int y } x;
+    foo (&x);
+  }
+  
+  mov r0, r13
+  bl foo
+
+The two "x"s could have the same stack slot, so it doesn't work to have a static stack map per-function.
+
+Do we need to create a complete stack map per function call site? Actually we only care about stack slots which are visible from each foo's argument list. Similarly when local pointers are stored to globals (probably rare).
+
+Then we might be able to analyze dataflow between basic blocks, to determine (HL) blocks in which variables are declared.
+
+Maybe we only need to care about pointers which are:
+
+* reachable from currently-live registers.
+* reachable from pointers formed from stack addresses, then stored on the stack (spilled registers).
+
+It probably makes sense to do this before SSA conversion.
+
+Can we detect registers loaded from spill slots? Or spill slots themselves?
+
+Spill slots will only ever participate in loads and stores from stack addresses to registers. Their addresses can never escape from a function. A spill slot will never have its address taken. They will generally consist of a store to the stack followed by a load in a later block (fsvo later), or multiple such loads.
+
+Functions with no arrays & no pointer arithmetic
+------------------------------------------------
+
+If we offsets in base+offset addresses are constant, we might be able to do a better job of stack mapping, because we can see how all stack addresses are formed. (Is this true?)
+
+Arrays/structs on the stack
+---------------------------
+
+Assuming we can't always figure out which stack offsets correspond to "big" objects, arrays and stacks, what can we do? We must keep adjacent memory locations contiguous, rather than assigning them separate local variables.
+
+Say we have:
+
+  str r0, [r13, #0]
+  str r1, [r13, #4]
+  mov r0, r13
+  bl foo
+
+i.e. we take the address of some variable, then write to (before) or read from (after) addresses contiguous to that address, but don't take the addresses of those contiguous addresses themselves. We can then infer an aggregate containing [r13+0, r13+4]. But this is far from infallible.
+
+
+
+Constness of arguments & dataflow implications for intent-in/intent-out pointers
+--------------------------------------------------------------------------------
+
+"Const" will only be read. No-const can be either read or written.
+
+For pointers which are passed to functions, which point to values on the stack, we might be able to tell:
+
+  * pointers which are passed without writing to the pointed data first, then passed without "const": probably written by function.
+
+  * pointers which are passed after being having their pointed-to data written are probably read by the function, and may be modified.
+
+  * pointers which are passed after having been written by the caller, to "const" arguments, are read by the function and not modified.
+
+Finding addressable entities on the stack
+-----------------------------------------
+
+	 +-+
+	 |E|
+	 +-+
+        /
+ +------+    +------+
+ |      |--->|      |
+ +------+    +------+
+       \      /
+       +------+<--.
+       |  bl  |   |
+       +------+   |
+         | |      |
+         |  \____/
+         v
+
+ * walk backwards through current block.
+ * iterate over predecessor blocks, DFS, visiting only unvisited nodes, stopping at virtual entry point. Scan each node backwards.
+ * look for:
+ 
+   - instructions forming stack addresses in registers.
+   - those registers being used without indirection: as function arguments, or stored to global memory, or stored to the stack. These are addressable entities.
+
+ * in a second pass, look for:
+
+   - instructions (including loads & stores) forming addresses which are adjacent (higher) to (than) addressable entities. These will have to be aggregates.
+   - what do we do when we take two addresses from within a single aggregate/array? E.g.,
+   
+     int i[99]
+     foo (i, &i[98]);
+    
+     maybe the only safe solution is to put all the locals in a function into a single struct to maintain the relative layout...
+
+   - debug info might be needed after all, heh.
+
+Stack slot sharing
+------------------
+
+The same stack slot might be used for distinct variables with non-overlapping live ranges (at least, we can't assume that this won't happen). We must be careful that addressable variables stay live for the correct length of time, and that we do not split a single variable into two differently-addressed parts.
+
+ * It's OK to create a new variable (on the stack) if it completely initialised, i.e. all of its bytes are written to, and its address cannot escape from the current function (to another function, or a global variable).
+
+ * Conversely, a known N-byte entity must keep the same address if none of it, or only parts of it, are initialised between one use and another.
+

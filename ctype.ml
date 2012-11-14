@@ -96,6 +96,15 @@ let rec pointed_to_type ct_for_cu ctyp =
       pointed_to_type ct_for_cu (Hashtbl.find ct_for_cu.ct_typedefs td)
   | _ -> raise Non_pointer
 
+let rec aggregate_type ct_for_cu ctyp =
+  match ctyp with
+    C_union _ | C_struct _ -> true
+  | C_typedef td ->
+      aggregate_type ct_for_cu (Hashtbl.find ct_for_cu.ct_typedefs td)
+  | C_typetag tt ->
+      aggregate_type ct_for_cu (Hashtbl.find ct_for_cu.ct_typetags tt)
+  | _ -> false
+
 let rec type_size ct_for_cu ctyp =
   match ctyp with
     C_void -> 1
