@@ -217,7 +217,10 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
 	  "Last instruction of block (%s) does no control flow" insn)
 
     (* Insert an insn at the end of a code sequence, before any control-flow
-       instruction if one is present.  *)
+       instruction if one is present.  FIXME: This is flawed, because it will
+       insert code before the function call for basic blocks which finish with
+       a call (or similar) instruction.  We need to create a new block in those
+       cases.  *)
     let insert_before_control cseq insn =
       if CS.is_empty cseq then
 	CS.snoc cseq insn

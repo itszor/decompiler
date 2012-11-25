@@ -310,6 +310,8 @@ and convert_control ct_for_cu vars ctl fallthru acc =
       convert_jump ct_for_cu vars dst fallthru acc
   | C.CompJump (swval, dests) ->
       convert_compjump ct_for_cu vars swval dests fallthru acc
+  | C.CompJump_ext (abi, dest) ->
+      Cabs.NOP
   | _ ->
       failwith (Printf.sprintf "unsupported control: %s"
         (C.string_of_control ctl))

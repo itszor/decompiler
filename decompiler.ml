@@ -362,13 +362,19 @@ let decompile_sym binf sym =
   let sp_var_set = Sptracking.sp_track blk_arr' vars cu_inf.ci_ctypes in
   add_stackvars_to_entry_block blk_arr' 0 sp_var_set;
   dump_blockarr blk_arr';*)
-  Log.printf 2 "--- gather sp refs ---\n";
+  Log.printf 2 "--- find addressable variables ---\n";
+  let addressable =
+    Ptrtracking.find_addressable blk_arr inforec dwarf_vars cu_inf.ci_ctypes in
+  Log.printf 2 "--- find vars & types for addressable entities ---\n";
+  Dwptrtracking.resolve_vars blk_arr dwarf_vars addressable;
+  (*Log.printf 2 "--- gather sp refs ---\n";
   let stack_coverage =
     Ptrtracking.find_stack_references blk_arr inforec dwarf_vars
 				      cu_inf.ci_ctypes in
   Log.printf 2 "--- ptr tracking ---\n";
   let blk_arr, sp_var_set =
-    Ptrtracking.pointer_tracking blk_arr inforec dwarf_vars cu_inf.ci_ctypes in
+    Dwptrtracking.pointer_tracking blk_arr inforec dwarf_vars
+				   cu_inf.ci_ctypes in
   add_stackvars_to_entry_block blk_arr 0 sp_var_set;
   dump_blockarr blk_arr;
   Log.printf 2 "--- rewrite sp refs ---\n";
@@ -384,7 +390,7 @@ let decompile_sym binf sym =
   Log.printf 2 "--- gather info (2) ---\n";
   Typedb.gather_info blk_arr inforec;
   Typedb.print_info inforec.Typedb.infotag;
-  Typedb.print_implied_info inforec.Typedb.implications;
+  Typedb.print_implied_info inforec.Typedb.implications;*)
   (*Log.printf 2 "--- finding & substituting incoming args ---\n";
   let ht = Args_in.find_args blk_arr 0 in
   let arg_vars = Hashtbl.create 10 in
@@ -407,10 +413,10 @@ let decompile_sym binf sym =
   (*Log.printf 3 "--- add arg types to vars hash ---\n";
   Hashtbl.iter (fun k v -> Hashtbl.add vars k v) arg_vars;*)
   (* Convert more aggregate/array accesses here.  *)
-  Log.printf 3 "--- convert aggregate/array accesses ---\n";
+  (*Log.printf 3 "--- convert aggregate/array accesses ---\n";
   let blk_arr, _ =
-    Ptrtracking.pointer_tracking blk_arr inforec dwarf_vars ~vartype_hash:vars
-				 cu_inf.ci_ctypes in
+    Dwptrtracking.pointer_tracking blk_arr inforec dwarf_vars ~vartype_hash:vars
+				   cu_inf.ci_ctypes in*)
   Log.printf 2 "--- eliminate phi nodes ---\n";
   IrPhiPlacement.eliminate blk_arr;
   dump_blockarr blk_arr;
@@ -615,7 +621,8 @@ let _ =
 	     "Add compilation unit to selection to decompile (default: all)";
      "-f", Arg.String
 	     (fun sel -> selected_funs := sel :: !selected_funs),
-	     "Add function to selection to decompile (default: all)" ] in
+	     "Add function to selection to decompile (default: all)";
+     "-e", Arg.Set continue_after_error, "Continue after errors" ] in
   Arg.parse argspec (fun _ -> ()) "Usage: decompile [options]";
   if not !Sys.interactive then begin
     if !infile = "" then begin

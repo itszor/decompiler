@@ -8,6 +8,7 @@ type classification =
 
 type def_info = {
   src : C.code;
+  src_insn_addr : int32 option;
   mutable num_uses : int;
   mutable classification : classification;
   mutable ctype : Ctype.ctype option;
@@ -40,17 +41,20 @@ let get_defs blk_arr =
   let ht = Hashtbl.create 10 in
   Array.iter
     (fun blk ->
-      CS.iter
-        (fun stmt ->
+      ignore (CS.fold_left
+        (fun insn_addr stmt ->
+	  let ia_ref = ref insn_addr in
 	  C.iter
 	    (function
-	      C.Set (C.SSAReg regid, src) ->
+	      C.Entity (CT.Insn_address ia) -> ia_ref := Some ia
+	    | C.Set (C.SSAReg regid, src) ->
 		let classify =
 		  match src with
 		    C.Immed imm -> Constant
 		  | _ -> Variable in
 		let di = {
 		  src = src;
+		  src_insn_addr = !ia_ref;
 		  classification = classify;
 		  ctype = None;
 		  orig_name = None;
@@ -58,8 +62,14 @@ let get_defs blk_arr =
 		} in
 		Hashtbl.add ht regid di
 	    | _ -> ())
-	  (C.strip_ids stmt))
-	blk.Block.code)
+	  (C.strip_ids stmt);
+	  !ia_ref)
+	None
+	blk.Block.code))
     blk_arr;
   count_uses blk_arr ht;
   ht
+
+let ssa_id_of_code = function
+    C.SSAReg regid -> regid
+  | _ -> raise Not_found

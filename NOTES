@@ -300,12 +300,93 @@ Finding addressable entities on the stack
 
    - debug info might be needed after all, heh.
 
+   - maybe solve with a global analysis/N-pass algorithm: we can tell if one
+     function argument (pointer) is subtracted from another, and hence the
+     pointers must be formed from the same "object".
+   
+   - globally, we might also be able to tell how far a base pointer is
+     offset by (how big the pointed-to object is).
+
+Try 2:
+------
+
+ * Determine possibly-escaping addresses of stack variables. These are CFA+offset addresses which:
+ 
+   - are the source operand for word (pointer-size) stores.
+   
+   - are function arguments. (Stores catch arguments passed on the stack.)
+   
+   - are arguments of phi nodes (pessimistic! Can do a little better.)
+
+ * Use debug info to try to match each of these addresses to a known variable. We don't expect this to be completely reliable: introduce made-up variables for non-matching locations. Debug info might indicate that some variables aren't live for the whole function: at this stage, we have a flat list of basic blocks. Maybe store some metadata about eventual program structure somewhere, as we proceed. We may be able to assume that each BB is completely enclosed by a particular brace block -- or that might only be mostly true.
+
+ * Find all loads, stores and address calculations for CFA+offset addresses. These can be any of:
+ 
+   - [stores/loads] prologue/epilogue code, storing & restoring callee-save registers.
+   
+   - [loads & stores] spill code, keeping temporary values on the stack which don't correspond to variables in the source program.
+   
+   - [loads & stores] local variables which do not have their address taken. These look very similar to spill code, but have some correspondence to variables in the source code.
+   
+   - [loads, stores & get-address] local variables which have their address taken. These will also correspond to variables in the source code.
+   
+   - [stores, get-address] outgoing arguments for function calls passed on the stack. (Get-address for structs returned by reference).
+
+Any "get-address" for a stack location (without further metadata) potentially points to an unboundedly-big object -- we want to find an upper bound for this size, because otherwise we need to put the whole stack above that point into a struct so we can control the layout (we might need to do this as a fallback in some cases anyway).
+
+   - The most pessimistic upper bound is the SP on entry to the function (the CFA).
+   
+   - We can reliably detect prologue code, which can shrink the upper bound by the size of callee-save registers.
+   
+   - Any known variables (from debug info) higher up on the stack than an unknown value will provide a handy cut-off point.
+
 Stack slot sharing
 ------------------
 
 The same stack slot might be used for distinct variables with non-overlapping live ranges (at least, we can't assume that this won't happen). We must be careful that addressable variables stay live for the correct length of time, and that we do not split a single variable into two differently-addressed parts.
 
- * It's OK to create a new variable (on the stack) if it completely initialised, i.e. all of its bytes are written to, and its address cannot escape from the current function (to another function, or a global variable).
+ * It's OK to create a new variable (on the stack) if it completely initialised, i.e. all of its bytes are written to, and its address cannot escape from the current function (to another function, or a global variable). (IOW, stack slots which definitely do not fall within a block whose address is taken can be treated like registers.)
 
- * Conversely, a known N-byte entity must keep the same address if none of it, or only parts of it, are initialised between one use and another.
+ * However, a known N-byte entity must keep the same address if none of it, or only parts of it, are initialised between one use and another (parts of aggregates on the stack being written to).
+
+ * The type of and/or variable represented by a stack slot can potentially change whenever it is written to. If that stack slot has its address taken, we can either:
+ 
+  - attempt to rely on debug data to determine live ranges for variables corresponding to the shared slot.
+  
+  - use a union of all the inferred types represented by the slot -- faking dynamic typing. It might be possible then to split the live ranges by region, or it might not. E.g.:
+  
+    void foo (void)
+    {
+      {
+	int x = 0;
+	bar (&x);
+      }
+      {
+        float y = 1.0;  /* Same stack slot as x.  */
+	baz (&y);
+      }
+    }
+      
+  Here we probably couldn't assume that x & y are different variables just by looking at the code, so we'd have to translate as something like:
+  
+   typedef union {
+     int a;
+     float b;
+   } u;
+   
+   void foo (void)
+   {
+     u tmp;
+     tmp.a = 0;
+     bar (&tmp.a);
+     tmp.b = 1.0;
+     baz (&tmp.b);
+   }
+
+(Assuming that "bar" stores its argument in a global variable, then "baz" could dereference the same global variable.)
+
+  If the address only escapes for part of the stack slot's lifetime (e.g. there's no way it can be dereferenced after a point, and no further functions are called before the function exits), then we might be able to avoid this. I.e., split a stack slot with differing "regions" using different types (different representations) into separate variables.
+
+  It'd be helpful to know if callees are pure/no-side-effect functions. It might be possible to determine that in trivial cases (multi-pass decompilation).
+
 

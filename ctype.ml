@@ -115,6 +115,7 @@ let rec type_size ct_for_cu ctyp =
   | C_float -> 4
   | C_double -> 8
   | C_const x | C_volatile x -> type_size ct_for_cu x
+  | C_signed x | C_unsigned x -> type_size ct_for_cu x
   | C_pointer _ -> 4
   | C_struct (_, agl) -> List.fold_right (fun am acc -> acc + am.size) agl 0
   | C_union (_, agl) -> List.fold_right (fun am acc -> max acc am.size) agl 0
