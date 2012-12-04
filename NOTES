@@ -87,7 +87,7 @@ Decompilation primarily happens one compilation unit at a time, and then one fun
 
  2g. Build a DFS graph of the IR, and reorder the blocks into DFS order.
 
- 2h. Compute dominators using Lengaur/Tarjan's algorithm.
+ 2h. Compute dominators using Lengauer/Tarjan's algorithm.
 
  2i. Convert IR (still containing ARM register references) into SSA form.
 
@@ -113,7 +113,9 @@ So, if a variable is used in both, it's probably going to be an integer. The inf
   iii. If the loaded value is used as a pointer, scan the symbol table to see if we can find a symbol corresponding to the loaded address. If we can, replace the PC-relative load with a move from that symbol's address.
   
   iv. If there's no corresponding symbol, see if the address is contained within a known section (e.g. rodata). Replace the PC-relative load with a move from an offset into that section.
-  
+
+*** FOLLOWING SECTIONS IN FLUX (see below) ***
+
  2l. Code is scanned to find stack references -- anything which forms an address relative to the stack pointer (actually, the canonical frame pointer), or loads or stores relative to such an adddress. Create a coverage structure, noting where such accesses take place (again relative to the CFP). Use the access size to delimit ranges where possible (loads and stores). Store this coverage structure for later.
 
  2m. Perform pointer tracking/resolution for aggregates, using Dwarf information: locations of aggregates on the stack are assumed to be described quite reliably by debug information, relative to locations of "POD" integer/pointer types (which are quite often described incompletely or not at all -- at least in GCC output). Loads, stores and instructions which look like they're forming the address of structure member accesses are rewritten into member accesses ("base.foo").
@@ -123,6 +125,8 @@ So, if a variable is used in both, it's probably going to be an integer. The inf
  2o. SSA conversion is performed for a second time -- converting the local variables from stage (2n) into SSA names.
 
  2p. The information-gathering stage from stage (2j) is performed again, so that we have type information about the new SSA names we just created.
+
+*** END IN-FLUX PART ***
 
  2q. Incoming function argument names are substituted into the IR.
 
@@ -155,7 +159,7 @@ Currently only (very simple) functions can be decompiled -- most of the translat
 
 Conditions are currently handled by setting a "virtual" condition-code register (just a local variable in the function), and explicitly testing the bits of that register to determine the condition's outcome. A relatively simple pass could turn the vast majority (probably all, from compiled code) of such tests into normal comparisons.
 
-It might be sensible to (eventually) add another intermediate representation between the IR and the C AST form, tuned for easier manipulation of high-level control flow, and with a better-defined type system.
+It might be sensible to (eventually) add another intermediate representation between the IR and the C AST form, tuned for easier manipulation of high-level control flow, and with a better-defined type system. (The "Restructure" module is the beginnings of another approach, adding metadata to the existing IR.)
 
 We can do better wrt. recovering names and types for local variables by using more of the debug information. We can probably also recover more of the original program's lexical structure by using yet more debug information (although it remains to be seen how reliable or useful such information is).
 
@@ -214,7 +218,7 @@ Consider,
 
 The two "x"s could have the same stack slot, so it doesn't work to have a static stack map per-function.
 
-Do we need to create a complete stack map per function call site? Actually we only care about stack slots which are visible from each foo's argument list. Similarly when local pointers are stored to globals (probably rare).
+Do we need to create a complete stack map per function call site? Actually we only care about stack slots which are visible from each foo's argument list (NOTE: actually I don't think this is true). Similarly when local pointers are stored to globals (probably rare).
 
 Then we might be able to analyze dataflow between basic blocks, to determine (HL) blocks in which variables are declared.
 
@@ -385,8 +389,9 @@ The same stack slot might be used for distinct variables with non-overlapping li
 
 (Assuming that "bar" stores its argument in a global variable, then "baz" could dereference the same global variable.)
 
+I believe this should be generally safe, even when a & b were originally different variables (in different function-internal scopes).
+
   If the address only escapes for part of the stack slot's lifetime (e.g. there's no way it can be dereferenced after a point, and no further functions are called before the function exits), then we might be able to avoid this. I.e., split a stack slot with differing "regions" using different types (different representations) into separate variables.
 
-  It'd be helpful to know if callees are pure/no-side-effect functions. It might be possible to determine that in trivial cases (multi-pass decompilation).
-
+  It'd be helpful to know if callees are pure/no-side-effect functions. It might be possible to determine that in trivial cases (global/multi-pass decompilation).
 
