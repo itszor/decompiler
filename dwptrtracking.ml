@@ -183,22 +183,22 @@ let pointer_tracking blk_arr inforec dwarf_vars ?vartype_hash ctypes_for_cu =
     blk_arr in
   blk_arr', !stack_vars
 
-let rec starts_at_stack_address location_list insn_addr sp_offset var_size =
+let rec stack_address_within_var location_list insn_addr sp_offset var_size =
   match insn_addr with
     Some insn_addr' ->
       List.fold_right
         (fun location found ->
 	  match location with
-            Location.Within_range (lo, hi, loc)
+            Locations.Within_range (lo, hi, loc)
 	      when insn_addr' >= lo && insn_addr' < hi ->
-	      found || starts_at_stack_address [loc] insn_addr sp_offset
-					       var_size
-	  | Location.Within_range (lo, hi, loc) ->
+	      found || stack_address_within_var [loc] insn_addr sp_offset
+						var_size
+	  | Locations.Within_range (lo, hi, loc) ->
 	      (*Log.printf 3 "Offset %ld not in %s, %lx not in range %lx-%lx\n" 
 	        sp_offset (Location.string_of_location loc) insn_addr' lo hi;*)
 	      found
-	  | Location.Parts _ -> failwith "unimplemented"
-	  | Location.In code ->
+	  | Locations.Parts _ -> failwith "unimplemented"
+	  | Locations.In code ->
               begin match code with
 		C.Reg (CT.Stack o) ->
 		  found || (sp_offset >= Int32.of_int o
@@ -217,8 +217,8 @@ let resolve_vars blk_arr dwarf_vars addressable =
           (fun var ->
 	    match var.Function.var_location with
 	      Some loclist ->
-		let conv_loc = Location.convert_dwarf_loclist loclist in
-		starts_at_stack_address conv_loc
+		let conv_loc = Locations.convert_dwarf_loclist loclist in
+		stack_address_within_var conv_loc
 		  addressable_ent.Ptrtracking.insn_addr
 		  addressable_ent.Ptrtracking.cfa_offset
 		  var.Function.var_size
@@ -233,3 +233,68 @@ let resolve_vars blk_arr dwarf_vars addressable =
         Log.printf 3 "Can't find var for CFA offset %ld\n"
 	  addressable_ent.Ptrtracking.cfa_offset)
     addressable
+
+module OffsetMap = Map.Make
+  (struct
+    type t = int
+    let compare = compare
+  end)
+
+type stack_access_kind =
+    Saved_caller_reg
+  | Outgoing_arg
+  | Local_var_or_spill_slot
+  | Addressable_stack_var
+
+let add_offsetmap_to_blkarr blkarr =
+  Block.map_code
+    (CS.map (fun stmt -> stmt, ref OffsetMap.empty))
+    blkarr
+
+let rec record_kind_for_offset omap offset bytes kind =
+  match bytes with
+    0 -> omap
+  | n ->
+      OffsetMap.add offset kind (record_kind_for_offset omap (succ offset)
+		    (pred bytes) kind)
+
+let store defs accsz src offset offsetmap =
+  match Ptrtracking.first_src defs src with
+    None -> ()
+  | Some (C.Nullary Irtypes.Caller_saved, _) ->
+      offsetmap := record_kind_for_offset !offsetmap (Int32.to_int offset)
+        (Irtypes.access_bytesize accsz) Saved_caller_reg
+  | Some _ -> ()
+
+let scan_forwards blkarr entrypoint =
+  let defs = get_defs blkarr in
+  let num_blks = Array.length blkarr in
+  let offsetmap_at_start = Array.make num_blks OffsetMap.empty
+  and offsetmap_at_end = Array.make num_blks OffsetMap.empty in
+  let blkarr_offsetmap = add_offsetmap_to_blkarr blkarr in
+  let rec scan at =
+    ignore (CS.fold_left
+      (fun insn_addr (stmt, offsetmap) ->
+        let ia_ref = ref insn_addr in
+        ignore (C.map
+	  (fun node ->
+	    try
+              match node with
+	        C.Entity (CT.Insn_address ia) ->
+		  ia_ref := Some ia;
+		  node
+	      | C.Store (accsz, addr, C.SSAReg src) ->
+		  let offset = Ptrtracking.cfa_offset addr defs in
+		  store defs accsz src offset offsetmap;
+		  C.Protect node
+	      | _ -> node
+	    with Ptrtracking.Not_constant_cfa_offset ->
+	      C.Protect node)
+	  stmt);
+	!ia_ref)
+      None
+      blkarr_offsetmap.(at).Block.code);
+    List.iter
+      (fun blk -> scan blk.Block.dfnum)
+      blkarr_offsetmap.(at).Block.successors in
+  scan entrypoint

@@ -31,7 +31,7 @@ OCAMLSRC := log.ml coverage.ml elfreader.ml dwarfreader.ml dwarfprint.ml \
 	    ctype.ml function.ml irtypes.ml ir.ml typedb.ml builtin.ml \
 	    slice_section.ml binary_info.ml insn_to_ir.ml plt.ml dfs.ml \
 	    dominator.ml phi.ml defs.ml ce.ml dce.ml minipool.ml \
-	    location.ml ptrtracking.ml dwptrtracking.ml resolve_section.ml \
+	    locations.ml ptrtracking.ml dwptrtracking.ml resolve_section.ml \
 	    jumptable.ml restructure.ml vartypes.ml ctree.ml decompiler.ml
 
 # OCAMLOBJ := $(shell < .depend $(OCAMLDSORT) -byte $(OCAMLSRC))

@@ -115,3 +115,9 @@ type ir_blockref =
   | BlockNum of int
   | Virtual_entry
   | Virtual_exit
+
+let access_bytesize = function
+    U8 | S8 -> 1
+  | U16 | S16 -> 2
+  | Word -> 4
+  | Dword -> 8

@@ -1,4 +1,4 @@
-open Location
+open Locations
 
 module CS = Ir.IrCS
 module CT = Ir.IrCT

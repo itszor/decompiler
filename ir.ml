@@ -22,6 +22,7 @@ module IrCT =
     type entity = PC of int32
 		| Symbol_addr of string * Elfreader.elf_sym
 		| Arg_var of string
+		| Local_var of string
 		| Section of string
 		| Arg_out
 		| Caller_restored
@@ -163,6 +164,7 @@ module IrCT =
       PC loc -> Printf.sprintf "pc(0x%lx)" loc
     | Symbol_addr (name, _) -> Printf.sprintf "&%s" name
     | Arg_var name -> Printf.sprintf "arg(%s)" name
+    | Local_var name -> Printf.sprintf "local(%s)" name
     | Section name -> Printf.sprintf "section(%s)" name
     | Arg_out -> "arg_out"
     | Caller_restored -> "caller_restored"

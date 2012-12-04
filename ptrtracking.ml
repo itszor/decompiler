@@ -45,6 +45,14 @@ let track_pointer defs use =
       raise Untrackable in
   track use 0l
 
+let first_src defs use =
+  try
+    let deflist = track_pointer defs use in
+    match deflist with
+      [] -> None
+    | deflist -> Some (List.nth deflist (List.length deflist - 1))
+  with Untrackable -> None
+
 exception Not_constant_cfa_offset
 
 let find_pointer_cfa_offset_equiv defs ptr_reg offset =
