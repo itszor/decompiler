@@ -609,6 +609,7 @@ let _ =
   and list_compunits = ref false
   and selected_compunits = ref []
   and selected_funs = ref []
+  and gc_alarms = ref false
   and infile = ref "" in
   let argspec =
     ["-a", Arg.Set do_all,
@@ -622,13 +623,16 @@ let _ =
      "-f", Arg.String
 	     (fun sel -> selected_funs := sel :: !selected_funs),
 	     "Add function to selection to decompile (default: all)";
-     "-e", Arg.Set continue_after_error, "Continue after errors" ] in
+     "-e", Arg.Set continue_after_error, "Continue after errors";
+     "-m", Arg.Set gc_alarms, "Show major GC cycles" ] in
   Arg.parse argspec (fun _ -> ()) "Usage: decompile [options]";
   if not !Sys.interactive then begin
     if !infile = "" then begin
       prerr_endline "No input file";
       exit 1
     end;
+    if !gc_alarms then
+      ignore (Gc.create_alarm (fun () -> flush stdout; prerr_endline "[gc]"));
     let binf = open_file !infile in
     if !list_compunits then begin
       Printf.printf "Compilation units:\n";
