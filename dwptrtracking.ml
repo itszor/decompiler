@@ -1,5 +1,6 @@
 open Defs
 
+module BS = Ir.IrBS
 module CS = Ir.IrCS
 module CT = Ir.IrCT
 module C = Ir.Ir
@@ -272,10 +273,14 @@ let scan_forwards blkarr entrypoint =
   let offsetmap_at_start = Array.make num_blks OffsetMap.empty
   and offsetmap_at_end = Array.make num_blks OffsetMap.empty in
   let blkarr_offsetmap = add_offsetmap_to_blkarr blkarr in
-  let rec scan at =
-    ignore (CS.fold_left
-      (fun insn_addr (stmt, offsetmap) ->
-        let ia_ref = ref insn_addr in
+  Block.clear_visited blkarr_offsetmap;
+  let rec scan cur_offsetmap at =
+    Log.printf 3 "Propagating to block %d\n" at;
+    offsetmap_at_start.(at) <- cur_offsetmap;
+    let _, final_offsetmap = CS.fold_left
+      (fun (insn_addr, offsetmap_acc) (stmt, stmt_offsetmap) ->
+        let ia_ref = ref insn_addr
+	and om_ref = ref offsetmap_acc in
         ignore (C.map
 	  (fun node ->
 	    try
@@ -285,16 +290,57 @@ let scan_forwards blkarr entrypoint =
 		  node
 	      | C.Store (accsz, addr, C.SSAReg src) ->
 		  let offset = Ptrtracking.cfa_offset addr defs in
-		  store defs accsz src offset offsetmap;
+		  store defs accsz src offset om_ref;
 		  C.Protect node
 	      | _ -> node
 	    with Ptrtracking.Not_constant_cfa_offset ->
 	      C.Protect node)
 	  stmt);
-	!ia_ref)
-      None
-      blkarr_offsetmap.(at).Block.code);
+	stmt_offsetmap := !om_ref;
+	!ia_ref, !om_ref)
+      (None, cur_offsetmap)
+      blkarr_offsetmap.(at).Block.code in
+    offsetmap_at_end.(at) <- final_offsetmap;
+    blkarr_offsetmap.(at).Block.visited <- true;
     List.iter
-      (fun blk -> scan blk.Block.dfnum)
+      (fun blk ->
+        let dest_dfnum = blk.Block.dfnum in
+        let dest_start = offsetmap_at_start.(dest_dfnum) in
+	if not (OffsetMap.equal (=) dest_start final_offsetmap)
+	   || not blkarr_offsetmap.(dest_dfnum).Block.visited then
+          scan final_offsetmap dest_dfnum)
       blkarr_offsetmap.(at).Block.successors in
-  scan entrypoint
+  scan OffsetMap.empty entrypoint;
+  blkarr_offsetmap
+
+let string_of_offsetmap om =
+  let opt = function
+    None -> "*"
+  | Some x -> string_of_int x in
+  let mini, maxi =
+    OffsetMap.fold
+      (fun key _ (lo, hi) ->
+        begin match lo with
+	  None -> Some key
+	| Some lo -> Some (min key lo)
+	end,
+	begin match hi with
+	  None -> Some key
+	| Some hi -> Some (max key hi)
+	end)
+      om
+      (None, None) in
+  let prefix = Printf.sprintf "[%s...%s]" (opt mini) (opt maxi) in
+  prefix
+
+let dump_offsetmap_blkarr barr =
+  Array.iter
+    (fun block ->
+      Log.printf 3 "block id \"%s\":\n" (BS.string_of_blockref block.Block.id);
+      ignore (CS.fold_left
+        (fun _ (code, offsets) ->
+	  Log.printf 3 "%s\t%s\n" (C.string_of_code code)
+		     (string_of_offsetmap !offsets))
+	()
+        block.Block.code))
+    barr
