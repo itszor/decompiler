@@ -368,7 +368,7 @@ let decompile_sym binf sym =
   Log.printf 2 "--- find vars & types for addressable entities ---\n";
   Dwptrtracking.resolve_vars blk_arr dwarf_vars addressable;
   Log.printf 2 "--- propagating stack references ---\n";
-  let blkarr_om = Dwptrtracking.scan_forwards blk_arr 0 in
+  let blkarr_om = Dwptrtracking.scan_stack_accesses blk_arr 0 in
   Dwptrtracking.dump_offsetmap_blkarr blkarr_om;
   (*Log.printf 2 "--- gather sp refs ---\n";
   let stack_coverage =

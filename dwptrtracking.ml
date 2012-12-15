@@ -259,6 +259,18 @@ let rec record_kind_for_offset omap offset bytes kind =
       OffsetMap.add offset kind (record_kind_for_offset omap (succ offset)
 		    (pred bytes) kind)
 
+exception Mixed
+
+let kind_for_offset_word omap offset =
+  let b1 = OffsetMap.find offset omap
+  and b2 = OffsetMap.find (offset + 1) omap
+  and b3 = OffsetMap.find (offset + 2) omap
+  and b4 = OffsetMap.find (offset + 3) omap in
+  if b1 = b2 && b2 = b3 && b3 = b4 then
+    b1
+  else
+    raise Mixed
+
 let store defs accsz src offset offsetmap =
   match Ptrtracking.first_src defs src with
     None -> ()
@@ -267,14 +279,18 @@ let store defs accsz src offset offsetmap =
         (Irtypes.access_bytesize accsz) Saved_caller_reg
   | Some _ -> ()
 
-let scan_forwards blkarr entrypoint =
+let load defs accsz offset offsetmap =
+  offsetmap := record_kind_for_offset !offsetmap (Int32.to_int offset)
+    (Irtypes.access_bytesize accsz) Outgoing_arg
+
+let scan_stack_accesses blkarr entrypoint =
   let defs = get_defs blkarr in
   let num_blks = Array.length blkarr in
   let offsetmap_at_start = Array.make num_blks OffsetMap.empty
   and offsetmap_at_end = Array.make num_blks OffsetMap.empty in
   let blkarr_offsetmap = add_offsetmap_to_blkarr blkarr in
-  Block.clear_visited blkarr_offsetmap;
-  let rec scan cur_offsetmap at =
+  (* Propagate stores forwards.  *)
+  let rec scan_f cur_offsetmap at =
     Log.printf 3 "Propagating to block %d\n" at;
     offsetmap_at_start.(at) <- cur_offsetmap;
     let _, final_offsetmap = CS.fold_left
@@ -308,10 +324,79 @@ let scan_forwards blkarr entrypoint =
         let dest_start = offsetmap_at_start.(dest_dfnum) in
 	if not (OffsetMap.equal (=) dest_start final_offsetmap)
 	   || not blkarr_offsetmap.(dest_dfnum).Block.visited then
-          scan final_offsetmap dest_dfnum)
+          scan_f final_offsetmap dest_dfnum)
       blkarr_offsetmap.(at).Block.successors in
-  scan OffsetMap.empty entrypoint;
+  (* Propagate loads backwards.  *)
+  let rec scan_b cur_offsetmap at =
+    Log.printf 3 "Propagating backwards to block %d\n" at;
+    offsetmap_at_end.(at) <- cur_offsetmap;
+    let _, start_offsetmap = CS.fold_right
+      (fun (stmt, stmt_offsetmap) (insn_addr, offsetmap_acc) ->
+        let ia_ref = ref insn_addr
+	and om_ref = ref offsetmap_acc in
+	ignore (C.map
+	  (fun node ->
+	    try
+	      match node with
+	        C.Entity (CT.Insn_address ia) ->
+		  ia_ref := Some ia;
+		  node
+	      | _ -> node
+	    with Ptrtracking.Not_constant_cfa_offset ->
+	      C.Protect node)
+	  ~ctl_fn:(fun node ->
+	    match node with
+	      C.Call_ext (_, _, args, _, _) ->
+	        ignore (C.map
+		  (fun node ->
+		    try
+		      match node with
+			C.Load (accsz, addr) ->
+			  let offset = Ptrtracking.cfa_offset addr defs in
+			  load defs accsz offset om_ref;
+			  C.Protect node
+		      | _ -> node
+		    with Ptrtracking.Not_constant_cfa_offset ->
+		      C.Protect node)
+		  args);
+		node
+	    | _ -> node)
+	  stmt);
+	stmt_offsetmap := !om_ref;
+	!ia_ref, !om_ref)
+      blkarr_offsetmap.(at).Block.code
+      (None, cur_offsetmap) in
+    offsetmap_at_start.(at) <- start_offsetmap;
+    blkarr_offsetmap.(at).Block.visited <- true;
+    List.iter
+      (fun blk ->
+        let dest_dfnum = blk.Block.dfnum in
+	let dest_end = offsetmap_at_end.(dest_dfnum) in
+	if not (OffsetMap.equal (=) dest_end start_offsetmap)
+	   || not blkarr_offsetmap.(dest_dfnum).Block.visited then
+	  scan_b start_offsetmap dest_dfnum)
+      blkarr_offsetmap.(at).Block.predecessors in
+  Block.clear_visited blkarr_offsetmap;
+  scan_f OffsetMap.empty entrypoint;
+  Block.clear_visited blkarr_offsetmap;
+  (* I'm not sure if control always reaches the virtual_exit block: scan all
+     the blocks to be sure.  FIXME?  *)
+  for i = Array.length blkarr_offsetmap - 1 downto 0 do
+    if not blkarr_offsetmap.(i).Block.visited then
+      scan_b offsetmap_at_end.(i) i;
+  done;
   blkarr_offsetmap
+
+let letter_for_offset_word omap offset =
+  try
+    match kind_for_offset_word omap offset with
+      Saved_caller_reg -> 'R'
+    | Outgoing_arg -> 'A'
+    | Local_var_or_spill_slot -> 'V'
+    | Addressable_stack_var -> '&'
+  with
+    Not_found -> '.'
+  | Mixed -> '*'
 
 let string_of_offsetmap om =
   let opt = function
@@ -330,8 +415,17 @@ let string_of_offsetmap om =
 	end)
       om
       (None, None) in
-  let prefix = Printf.sprintf "[%s...%s]" (opt mini) (opt maxi) in
-  prefix
+  let prefix = Printf.sprintf "[%s...%s] " (opt mini) (opt maxi) in
+  let buf = Buffer.create 5 in
+  begin match mini, maxi with
+    Some mini, Some maxi ->
+      for i = (maxi - 3) / 4 downto mini / 4 do
+	Buffer.add_char buf (letter_for_offset_word om (i * 4))
+      done
+  | _ -> ()
+  end;
+  prefix ^ (Buffer.contents buf)
+
 
 let dump_offsetmap_blkarr barr =
   Array.iter
