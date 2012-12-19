@@ -211,7 +211,7 @@ let rec stack_address_within_var location_list insn_addr sp_offset var_size =
   | None -> false
 
 let resolve_vars blk_arr dwarf_vars addressable =
-  List.iter
+  List.map
     (fun addressable_ent ->
       try
 	let var = List.find
@@ -229,10 +229,14 @@ let resolve_vars blk_arr dwarf_vars addressable =
 	  Ptrtracking.string_of_optional_insn_addr
 	    addressable_ent.Ptrtracking.insn_addr in
 	Log.printf 3 "Found var for CFA offset %ld (%s): %s\n"
-	  addressable_ent.Ptrtracking.cfa_offset iaddr_str var.Function.var_name
+	  addressable_ent.Ptrtracking.cfa_offset iaddr_str
+	  var.Function.var_name;
+	{ addressable_ent with Ptrtracking.ent_size =
+				 Some var.Function.var_size }
       with Not_found ->
         Log.printf 3 "Can't find var for CFA offset %ld\n"
-	  addressable_ent.Ptrtracking.cfa_offset)
+	  addressable_ent.Ptrtracking.cfa_offset;
+	addressable_ent)
     addressable
 
 module OffsetMap = Map.Make
@@ -245,7 +249,7 @@ type stack_access_kind =
     Saved_caller_reg
   | Outgoing_arg
   | Local_var_or_spill_slot
-  | Addressable_stack_var
+  | Addressable_local_var
 
 let add_offsetmap_to_blkarr blkarr =
   Block.map_code
@@ -279,11 +283,19 @@ let store defs accsz src offset offsetmap =
         (Irtypes.access_bytesize accsz) Saved_caller_reg
   | Some _ -> ()
 
-let load defs accsz offset offsetmap =
+let outgoing_arg defs accsz offset offsetmap =
   offsetmap := record_kind_for_offset !offsetmap (Int32.to_int offset)
     (Irtypes.access_bytesize accsz) Outgoing_arg
 
-let scan_stack_accesses blkarr entrypoint =
+let mark_addressable addressable_ent offsetmap =
+  match addressable_ent.Ptrtracking.ent_size with
+    Some ent_size ->
+      offsetmap := record_kind_for_offset !offsetmap
+	(Int32.to_int addressable_ent.Ptrtracking.cfa_offset) ent_size
+	Addressable_local_var
+  | None -> ()
+
+let scan_stack_accesses blkarr addressable entrypoint =
   let defs = get_defs blkarr in
   let num_blks = Array.length blkarr in
   let offsetmap_at_start = Array.make num_blks OffsetMap.empty
@@ -303,6 +315,13 @@ let scan_stack_accesses blkarr entrypoint =
               match node with
 	        C.Entity (CT.Insn_address ia) ->
 		  ia_ref := Some ia;
+		  List.iter
+		    (fun addressable_ent ->
+		      match addressable_ent.Ptrtracking.insn_addr with
+		        Some insn_addr when insn_addr = ia ->
+			  mark_addressable addressable_ent om_ref
+		      | _ -> ())
+		    addressable;
 		  node
 	      | C.Store (accsz, addr, C.SSAReg src) ->
 		  let offset = Ptrtracking.cfa_offset addr defs in
@@ -353,7 +372,7 @@ let scan_stack_accesses blkarr entrypoint =
 		      match node with
 			C.Load (accsz, addr) ->
 			  let offset = Ptrtracking.cfa_offset addr defs in
-			  load defs accsz offset om_ref;
+			  outgoing_arg defs accsz offset om_ref;
 			  C.Protect node
 		      | _ -> node
 		    with Ptrtracking.Not_constant_cfa_offset ->
@@ -393,7 +412,7 @@ let letter_for_offset_word omap offset =
       Saved_caller_reg -> 'R'
     | Outgoing_arg -> 'A'
     | Local_var_or_spill_slot -> 'V'
-    | Addressable_stack_var -> '&'
+    | Addressable_local_var -> '&'
   with
     Not_found -> '.'
   | Mixed -> '*'
