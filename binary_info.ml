@@ -30,6 +30,7 @@ type binary_info = {
   debug_line : Bitstring.bitstring;
   debug_pubnames : Bitstring.bitstring;
   debug_aranges : Bitstring.bitstring;
+  debug_ranges : Bitstring.bitstring;
   debug_loc : Bitstring.bitstring;
   text : Bitstring.bitstring;
   rodata : Bitstring.bitstring;
@@ -45,6 +46,8 @@ type binary_info = {
   rodata_sliced : Slice_section.slicetype Coverage.coverage;
   (* Parsed arange data.  *)
   parsed_aranges : (aranges_header * (int32 * int32) list) list;
+  (* Parsed range data.  *)
+  parsed_ranges : (int32, (int32 * int32) list) Hashtbl.t;
   (* Relocations from the .rel.plt section.  *)
   parsed_rel_plt : elf_rel array;
   (* Hashtbl of cu_infos, indexed by debug_info offset.  *)
@@ -114,6 +117,7 @@ let index_debug_data binf parsed_data =
 	  let debug_abbr_offset = cu_header.debug_abbrev_offset in
 	  let debug_abbr = offset_section binf.debug_abbrev debug_abbr_offset in
 	  let abbrevs = parse_abbrevs debug_abbr in
+	  Log.printf 4 "Parsed %d abbrevs\n" (Array.length abbrevs);
 	  let cu_dies, die_hash, _ =
 	    parse_die_for_cu after_cu_hdr
 	      ~length:(Bitstring.bitstring_length debug_inf_for_hdr)
@@ -164,6 +168,8 @@ let open_file filename =
 					   ".debug_pubnames" in
   let debug_aranges = get_section_by_name elfbits ehdr shdr_arr
 					  ".debug_aranges" in
+  let debug_ranges = get_section_by_name elfbits ehdr shdr_arr
+					 ".debug_ranges" in
   let debug_loc = get_section_by_name elfbits ehdr shdr_arr ".debug_loc" in
   let text = get_section_by_name elfbits ehdr shdr_arr ".text" in
   let rodata = get_section_by_name elfbits ehdr shdr_arr ".rodata" in
@@ -181,6 +187,7 @@ let open_file filename =
   let rodata_sliced = Coverage.create_coverage
     shdr_arr.(rodata_shdrnum).sh_addr shdr_arr.(rodata_shdrnum).sh_size in
   let ar = parse_all_arange_data debug_aranges in
+  let ranges = parse_ranges debug_ranges in
   let plt_rels = parse_rel_sec rel_plt in
   let binf = {
     elfbits = elfbits;
@@ -192,6 +199,7 @@ let open_file filename =
     debug_line = debug_line;
     debug_pubnames = debug_pubnames;
     debug_aranges = debug_aranges;
+    debug_ranges = debug_ranges;
     debug_loc = debug_loc;
     text = text;
     rodata = rodata;
@@ -206,6 +214,7 @@ let open_file filename =
     mapping_syms = mapping_syms;
     rodata_sliced = rodata_sliced;
     parsed_aranges = ar;
+    parsed_ranges = ranges;
     parsed_rel_plt = plt_rels;
     cu_hash = Hashtbl.create 10
   } in

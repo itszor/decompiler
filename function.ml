@@ -104,7 +104,8 @@ type var =
     var_name : string;
     var_type : Ctype.ctype;
     var_size : int;
-    var_location : Dwarfreader.location option
+    var_location : Dwarfreader.location option;
+    mutable var_addressable : bool
   }
 
 let function_vars die die_hash locbits ~compunit_baseaddr ctypes_for_cu =
@@ -128,7 +129,8 @@ let function_vars die die_hash locbits ~compunit_baseaddr ctypes_for_cu =
 	  var_name = var_name;
 	  var_type = var_type;
 	  var_size = type_size;
-	  var_location = var_loc
+	  var_location = var_loc;
+	  var_addressable = false
 	} in
 	makelist sibl (var :: acc)
     | Die_tree ((DW_TAG_lexical_block, attrs), child, _) ->

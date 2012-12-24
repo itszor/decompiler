@@ -286,8 +286,7 @@ type addressable_entity =
   {
     code : C.code;
     cfa_offset : int32;
-    insn_addr : int32 option;
-    ent_size : int option
+    insn_addr : int32 option
   }
 
 let string_of_optional_insn_addr = function
@@ -310,8 +309,7 @@ let find_addressable blk_arr inforec vars ctypes_for_cu =
       let new_ent = {
         code = code;
 	cfa_offset = offset;
-	insn_addr = insn_addr;
-	ent_size = None
+	insn_addr = insn_addr
       } in
       addressable := new_ent :: !addressable
     with Not_constant_cfa_offset ->

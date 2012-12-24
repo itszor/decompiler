@@ -7,6 +7,13 @@ type location =
   | Within_range of int32 * int32 * location
   | In of C.code
 
+let rec valid_at_address addr = function
+    In c -> Some c
+  | Within_range (lo, hi, c) when addr >= lo && addr < hi ->
+      valid_at_address addr c
+  | Within_range (_, _, _) -> None
+  | Parts _ -> failwith "unimplemented" (* The location type is all wrong! *)
+
 let string_of_location loc =
   let rec build = function
     In c -> Printf.sprintf "in %s" (C.string_of_code c)
@@ -27,6 +34,9 @@ let convert_dwarf_loc = function
   | `DW_OP_breg (r, o) ->
       C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg r),
 		C.Immed (Big_int.int32_of_big_int o))
+  | `DW_OP_addr addr ->
+      (* FIXME: Dubious.  *)
+      C.Unary (Irtypes.Address_of, C.Immed (Int64.to_int32 addr))
   | _ -> failwith "Unknown loc expr"
 
 let convert_dwarf_loclist = function
@@ -38,3 +48,7 @@ let convert_dwarf_loclist = function
 	  Within_range (lo, hi, In conv_loc) :: acc)
 	ll
 	[]
+
+let convert_dwarf_loclist_opt = function
+    None -> []
+  | Some loclist -> convert_dwarf_loclist loclist

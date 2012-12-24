@@ -65,3 +65,17 @@ let map_code fn blkarr =
       | Some p -> new_blkarr.(this_idx).parent <- Some new_blkarr.(p.dfnum))
     blkarr;
   new_blkarr
+
+(* Find the index of a block for which <<FN block>> is true, or raise Not_found
+   if none satisfies FN.  *)
+
+let find fn blk_arr =
+  let length = Array.length blk_arr in
+  let rec find idx =
+    if idx == length then
+      raise Not_found
+    else if fn blk_arr.(idx) then
+      idx
+    else
+      find (succ idx) in
+  find 0

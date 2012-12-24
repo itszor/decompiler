@@ -459,6 +459,14 @@ type dwarf_abbrev =
     abv_has_children : bool
   }
 
+let dummy_abbrev =
+  {
+    abv_num = -1;
+    abv_tag = DW_TAG_compile_unit;
+    abv_attribs = [];
+    abv_has_children = false
+  }
+
 (* Parse a single abbreviation.  *)
 
 let parse_one_abbrev dwbits =
@@ -489,7 +497,21 @@ let parse_abbrevs dwbits =
   let rec build abbrevs dwbits =
     let abbrev, dwbits = parse_one_abbrev dwbits in
     match abbrev with
-      None -> Array.of_list (List.rev abbrevs)
+      None ->
+        (* I'm not sure anything guarantees that abbrevs are given in
+	   monotonically increasing order.  *)
+        let max_abv =
+	  List.fold_left
+	    (fun maxnum abv ->
+	      assert (abv.abv_num >= 1);
+	      max maxnum abv.abv_num)
+	    0
+	    abbrevs in
+	let arr = Array.make max_abv dummy_abbrev in
+	List.iter
+	  (fun abv -> arr.(abv.abv_num - 1) <- abv)
+	  abbrevs;
+	arr
     | Some (num, tag, attribs, has_children) ->
         build ({ abv_num = num; abv_tag = tag; abv_attribs = attribs;
 		 abv_has_children = has_children } :: abbrevs) dwbits in
@@ -866,10 +888,9 @@ let parse_one_die dwbits ~abbrevs ~addr_size ~string_sec =
   let abbrev_code, dwbits = parse_uleb128_int dwbits in
   if abbrev_code = 0 then
     None, dwbits
-  else begin
+  else if abbrev_code <= Array.length abbrevs then begin
     let abbrev = abbrevs.(abbrev_code - 1) in
-    if abbrev.abv_num != abbrev_code then
-      failwith "Hmm, I expected contiguous numbering in .dwarf_abbrev";
+    assert (abbrev.abv_num == abbrev_code);
     let attr_vals, dwbits = List.fold_left
       (fun (parsed, dwbits) (attr, form) ->
 	let data, dwbits = parse_form dwbits form ~addr_size ~string_sec in
@@ -877,6 +898,9 @@ let parse_one_die dwbits ~abbrevs ~addr_size ~string_sec =
       ([], dwbits)
       abbrev.abv_attribs in
     Some (abbrev.abv_tag, attr_vals, abbrev.abv_has_children), dwbits
+  end else begin
+    Log.printf 1 "Out-of-bounds abbrev (%d)\n" abbrev_code;
+    None, dwbits
   end
 
 type attr_datum = [
@@ -908,13 +932,17 @@ let parse_die_for_cu dwbits ~length ~abbrevs ~addr_size ~string_sec =
   let rec build dwbits depth =
     let offset_bits = length - (Bitstring.bitstring_length dwbits) in
     let offset = offset_bits / 8 in
-    (* Log.printf 3 "parsing die, offset %d\n" offset; *)
+    Log.printf 5 "parsing die, offset %d\n" offset;
     let things, dwbits = parse_one_die dwbits ~abbrevs ~addr_size ~string_sec in
     match things with
       Some (tag, attr_vals, has_children) ->
         let data = tag, attr_vals in
 	let cdepth = if has_children then succ depth else depth in
-	let child_or_sibling, dwbits' = build dwbits cdepth in
+	let child_or_sibling, dwbits' =
+	  if Bitstring.bitstring_length dwbits > 0 then
+	    build dwbits cdepth
+	  else
+	    Die_empty, dwbits in
         let this_node, dwbits' =
 	  if has_children then begin
 	    (* This is kind of ugly: the top-level die must be
@@ -1071,6 +1099,32 @@ let parse_all_arange_data dwbits =
       let aranges_list, rest' = parse_aranges contents in
       build rest' ((hdr, aranges_list) :: acc) in
   build dwbits []
+
+let parse_ranges dwbits =
+  let ht = Hashtbl.create 30 in
+  let rec build dwbits' base sec_offset acc =
+    if Bitstring.bitstring_length dwbits' > 0 then
+      (bitmatch dwbits' with
+	{ start_address : 32 : littleendian;
+          end_address : 32 : littleendian; 
+	  rest : -1 : bitstring } ->
+	if start_address = 0l && end_address = 0l then begin
+	  let list_start =
+	    Int32.sub sec_offset (Int32.of_int (List.length acc * 8)) in
+          Hashtbl.add ht list_start (List.rev acc);
+	  Log.printf 5 "Added at %lx:\n" list_start;
+	  List.iter (fun (l, h) -> Log.printf 5 "%lx %lx\n" l h) (List.rev acc);
+	  build rest 0l (Int32.add sec_offset 8l) []
+	end else if start_address = 0xffffffffl then begin
+	  Log.printf 5 "Changing base to %lx\n" end_address;
+          build rest end_address (Int32.add sec_offset 8l) acc
+	end else
+	  let base_start = Int32.add base start_address
+	  and base_end = Int32.add base end_address in
+          build rest base (Int32.add sec_offset 8l)
+		((base_start, base_end) :: acc)) in
+  build dwbits 0l 0l [];
+  ht
 
 let parse_loc_list dwbits ~addr_size ~compunit_baseaddr =
   let rec build dwbits' acc =

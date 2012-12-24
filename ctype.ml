@@ -195,11 +195,11 @@ let rec dwarf_type_size die die_hash =
       let targ = get_attr_deref attrs DW_AT_type die_hash in
       dwarf_type_size targ die_hash
   | Die_tree ((DW_TAG_array_type, attrs), child, _) ->
+      let elem_type = get_attr_deref attrs DW_AT_type die_hash in
+      let elsize = dwarf_type_size elem_type die_hash in
       begin match child with
         Die_node ((DW_TAG_subrange_type, attrs), _) ->
 	  let upper_bound = get_attr_int attrs DW_AT_upper_bound in
-	  let elem_type = get_attr_deref attrs DW_AT_type die_hash in
-	  let elsize = dwarf_type_size elem_type die_hash in
 	  elsize * (upper_bound + 1)
       | _ -> failwith "can't find array size"
       end

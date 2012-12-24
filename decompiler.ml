@@ -365,11 +365,12 @@ let decompile_sym binf sym =
   Log.printf 2 "--- find addressable variables ---\n";
   let addressable =
     Ptrtracking.find_addressable blk_arr inforec dwarf_vars cu_inf.ci_ctypes in
-  Log.printf 2 "--- find vars & types for addressable entities ---\n";
-  let addressable =
-    Dwptrtracking.resolve_vars blk_arr dwarf_vars addressable in
+  Log.printf 2 "--- finding address-taken vars ---\n";
+  Dwptrtracking.mark_addressable_vars blk_arr dwarf_vars addressable;
+  Log.printf 2 "--- sp tracking ---\n";
+  let sp_cov = Sptracking.sp_track blk_arr in
   Log.printf 2 "--- propagating stack references ---\n";
-  let blkarr_om = Dwptrtracking.scan_stack_accesses blk_arr addressable 0 in
+  let blkarr_om = Dwptrtracking.scan_stack_accesses blk_arr dwarf_vars 0 in
   Dwptrtracking.dump_offsetmap_blkarr blkarr_om;
   (*Log.printf 2 "--- gather sp refs ---\n";
   let stack_coverage =

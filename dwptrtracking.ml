@@ -210,8 +210,8 @@ let rec stack_address_within_var location_list insn_addr sp_offset var_size =
 	false
   | None -> false
 
-let resolve_vars blk_arr dwarf_vars addressable =
-  List.map
+let mark_addressable_vars blk_arr dwarf_vars addressable =
+  List.iter
     (fun addressable_ent ->
       try
 	let var = List.find
@@ -231,12 +231,11 @@ let resolve_vars blk_arr dwarf_vars addressable =
 	Log.printf 3 "Found var for CFA offset %ld (%s): %s\n"
 	  addressable_ent.Ptrtracking.cfa_offset iaddr_str
 	  var.Function.var_name;
-	{ addressable_ent with Ptrtracking.ent_size =
-				 Some var.Function.var_size }
+	(* Mark that the variable is addressable.  *)
+	var.Function.var_addressable <- true
       with Not_found ->
         Log.printf 3 "Can't find var for CFA offset %ld\n"
-	  addressable_ent.Ptrtracking.cfa_offset;
-	addressable_ent)
+	  addressable_ent.Ptrtracking.cfa_offset)
     addressable
 
 module OffsetMap = Map.Make
@@ -248,20 +247,46 @@ module OffsetMap = Map.Make
 type stack_access_kind =
     Saved_caller_reg
   | Outgoing_arg
-  | Local_var_or_spill_slot
+  | Local_var
   | Addressable_local_var
+  | Local_var_or_spill_slot
 
 let add_offsetmap_to_blkarr blkarr =
   Block.map_code
     (CS.map (fun stmt -> stmt, ref OffsetMap.empty))
     blkarr
 
+let mix_kind offset old_kind new_kind =
+  match old_kind, new_kind with
+    Saved_caller_reg, Saved_caller_reg -> Saved_caller_reg
+  | Saved_caller_reg, _
+  | _, Saved_caller_reg ->
+      Log.printf 3 "*** caller-saved reg collision, offset %d ***\n" offset;
+      Saved_caller_reg
+  | _, replacement -> replacement
+
+let map_union a b =
+  OffsetMap.merge
+    (fun offset a_opt b_opt ->
+      match a_opt, b_opt with
+        Some x, Some y -> Some (mix_kind offset x y)
+      | Some x, None -> Some x
+      | None, Some y -> Some y
+      | None, None -> None) a b
+
 let rec record_kind_for_offset omap offset bytes kind =
   match bytes with
     0 -> omap
   | n ->
-      OffsetMap.add offset kind (record_kind_for_offset omap (succ offset)
-		    (pred bytes) kind)
+      begin try
+        let existing = OffsetMap.find offset omap in
+	let mixed = mix_kind offset existing kind in
+	OffsetMap.add offset mixed (record_kind_for_offset omap (succ offset)
+		      (pred bytes) kind)
+      with Not_found ->
+	OffsetMap.add offset kind (record_kind_for_offset omap (succ offset)
+		      (pred bytes) kind)
+      end
 
 exception Mixed
 
@@ -276,9 +301,13 @@ let kind_for_offset_word omap offset =
     raise Mixed
 
 let store defs accsz src offset offsetmap =
-  match Ptrtracking.first_src defs src with
+  let first_src = Ptrtracking.first_src defs src in
+  Log.printf 4 "tracking %s for offset %ld\n"
+    (Typedb.string_of_ssa_reg (fst src) (snd src)) offset;
+  match first_src with
     None -> ()
-  | Some (C.Nullary Irtypes.Caller_saved, _) ->
+  | Some ((C.Nullary (Irtypes.Special | Irtypes.Caller_saved) as fs), _) ->
+      Log.printf 4 "first src %s\n" (C.string_of_code fs);
       offsetmap := record_kind_for_offset !offsetmap (Int32.to_int offset)
         (Irtypes.access_bytesize accsz) Saved_caller_reg
   | Some _ -> ()
@@ -287,15 +316,69 @@ let outgoing_arg defs accsz offset offsetmap =
   offsetmap := record_kind_for_offset !offsetmap (Int32.to_int offset)
     (Irtypes.access_bytesize accsz) Outgoing_arg
 
-let mark_addressable addressable_ent offsetmap =
-  match addressable_ent.Ptrtracking.ent_size with
-    Some ent_size ->
-      offsetmap := record_kind_for_offset !offsetmap
-	(Int32.to_int addressable_ent.Ptrtracking.cfa_offset) ent_size
-	Addressable_local_var
-  | None -> ()
+let virtual_exit_idx blk_arr =
+  Block.find (fun blk -> blk.Block.id = Irtypes.Virtual_exit) blk_arr
 
-let scan_stack_accesses blkarr addressable entrypoint =
+let letter_for_offset_word omap offset =
+  try
+    match kind_for_offset_word omap offset with
+      Saved_caller_reg -> 'R'
+    | Outgoing_arg -> 'A'
+    | Local_var_or_spill_slot -> 'V'
+    | Local_var -> 'L'
+    | Addressable_local_var -> '&'
+  with
+    Not_found -> '.'
+  | Mixed -> '*'
+
+let string_of_offsetmap om =
+  let opt = function
+    None -> "*"
+  | Some x -> string_of_int x in
+  let mini, maxi =
+    OffsetMap.fold
+      (fun key _ (lo, hi) ->
+        begin match lo with
+	  None -> Some key
+	| Some lo -> Some (min key lo)
+	end,
+	begin match hi with
+	  None -> Some key
+	| Some hi -> Some (max key hi)
+	end)
+      om
+      (None, None) in
+  let prefix = Printf.sprintf "[%s...%s] " (opt maxi) (opt mini) in
+  let buf = Buffer.create 5 in
+  begin match mini, maxi with
+    Some mini, Some maxi ->
+      for i = (maxi - 3) / 4 downto mini / 4 do
+	Buffer.add_char buf (letter_for_offset_word om (i * 4))
+      done
+  | _ -> ()
+  end;
+  prefix ^ (Buffer.contents buf)
+
+(*let mark_addressable addressable_ent offsetmap =
+  match addressable_ent.Ptrtracking.var with
+    Some var ->
+      offsetmap := record_kind_for_offset !offsetmap
+	(Int32.to_int addressable_ent.Ptrtracking.cfa_offset)
+	  var.Function.var_size
+	Addressable_local_var
+  | None -> ()*)
+
+(* Merge OLDMAP with NEWMAP, returning the merged map and a boolean saying
+   whether any significant changes happened.  *)
+
+let merge_offsetmap oldmap newmap =
+  let mergedmap = map_union oldmap newmap in
+  if OffsetMap.equal (=) oldmap mergedmap then
+    oldmap, false
+  else
+    mergedmap, true
+
+let scan_stack_accesses blkarr dwarf_vars entrypoint =
   let defs = get_defs blkarr in
   let num_blks = Array.length blkarr in
   let offsetmap_at_start = Array.make num_blks OffsetMap.empty
@@ -303,8 +386,12 @@ let scan_stack_accesses blkarr addressable entrypoint =
   let blkarr_offsetmap = add_offsetmap_to_blkarr blkarr in
   (* Propagate stores forwards.  *)
   let rec scan_f cur_offsetmap at =
+    let made_change = ref false in
     Log.printf 3 "Propagating to block %d\n" at;
-    offsetmap_at_start.(at) <- cur_offsetmap;
+    let nom, chg = merge_offsetmap offsetmap_at_start.(at) cur_offsetmap in
+    offsetmap_at_start.(at) <- nom;
+    made_change := !made_change || chg;
+    blkarr_offsetmap.(at).Block.visited <- true;
     let _, final_offsetmap = CS.fold_left
       (fun (insn_addr, offsetmap_acc) (stmt, stmt_offsetmap) ->
         let ia_ref = ref insn_addr
@@ -315,13 +402,30 @@ let scan_stack_accesses blkarr addressable entrypoint =
               match node with
 	        C.Entity (CT.Insn_address ia) ->
 		  ia_ref := Some ia;
+		  (* This could be more efficient if we used a more
+		     sophisticated data structure...  *)
 		  List.iter
-		    (fun addressable_ent ->
-		      match addressable_ent.Ptrtracking.insn_addr with
-		        Some insn_addr when insn_addr = ia ->
-			  mark_addressable addressable_ent om_ref
-		      | _ -> ())
-		    addressable;
+		    (fun dwarf_var ->
+		      let locs = Locations.convert_dwarf_loclist_opt
+				   dwarf_var.Function.var_location in
+		      List.iter
+		        (fun loc ->
+			  let code_opt = Locations.valid_at_address ia loc in
+			  match code_opt with
+			    Some (C.Reg (CT.Stack o)) ->
+			      let typ =
+				if dwarf_var.Function.var_addressable then
+				  Addressable_local_var
+				else
+				  Local_var in
+			      Log.printf 4 "Marking local variable %s (size \
+			        %d) at offset %d\n" dwarf_var.Function.var_name
+				dwarf_var.Function.var_size o;
+			      om_ref := record_kind_for_offset !om_ref o
+				dwarf_var.Function.var_size typ
+			  | _ -> ())
+			locs)
+		    dwarf_vars;
 		  node
 	      | C.Store (accsz, addr, C.SSAReg src) ->
 		  let offset = Ptrtracking.cfa_offset addr defs in
@@ -335,20 +439,25 @@ let scan_stack_accesses blkarr addressable entrypoint =
 	!ia_ref, !om_ref)
       (None, cur_offsetmap)
       blkarr_offsetmap.(at).Block.code in
-    offsetmap_at_end.(at) <- final_offsetmap;
-    blkarr_offsetmap.(at).Block.visited <- true;
+    let nom, chg = merge_offsetmap offsetmap_at_end.(at) final_offsetmap in
+    offsetmap_at_end.(at) <- nom;
+    made_change := !made_change || chg;
     List.iter
       (fun blk ->
         let dest_dfnum = blk.Block.dfnum in
         let dest_start = offsetmap_at_start.(dest_dfnum) in
-	if not (OffsetMap.equal (=) dest_start final_offsetmap)
-	   || not blkarr_offsetmap.(dest_dfnum).Block.visited then
+	if !made_change || not blkarr_offsetmap.(dest_dfnum).Block.visited then
           scan_f final_offsetmap dest_dfnum)
       blkarr_offsetmap.(at).Block.successors in
   (* Propagate loads backwards.  *)
   let rec scan_b cur_offsetmap at =
+    let made_change = ref false in
     Log.printf 3 "Propagating backwards to block %d\n" at;
-    offsetmap_at_end.(at) <- cur_offsetmap;
+    let nom, chg = merge_offsetmap offsetmap_at_end.(at) cur_offsetmap in
+    offsetmap_at_end.(at) <- nom;
+    made_change := !made_change || chg;
+    Log.printf 3 "mark block %d visited\n" at;
+    blkarr_offsetmap.(at).Block.visited <- true;
     let _, start_offsetmap = CS.fold_right
       (fun (stmt, stmt_offsetmap) (insn_addr, offsetmap_acc) ->
         let ia_ref = ref insn_addr
@@ -385,66 +494,23 @@ let scan_stack_accesses blkarr addressable entrypoint =
 	!ia_ref, !om_ref)
       blkarr_offsetmap.(at).Block.code
       (None, cur_offsetmap) in
-    offsetmap_at_start.(at) <- start_offsetmap;
-    blkarr_offsetmap.(at).Block.visited <- true;
+    let nom, chg = merge_offsetmap offsetmap_at_start.(at) start_offsetmap in
+    offsetmap_at_start.(at) <- nom;
+    made_change := !made_change || chg;
     List.iter
       (fun blk ->
         let dest_dfnum = blk.Block.dfnum in
 	let dest_end = offsetmap_at_end.(dest_dfnum) in
-	if not (OffsetMap.equal (=) dest_end start_offsetmap)
-	   || not blkarr_offsetmap.(dest_dfnum).Block.visited then
+	if !made_change || not blkarr_offsetmap.(dest_dfnum).Block.visited then
 	  scan_b start_offsetmap dest_dfnum)
       blkarr_offsetmap.(at).Block.predecessors in
   Block.clear_visited blkarr_offsetmap;
   scan_f OffsetMap.empty entrypoint;
   Block.clear_visited blkarr_offsetmap;
-  (* I'm not sure if control always reaches the virtual_exit block: scan all
-     the blocks to be sure.  FIXME?  *)
-  for i = Array.length blkarr_offsetmap - 1 downto 0 do
-    if not blkarr_offsetmap.(i).Block.visited then
-      scan_b offsetmap_at_end.(i) i;
-  done;
+  let v_exit = virtual_exit_idx blkarr_offsetmap in
+  Log.printf 3 "Using virtual exit block index %d\n" v_exit;
+  scan_b offsetmap_at_end.(v_exit) v_exit;
   blkarr_offsetmap
-
-let letter_for_offset_word omap offset =
-  try
-    match kind_for_offset_word omap offset with
-      Saved_caller_reg -> 'R'
-    | Outgoing_arg -> 'A'
-    | Local_var_or_spill_slot -> 'V'
-    | Addressable_local_var -> '&'
-  with
-    Not_found -> '.'
-  | Mixed -> '*'
-
-let string_of_offsetmap om =
-  let opt = function
-    None -> "*"
-  | Some x -> string_of_int x in
-  let mini, maxi =
-    OffsetMap.fold
-      (fun key _ (lo, hi) ->
-        begin match lo with
-	  None -> Some key
-	| Some lo -> Some (min key lo)
-	end,
-	begin match hi with
-	  None -> Some key
-	| Some hi -> Some (max key hi)
-	end)
-      om
-      (None, None) in
-  let prefix = Printf.sprintf "[%s...%s] " (opt mini) (opt maxi) in
-  let buf = Buffer.create 5 in
-  begin match mini, maxi with
-    Some mini, Some maxi ->
-      for i = (maxi - 3) / 4 downto mini / 4 do
-	Buffer.add_char buf (letter_for_offset_word om (i * 4))
-      done
-  | _ -> ()
-  end;
-  prefix ^ (Buffer.contents buf)
-
 
 let dump_offsetmap_blkarr barr =
   Array.iter
