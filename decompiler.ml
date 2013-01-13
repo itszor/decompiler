@@ -318,6 +318,7 @@ let decompile_sym binf sym =
   let dwarf_vars =
     Function.function_vars die cu_inf.ci_dietab binf.debug_loc
 			   ~compunit_baseaddr:base_addr_for_cu
+			   ~ranges:binf.parsed_ranges
 			   cu_inf.ci_ctypes in
   let inforec = Typedb.create_info () in
   let blockseq, ht =
@@ -371,6 +372,8 @@ let decompile_sym binf sym =
   let sp_cov = Sptracking.sp_track blk_arr in
   Log.printf 2 "--- propagating stack references ---\n";
   let blkarr_om = Dwptrtracking.scan_stack_accesses blk_arr dwarf_vars 0 in
+  Log.printf 2 "--- merging known variables from dwarf info ---\n";
+  let blkarr_om = Dwptrtracking.merge_dwarf_vars blkarr_om dwarf_vars in
   Dwptrtracking.dump_offsetmap_blkarr blkarr_om;
   (*Log.printf 2 "--- gather sp refs ---\n";
   let stack_coverage =

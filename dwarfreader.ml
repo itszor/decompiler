@@ -1102,7 +1102,7 @@ let parse_all_arange_data dwbits =
 
 let parse_ranges dwbits =
   let ht = Hashtbl.create 30 in
-  let rec build dwbits' base sec_offset acc =
+  let rec build dwbits' base_opt sec_offset acc =
     if Bitstring.bitstring_length dwbits' > 0 then
       (bitmatch dwbits' with
 	{ start_address : 32 : littleendian;
@@ -1111,19 +1111,27 @@ let parse_ranges dwbits =
 	if start_address = 0l && end_address = 0l then begin
 	  let list_start =
 	    Int32.sub sec_offset (Int32.of_int (List.length acc * 8)) in
-          Hashtbl.add ht list_start (List.rev acc);
+          let rebase_list deferred_base =
+	    List.rev_map
+	      (fun (b, s, e) ->
+		let use_base =
+		  match b with
+		    None -> deferred_base
+		  | Some reset_base -> reset_base in
+		Int32.add use_base s, Int32.add use_base e)
+	      acc in
+          Hashtbl.add ht list_start rebase_list;
 	  Log.printf 5 "Added at %lx:\n" list_start;
-	  List.iter (fun (l, h) -> Log.printf 5 "%lx %lx\n" l h) (List.rev acc);
-	  build rest 0l (Int32.add sec_offset 8l) []
+	  List.iter (fun (_, l, h) ->
+	    Log.printf 5 "%lx %lx\n" l h) (List.rev acc);
+	  build rest None (Int32.add sec_offset 8l) []
 	end else if start_address = 0xffffffffl then begin
 	  Log.printf 5 "Changing base to %lx\n" end_address;
-          build rest end_address (Int32.add sec_offset 8l) acc
+          build rest (Some end_address) (Int32.add sec_offset 8l) acc
 	end else
-	  let base_start = Int32.add base start_address
-	  and base_end = Int32.add base end_address in
-          build rest base (Int32.add sec_offset 8l)
-		((base_start, base_end) :: acc)) in
-  build dwbits 0l 0l [];
+          build rest base_opt (Int32.add sec_offset 8l)
+		((base_opt, start_address, end_address) :: acc)) in
+  build dwbits None 0l [];
   ht
 
 let parse_loc_list dwbits ~addr_size ~compunit_baseaddr =

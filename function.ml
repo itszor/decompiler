@@ -99,21 +99,46 @@ let function_type debug_loc name die die_hash ctypes_for_cu ~compunit_baseaddr =
 	prototyped = prototyped }
   | _ -> raise Unknown_type
 
+type liveness =
+    Everywhere
+  | Lo_hi_range of int32 * int32
+  | Range_list of (int32 * int32) list
+
 type var =
   {
     var_name : string;
     var_type : Ctype.ctype;
     var_size : int;
     var_location : Dwarfreader.location option;
-    mutable var_addressable : bool
+    (* The addresses of instructions where this variable is live.  *)
+    var_liveness : liveness;
+    (* Whether the variable (or part of the variable) has its address taken.  *)
+    mutable var_addressable : bool;
   }
 
-let function_vars die die_hash locbits ~compunit_baseaddr ctypes_for_cu =
-  let rec makelist die acc =
+let modify_liveness old_liveness die_hash ranges cu_baseaddr attrs =
+  try
+    let low_pc = Dwarfreader.get_attr_address attrs DW_AT_low_pc
+    and hi_pc = Dwarfreader.get_attr_address attrs DW_AT_high_pc in
+    Lo_hi_range (low_pc, hi_pc)
+  with Not_found ->
+    begin
+      try
+        let range_idx = Dwarfreader.get_attr_int32 attrs DW_AT_ranges in
+	let rangelist_fn = Hashtbl.find ranges range_idx in
+	let rangelist = rangelist_fn cu_baseaddr in
+	Range_list rangelist
+      with Not_found ->
+        old_liveness
+    end
+
+let function_vars die die_hash locbits ~compunit_baseaddr ~ranges
+		  ctypes_for_cu =
+  let rec makelist die liveness acc =
     match die with
       Die_node ((DW_TAG_formal_parameter, _), sibl) ->
         (* Skip over formal parameters...  *)
-        makelist sibl acc
+        makelist sibl liveness acc
     | Die_node ((DW_TAG_variable, attrs), sibl) ->
         let var_name = get_attr_string attrs DW_AT_name
 	and type_offset = get_attr_ref attrs DW_AT_type in
@@ -130,17 +155,20 @@ let function_vars die die_hash locbits ~compunit_baseaddr ctypes_for_cu =
 	  var_type = var_type;
 	  var_size = type_size;
 	  var_location = var_loc;
+	  var_liveness = liveness;
 	  var_addressable = false
 	} in
-	makelist sibl (var :: acc)
+	makelist sibl liveness (var :: acc)
     | Die_tree ((DW_TAG_lexical_block, attrs), child, _) ->
+        let liveness' = modify_liveness liveness die_hash ranges
+					compunit_baseaddr attrs in
         (* FIXME: this is sketchy! Match up genuine lexical blocks to basic
 	   blocks, and handle nested declarations properly.  *)
         Log.printf 3 "lexical block within function\n";
-	makelist child acc
+	makelist child liveness' acc
     | _ -> acc in
   match die with
     Die_tree ((DW_TAG_subprogram, attrs), child, _) ->
-      makelist child []
+      makelist child Everywhere []
   | _ -> []
   

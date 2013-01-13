@@ -47,7 +47,7 @@ type binary_info = {
   (* Parsed arange data.  *)
   parsed_aranges : (aranges_header * (int32 * int32) list) list;
   (* Parsed range data.  *)
-  parsed_ranges : (int32, (int32 * int32) list) Hashtbl.t;
+  parsed_ranges : (int32, int32 -> (int32 * int32) list) Hashtbl.t;
   (* Relocations from the .rel.plt section.  *)
   parsed_rel_plt : elf_rel array;
   (* Hashtbl of cu_infos, indexed by debug_info offset.  *)

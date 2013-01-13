@@ -402,30 +402,6 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint =
               match node with
 	        C.Entity (CT.Insn_address ia) ->
 		  ia_ref := Some ia;
-		  (* This could be more efficient if we used a more
-		     sophisticated data structure...  *)
-		  List.iter
-		    (fun dwarf_var ->
-		      let locs = Locations.convert_dwarf_loclist_opt
-				   dwarf_var.Function.var_location in
-		      List.iter
-		        (fun loc ->
-			  let code_opt = Locations.valid_at_address ia loc in
-			  match code_opt with
-			    Some (C.Reg (CT.Stack o)) ->
-			      let typ =
-				if dwarf_var.Function.var_addressable then
-				  Addressable_local_var
-				else
-				  Local_var in
-			      Log.printf 4 "Marking local variable %s (size \
-			        %d) at offset %d\n" dwarf_var.Function.var_name
-				dwarf_var.Function.var_size o;
-			      om_ref := record_kind_for_offset !om_ref o
-				dwarf_var.Function.var_size typ
-			  | _ -> ())
-			locs)
-		    dwarf_vars;
 		  node
 	      | C.Store (accsz, addr, C.SSAReg src) ->
 		  let offset = Ptrtracking.cfa_offset addr defs in
@@ -511,6 +487,74 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint =
   Log.printf 3 "Using virtual exit block index %d\n" v_exit;
   scan_b offsetmap_at_end.(v_exit) v_exit;
   blkarr_offsetmap
+
+let log_liveness lv =
+  Log.printf 3 "Liveness: ";
+  let lstr = match lv with
+    Function.Everywhere -> "everywhere"
+  | Function.Lo_hi_range (l, h) -> Printf.sprintf "between %lx and %lx" l h
+  | Function.Range_list rl ->
+      Printf.sprintf "in ranges %s" (String.concat ", "
+        (List.map (fun (l, h) -> Printf.sprintf "%lx-%lx" l h) rl)) in
+  Log.printf 3 "%s\n" lstr
+
+let live_at_addr liveness addr =
+  match liveness with
+    Function.Everywhere -> true
+  | Function.Lo_hi_range (l, h) -> addr >= l && addr < h
+  | Function.Range_list rl ->
+      List.exists (fun (l, h) -> addr >= l && addr < h) rl
+
+let merge_dwarf_vars blkarr_offsetmap dwarf_vars =
+  List.fold_right
+    (fun dwvar blkarr_offsetmap' ->
+      Log.printf 3 "Merging dwarf var %s\n" dwvar.Function.var_name;
+      let liveness = dwvar.Function.var_liveness in
+      log_liveness liveness;
+      let locs =
+        Locations.convert_dwarf_loclist_opt dwvar.Function.var_location in
+      Array.map
+	(fun blk ->
+	  let _, codeseq' = CS.fold_left
+	    (fun (insn_addr, newseq) (stmt, stmt_offsetmap) ->
+	      let ia_ref = ref insn_addr in
+	      begin match stmt with
+		C.Entity (CT.Insn_address ia) ->
+		  ia_ref := Some ia
+	      | _ -> ()
+	      end;
+	      begin match !ia_ref with
+		Some insn_addr ->
+		  if live_at_addr liveness insn_addr then begin
+		    List.iter
+		      (fun loc ->
+			let code_opt =
+			  Locations.valid_at_address insn_addr loc in
+			match code_opt with
+			  Some (C.Reg (CT.Stack o)) ->
+			    let typ =
+			      if dwvar.Function.var_addressable then
+				Addressable_local_var
+			      else
+				Local_var in
+			    (*Log.printf 3 "Marking local variable %s (size \
+			      %d) at offset %d (insn %lx)\n"
+			      dwvar.Function.var_name dwvar.Function.var_size o
+			      insn_addr;*)
+			    stmt_offsetmap := record_kind_for_offset
+			      !stmt_offsetmap o dwvar.Function.var_size typ
+			| _ -> ())
+		      locs
+		  end
+	      | None -> ()
+	      end;
+	      !ia_ref, CS.snoc newseq (stmt, stmt_offsetmap))
+	    (None, CS.empty)
+	    blk.Block.code in
+	  { blk with Block.code = codeseq' })
+	blkarr_offsetmap')
+    dwarf_vars
+    blkarr_offsetmap
 
 let dump_offsetmap_blkarr barr =
   Array.iter
