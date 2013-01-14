@@ -282,10 +282,10 @@ let rec record_kind_for_offset omap offset bytes kind =
         let existing = OffsetMap.find offset omap in
 	let mixed = mix_kind offset existing kind in
 	OffsetMap.add offset mixed (record_kind_for_offset omap (succ offset)
-		      (pred bytes) kind)
+				     (pred bytes) kind)
       with Not_found ->
 	OffsetMap.add offset kind (record_kind_for_offset omap (succ offset)
-		      (pred bytes) kind)
+				    (pred bytes) kind)
       end
 
 exception Mixed
@@ -315,6 +315,21 @@ let store defs accsz src offset offsetmap =
 let outgoing_arg defs accsz offset offsetmap =
   offsetmap := record_kind_for_offset !offsetmap (Int32.to_int offset)
     (Irtypes.access_bytesize accsz) Outgoing_arg
+
+let unmark_outgoing_arg defs accsz offset offsetmap_ref =
+  let rec scan bytes offset offsetmap =
+    match bytes with
+      0 -> offsetmap
+    | n ->
+	let offsetmap' =
+	  try
+	    match OffsetMap.find offset offsetmap with
+	      Outgoing_arg -> OffsetMap.remove offset offsetmap
+	    | _ -> offsetmap
+	  with Not_found -> offsetmap in
+	scan (pred bytes) (succ offset) offsetmap' in
+  offsetmap_ref := scan (Irtypes.access_bytesize accsz) (Int32.to_int offset)
+			!offsetmap_ref
 
 let virtual_exit_idx blk_arr =
   Block.find (fun blk -> blk.Block.id = Irtypes.Virtual_exit) blk_arr
@@ -445,6 +460,12 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint =
 	        C.Entity (CT.Insn_address ia) ->
 		  ia_ref := Some ia;
 		  node
+	      | C.Store (accsz, addr, C.SSAReg src) ->
+	          let offset = Ptrtracking.cfa_offset addr defs in
+		  Log.printf 3 "unmarking for addr %s (offset %ld)\n"
+		    (C.string_of_code addr) offset;
+		  unmark_outgoing_arg defs accsz offset om_ref;
+	          C.Protect node
 	      | _ -> node
 	    with Ptrtracking.Not_constant_cfa_offset ->
 	      C.Protect node)
