@@ -100,6 +100,7 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
       | Phi of code array
       | Entity of CT.entity
       | Parallel of code array
+      | Concat of code array
       (* Just for iterating over code sequences.  Don't process "protected"
          child nodes.  *)
       | Protect of code
@@ -194,6 +195,9 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
     | Parallel arr ->
         str "par { %s }" (String.concat "; " (Array.to_list
 	  (Array.map string_of_code arr)))
+    | Concat arr ->
+        str "concat { %s }" (String.concat "; " (Array.to_list
+	  (Array.map string_of_code arr)))
     | Entity e -> CT.string_of_entity e
     | Protect x -> str "*protect* (%s)" (string_of_code x)
     | With_id (id, x) -> str "%s[with-id %d]" (string_of_code x) id
@@ -270,6 +274,8 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
             Array.fold_right scan parr acc'
 	| Parallel parr ->
 	    Array.fold_right scan parr acc'
+	| Concat carr ->
+	    Array.fold_right scan carr acc'
 	| Protect child ->
 	    acc'
 	| With_id (_, node) ->
@@ -315,6 +321,8 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
 	    Phi (Array.map scan parr)
 	| Parallel parr ->
 	    Parallel (Array.map scan parr)
+	| Concat carr ->
+	    Concat (Array.map scan carr)
 	| Protect child ->
 	    child
 	| With_id (id, node) ->

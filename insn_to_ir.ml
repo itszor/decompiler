@@ -349,6 +349,38 @@ let fn_args inforec callee_addr ft_args arglocs =
     ft_args in
   C.Nary (Irtypes.Fnargs, Array.to_list args_from_ctype)
 
+let stackregs_to_loads = function
+    C.Reg (CT.Stack x) ->
+      C.Load (Irtypes.Word,
+		C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
+		C.Immed (Int32.of_int x)))
+  | x -> x
+
+let rec code_for_location loc =
+  match loc with
+    Locations.In x -> stackregs_to_loads x
+  | Locations.Parts partlist ->
+      let sorted_parts =
+        List.sort (fun (a, _, _) (b, _, _) -> compare a b) partlist in
+      let rec build cursor parts =
+        match parts with
+	  [] -> []
+	| (lo, size, code) :: remain ->
+	    assert (lo == cursor);
+	    (code_for_location code) :: build (lo + size) remain in
+      let codeparts = build 0 sorted_parts in
+      C.Concat (Array.of_list codeparts)
+  | Locations.Within_range _ -> failwith "unexpected within_range"
+
+let fn_args2 callee_addr ft ct_for_cu =
+  let accum = Eabi.make_arg_accum () in
+  let args = Array.mapi
+    (fun i typ ->
+      let aloc = Eabi.eabi_arg_loc ft i accum ct_for_cu in
+      code_for_location aloc)
+    ft.Function.args in
+  C.Nary (Irtypes.Fnargs, Array.to_list args)
+
 (*let add_incoming_args ft code =
   let (_, code') = Array.fold_left
     (fun (argn, code) arg ->
@@ -457,8 +489,7 @@ let try_function_call binf inforec dst_addr =
 	    cu_inf.Binary_info.ci_dietab cu_inf.Binary_info.ci_ctypes
 	    ~compunit_baseaddr:cu_inf.Binary_info.ci_baseaddr in
 	let ct_sym = CT.Finf_sym (symname, fn_inf, sym) in
-	let passes = fn_args inforec dst_addr fn_inf.Function.args
-			     fn_inf.Function.arg_locs
+	let passes = fn_args2 dst_addr fn_inf cu_inf.Binary_info.ci_ctypes
 	and returns = fn_ret fn_inf.Function.return in
 	CT.EABI, ct_sym, passes, returns
       with Not_found ->
@@ -546,9 +577,8 @@ let convert_rr2f addr insn ilist =
     [| VFP_dreg rm |] ->
       let insn = 
 	C.Set (convert_operand addr insn.write_operands.(0),
-	       C.Binary (Irtypes.Concat,
-			 convert_operand addr insn.read_operands.(0),
-			 convert_operand addr insn.read_operands.(1))) in
+	       C.Concat [| convert_operand addr insn.read_operands.(0);
+			   convert_operand addr insn.read_operands.(1) |]) in
       CS.snoc ilist insn
   | [| VFP_sreg rm1; VFP_sreg rm2 |] ->
       let insn1 = C.Set (convert_operand addr insn.write_operands.(0),

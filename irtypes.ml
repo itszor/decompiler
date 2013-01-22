@@ -79,7 +79,6 @@ type ir_binop =
   | Vcmp
   | Vcmpe
   | Div
-  | Concat (* Implement in "Code"?  *)
 
 type ir_triop =
     Adc
