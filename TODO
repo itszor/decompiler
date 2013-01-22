@@ -3,9 +3,7 @@ TODO list for decompiler
 
 * Add missing instructions to decoder and insn_to_ir.
 
-* Removal of stack save/restore code.
-
-* Type tracking for (incoming) function parameters (outgoing ones are partly done).
+* Type tracking for (incoming) function parameters (outgoing ones are partly done). (Both are probably broken now!)
 
 * Extract types for declarations of local variables.
 
@@ -13,7 +11,7 @@ TODO list for decompiler
 
 * Speed up symbol access/mapping symbols (add suitable indices). [partly done]
 
-* Add parallel-set support for 'S' flag support etc.
+* Add parallel-set support for 'S' flag support etc. (done -- no 'S' flag support yet though.)
 
 * SP tracking falls over if it hits a phi node: fixable or not? Might suggest alloca or other dynamic stack allocation.
 
@@ -21,6 +19,8 @@ TODO list for decompiler
 
 * Add loading of debug info for dependent libraries.
 
-* stm/ldm ordering broken? [fixed]
+* Use eabi.ml functions for incoming arguments as well as outgoing ones.
 
-* I think we want exact address information during pointer tracking (to find the right locations in debug info). Maybe use "set_address" statements.
+* Finish handling of stack accesses.
+
+  - any unknown stack object which has its address taken will need to be invented, after determining an upper bound for its size. Any access falling within this region is then potentially a part of the same object.
