@@ -364,16 +364,20 @@ let decompile_sym binf sym =
   add_stackvars_to_entry_block blk_arr' 0 sp_var_set;
   dump_blockarr blk_arr';*)
   Log.printf 2 "--- find addressable variables ---\n";
+  let defs = Defs.get_defs blk_arr in
   let addressable =
-    Ptrtracking.find_addressable blk_arr inforec dwarf_vars cu_inf.ci_ctypes in
+    Ptrtracking.find_addressable blk_arr inforec dwarf_vars cu_inf.ci_ctypes
+				 defs in
   Log.printf 2 "--- finding address-taken vars ---\n";
   Dwptrtracking.mark_addressable_vars blk_arr dwarf_vars addressable;
   (*Log.printf 2 "--- sp tracking ---\n";
   let sp_cov = Sptracking.sp_track blk_arr in*)
   Log.printf 2 "--- propagating stack references ---\n";
-  let blkarr_om = Dwptrtracking.scan_stack_accesses blk_arr dwarf_vars 0 in
+  let blkarr_om = Dwptrtracking.scan_stack_accesses blk_arr dwarf_vars 0 defs in
   Log.printf 2 "--- merging known variables from dwarf info ---\n";
   let blkarr_om = Dwptrtracking.merge_dwarf_vars blkarr_om dwarf_vars in
+  Log.printf 2 "--- anonymous accesses ---\n";
+  Ptrtracking.anonymous_accesses blkarr_om dwarf_vars defs;
   Dwptrtracking.dump_offsetmap_blkarr blkarr_om;
   (*Log.printf 2 "--- gather sp refs ---\n";
   let stack_coverage =

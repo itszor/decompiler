@@ -297,8 +297,7 @@ let string_of_optional_insn_addr = function
    position in the function (because of e.g. local scopes).  Build up a hash
    table from insn addresses to addressable items?  *)
 
-let find_addressable blk_arr inforec vars ctypes_for_cu =
-  let defs = get_defs blk_arr in
+let find_addressable blk_arr inforec vars ctypes_for_cu defs =
   let addressable = ref [] in
   let maybe_addressable insn_addr thing code =
     try
@@ -372,3 +371,105 @@ let find_addressable blk_arr inforec vars ctypes_for_cu =
 	blk.Block.code))
     blk_arr;
   !addressable
+
+module OffsetMap = Map.Make
+  (struct
+    type t = int
+    let compare = compare
+  end)
+
+type stack_access_kind =
+    Saved_caller_reg
+  | Outgoing_arg
+  | Local_var
+  | Addressable_local_var
+  | Local_var_or_spill_slot
+
+exception Mixed
+
+let kind_for_offset_word omap offset =
+  let b1 = OffsetMap.find offset omap
+  and b2 = OffsetMap.find (offset + 1) omap
+  and b3 = OffsetMap.find (offset + 2) omap
+  and b4 = OffsetMap.find (offset + 3) omap in
+  if b1 = b2 && b2 = b3 && b3 = b4 then
+    b1
+  else
+    raise Mixed
+
+let letter_for_offset_word omap offset =
+  try
+    match kind_for_offset_word omap offset with
+      Saved_caller_reg -> 'R'
+    | Outgoing_arg -> 'A'
+    | Local_var_or_spill_slot -> 'V'
+    | Local_var -> 'L'
+    | Addressable_local_var -> '&'
+  with
+    Not_found -> '.'
+  | Mixed -> '*'
+
+let string_of_offsetmap om =
+  let opt = function
+    None -> "*"
+  | Some x -> string_of_int x in
+  let mini, maxi =
+    OffsetMap.fold
+      (fun key _ (lo, hi) ->
+        begin match lo with
+	  None -> Some key
+	| Some lo -> Some (min key lo)
+	end,
+	begin match hi with
+	  None -> Some key
+	| Some hi -> Some (max key hi)
+	end)
+      om
+      (None, None) in
+  let prefix = Printf.sprintf "[%s...%s] " (opt maxi) (opt mini) in
+  let buf = Buffer.create 5 in
+  begin match mini, maxi with
+    Some mini, Some maxi ->
+      for i = (maxi - 3) / 4 downto mini / 4 do
+	Buffer.add_char buf (letter_for_offset_word om (i * 4))
+      done
+  | _ -> ()
+  end;
+  prefix ^ (Buffer.contents buf)
+
+let anonymous_accesses blkarr_offsetmap dwarf_vars defs =
+  Array.map
+    (fun blk ->
+      let codeseq' = CS.fold_left
+        (fun newseq (stmt, stmt_offsetmap) ->
+	  let stmt' = C.map
+	    (fun node ->
+	      match node with
+	        C.Entity (CT.Insn_address _) -> node
+	      | C.Load (accsz, addr) ->
+	          begin try
+		    let offset = cfa_offset addr defs in
+		    Log.printf 3 "Load at cfa offset %ld (%c)\n" offset
+		      (letter_for_offset_word !stmt_offsetmap
+			(Int32.to_int offset));
+		  with Not_constant_cfa_offset ->
+		    ()
+		  end;
+	          node
+	      | C.Store (accsz, addr, src) ->
+	          begin try
+		    let offset = cfa_offset addr defs in
+		    Log.printf 3 "Store at cfa offset %ld (%c)\n" offset
+		      (letter_for_offset_word !stmt_offsetmap
+			(Int32.to_int offset));
+		  with Not_constant_cfa_offset ->
+		    ()
+		  end;
+		  node
+	      | _ -> node)
+	    stmt in
+	  CS.snoc newseq (stmt', stmt_offsetmap))
+	CS.empty
+	blk.Block.code in
+      { blk with Block.code = codeseq' })
+    blkarr_offsetmap

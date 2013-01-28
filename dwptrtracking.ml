@@ -1,4 +1,5 @@
 open Defs
+open Ptrtracking
 
 module BS = Ir.IrBS
 module CS = Ir.IrCS
@@ -238,19 +239,6 @@ let mark_addressable_vars blk_arr dwarf_vars addressable =
 	  addressable_ent.Ptrtracking.cfa_offset)
     addressable
 
-module OffsetMap = Map.Make
-  (struct
-    type t = int
-    let compare = compare
-  end)
-
-type stack_access_kind =
-    Saved_caller_reg
-  | Outgoing_arg
-  | Local_var
-  | Addressable_local_var
-  | Local_var_or_spill_slot
-
 let add_offsetmap_to_blkarr blkarr =
   Block.map_code
     (CS.map (fun stmt -> stmt, ref OffsetMap.empty))
@@ -288,18 +276,6 @@ let rec record_kind_for_offset omap offset bytes kind =
 				    (pred bytes) kind)
       end
 
-exception Mixed
-
-let kind_for_offset_word omap offset =
-  let b1 = OffsetMap.find offset omap
-  and b2 = OffsetMap.find (offset + 1) omap
-  and b3 = OffsetMap.find (offset + 2) omap
-  and b4 = OffsetMap.find (offset + 3) omap in
-  if b1 = b2 && b2 = b3 && b3 = b4 then
-    b1
-  else
-    raise Mixed
-
 let store defs accsz src offset offsetmap =
   let first_src = Ptrtracking.first_src defs src in
   Log.printf 4 "tracking %s for offset %ld\n"
@@ -334,46 +310,6 @@ let unmark_outgoing_arg defs accsz offset offsetmap_ref =
 let virtual_exit_idx blk_arr =
   Block.find (fun blk -> blk.Block.id = Irtypes.Virtual_exit) blk_arr
 
-let letter_for_offset_word omap offset =
-  try
-    match kind_for_offset_word omap offset with
-      Saved_caller_reg -> 'R'
-    | Outgoing_arg -> 'A'
-    | Local_var_or_spill_slot -> 'V'
-    | Local_var -> 'L'
-    | Addressable_local_var -> '&'
-  with
-    Not_found -> '.'
-  | Mixed -> '*'
-
-let string_of_offsetmap om =
-  let opt = function
-    None -> "*"
-  | Some x -> string_of_int x in
-  let mini, maxi =
-    OffsetMap.fold
-      (fun key _ (lo, hi) ->
-        begin match lo with
-	  None -> Some key
-	| Some lo -> Some (min key lo)
-	end,
-	begin match hi with
-	  None -> Some key
-	| Some hi -> Some (max key hi)
-	end)
-      om
-      (None, None) in
-  let prefix = Printf.sprintf "[%s...%s] " (opt maxi) (opt mini) in
-  let buf = Buffer.create 5 in
-  begin match mini, maxi with
-    Some mini, Some maxi ->
-      for i = (maxi - 3) / 4 downto mini / 4 do
-	Buffer.add_char buf (letter_for_offset_word om (i * 4))
-      done
-  | _ -> ()
-  end;
-  prefix ^ (Buffer.contents buf)
-
 (*let mark_addressable addressable_ent offsetmap =
   match addressable_ent.Ptrtracking.var with
     Some var ->
@@ -393,8 +329,7 @@ let merge_offsetmap oldmap newmap =
   else
     mergedmap, true
 
-let scan_stack_accesses blkarr dwarf_vars entrypoint =
-  let defs = get_defs blkarr in
+let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
   let num_blks = Array.length blkarr in
   let offsetmap_at_start = Array.make num_blks OffsetMap.empty
   and offsetmap_at_end = Array.make num_blks OffsetMap.empty in
@@ -558,10 +493,6 @@ let merge_dwarf_vars blkarr_offsetmap dwarf_vars =
 				Addressable_local_var
 			      else
 				Local_var in
-			    (*Log.printf 3 "Marking local variable %s (size \
-			      %d) at offset %d (insn %lx)\n"
-			      dwvar.Function.var_name dwvar.Function.var_size o
-			      insn_addr;*)
 			    stmt_offsetmap := record_kind_for_offset
 			      !stmt_offsetmap o dwvar.Function.var_size typ
 			| _ -> ())
