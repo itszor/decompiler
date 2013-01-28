@@ -349,16 +349,19 @@ let fn_args inforec callee_addr ft_args arglocs =
     ft_args in
   C.Nary (Irtypes.Fnargs, Array.to_list args_from_ctype)
 
-let stackregs_to_loads = function
-    C.Reg (CT.Stack x) ->
-      C.Load (Irtypes.Word,
-		C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
-		C.Immed (Int32.of_int x)))
-  | x -> x
+let stackregs_to_loads c =
+  C.map
+    (function
+	C.Reg (CT.Stack x) ->
+	  C.Protect (C.Load (Irtypes.Word,
+			     C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
+				       C.Immed (Int32.of_int x))))
+      | x -> x)
+    c
 
 let rec code_for_location loc =
   match loc with
-    Locations.In x -> stackregs_to_loads x
+    Locations.In x -> x
   | Locations.Parts partlist ->
       let sorted_parts =
         List.sort (fun (a, _, _) (b, _, _) -> compare a b) partlist in
@@ -377,7 +380,7 @@ let fn_args2 callee_addr ft ct_for_cu =
   let args = Array.mapi
     (fun i typ ->
       let aloc = Eabi.eabi_arg_loc ft i accum ct_for_cu in
-      code_for_location aloc)
+      stackregs_to_loads (code_for_location aloc))
     ft.Function.args in
   C.Nary (Irtypes.Fnargs, Array.to_list args)
 
