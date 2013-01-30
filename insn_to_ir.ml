@@ -465,6 +465,8 @@ let add_real_incoming_args2 ft codeseq ct_for_cu =
     (fun (cseq, argnum) argloc ->
       let insn =
         match argloc with
+	  (* FIXME: Irtypes.Word might not always be right. 
+	     Bigger-than-word-sized arguments are not handled properly.  *)
 	  C.Reg (CT.Stack x) ->
 	    C.Store (Irtypes.Word,
 		     C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
