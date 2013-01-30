@@ -109,7 +109,7 @@ module CS = Ir.IrCS
 module CT = Ir.IrCT
 module C = Ir.Ir
 
-let eabi_pre_prologue ft start_addr inforec real_entry_point =
+let eabi_pre_prologue ft start_addr inforec real_entry_point ct_for_cu =
   let insns =
     [(*C.Set (C.Reg (CT.Hard_reg 0), C.Nullary Irtypes.Arg_in);
      C.Set (C.Reg (CT.Hard_reg 1), C.Nullary Irtypes.Arg_in);
@@ -135,7 +135,8 @@ let eabi_pre_prologue ft start_addr inforec real_entry_point =
     (*if false then
       Insn_to_ir.add_incoming_args ft cs
     else*)
-    Insn_to_ir.add_real_incoming_args ft start_addr inforec cs in
+    (*Insn_to_ir.add_real_incoming_args ft start_addr inforec cs*)
+    Insn_to_ir.add_real_incoming_args2 ft cs ct_for_cu in
   let cs = CS.snoc cs (C.Control (C.Jump real_entry_point)) in
   Block.make_block Irtypes.Virtual_entry cs
 
@@ -162,7 +163,7 @@ let cons_and_add_to_index blk bseq ht blockref idx =
   incr idx;
   BS.cons blk bseq
 
-let bs_of_code_hash ft binf inforec code_hash start_addr entry_pt =
+let bs_of_code_hash ft binf inforec code_hash start_addr entry_pt ct_for_cu =
   let idx = ref 0 in
   let ht = Hashtbl.create 10 in
   let bseq_cons blk_id blk bseq =
@@ -174,7 +175,8 @@ let bs_of_code_hash ft binf inforec code_hash start_addr entry_pt =
 			       code_hash)
     code_hash
     BS.empty in
-  let pre_prologue_blk = eabi_pre_prologue ft start_addr inforec entry_pt
+  let pre_prologue_blk =
+    eabi_pre_prologue ft start_addr inforec entry_pt ct_for_cu
   and virtual_exit = eabi_post_epilogue () in
   let with_entry_pt
     = bseq_cons Irtypes.Virtual_entry pre_prologue_blk blockseq in
@@ -322,7 +324,8 @@ let decompile_sym binf sym =
 			   cu_inf.ci_ctypes in
   let inforec = Typedb.create_info () in
   let blockseq, ht =
-    bs_of_code_hash ft binf inforec code entry_point entry_point_ba in
+    bs_of_code_hash ft binf inforec code entry_point entry_point_ba
+		    cu_inf.ci_ctypes in
   Log.printf 2 "--- initial blockseq ---\n";
   dump_blockseq blockseq;
   let entry_point_ref = Hashtbl.find ht entry_point_ba in

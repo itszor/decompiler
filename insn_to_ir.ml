@@ -454,6 +454,29 @@ let add_real_incoming_args ft start_addr inforec codeseq =
     added_args
     [0; 1; 2; 3]
 
+let add_real_incoming_args2 ft codeseq ct_for_cu =
+  let accum = Eabi.make_arg_accum () in
+  let args = Array.mapi
+    (fun i _ ->
+      let aloc = Eabi.eabi_arg_loc ft i accum ct_for_cu in
+      code_for_location aloc)
+    ft.Function.args in
+  let cseq', _ = Array.fold_left
+    (fun (cseq, argnum) argloc ->
+      let insn =
+        match argloc with
+	  C.Reg (CT.Stack x) ->
+	    C.Store (Irtypes.Word,
+		     C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
+			       C.Immed (Int32.of_int x)),
+		     C.Entity (CT.Arg_var ft.Function.arg_names.(argnum)))
+	| _ -> C.Set (argloc,
+		      C.Entity (CT.Arg_var ft.Function.arg_names.(argnum))) in
+      CS.snoc cseq insn, succ argnum)
+    (codeseq, 0)
+    args in
+  cseq'
+
 let fn_ret = function
     Ctype.C_void -> C.Nullary Irtypes.Nop
   | _ -> C.Set (C.Reg (CT.Hard_reg 0), C.Entity CT.Arg_out)
