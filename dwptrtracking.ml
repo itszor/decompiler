@@ -288,6 +288,10 @@ let store defs accsz src offset offsetmap =
         (Irtypes.access_bytesize accsz) Saved_caller_reg
   | Some _ -> ()
 
+let incoming defs accsz offset offsetmap =
+  offsetmap := record_kind_for_offset !offsetmap (Int32.to_int offset)
+    (Irtypes.access_bytesize accsz) Incoming_arg
+
 let outgoing_arg defs accsz offset offsetmap =
   offsetmap := record_kind_for_offset !offsetmap (Int32.to_int offset)
     (Irtypes.access_bytesize accsz) Outgoing_arg
@@ -357,6 +361,10 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
 		  let offset = Ptrtracking.cfa_offset addr defs in
 		  store defs accsz src offset om_ref;
 		  C.Protect node
+	      | C.Store (accsz, addr, C.Entity (CT.Arg_var _)) ->
+		  let offset = Ptrtracking.cfa_offset addr defs in
+	          incoming defs accsz offset om_ref;
+		  C.Protect node
 	      | _ -> node
 	    with Ptrtracking.Not_constant_cfa_offset ->
 	      C.Protect node)
@@ -387,7 +395,8 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
     let _, start_offsetmap = CS.fold_right
       (fun (stmt, stmt_offsetmap) (insn_addr, offsetmap_acc) ->
         let ia_ref = ref insn_addr
-	and om_ref = ref offsetmap_acc in
+	and om_ref = ref offsetmap_acc
+	and remove_offset_for_store = ref None in
 	ignore (C.map
 	  (fun node ->
 	    try
@@ -397,9 +406,7 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
 		  node
 	      | C.Store (accsz, addr, C.SSAReg src) ->
 	          let offset = Ptrtracking.cfa_offset addr defs in
-		  Log.printf 3 "unmarking for addr %s (offset %ld)\n"
-		    (C.string_of_code addr) offset;
-		  unmark_outgoing_arg defs accsz offset om_ref;
+		  remove_offset_for_store := Some (addr, accsz, offset);
 	          C.Protect node
 	      | _ -> node
 	    with Ptrtracking.Not_constant_cfa_offset ->
@@ -423,6 +430,13 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
 	    | _ -> node)
 	  stmt);
 	stmt_offsetmap := !om_ref;
+	begin match !remove_offset_for_store with
+	  None -> ()
+	| Some (addr, accsz, offset) ->
+	    Log.printf 3 "unmarking for addr %s (offset %ld)\n"
+	      (C.string_of_code addr) offset;
+	    unmark_outgoing_arg defs accsz offset om_ref
+	end;
 	!ia_ref, !om_ref)
       blkarr_offsetmap.(at).Block.code
       (None, cur_offsetmap) in

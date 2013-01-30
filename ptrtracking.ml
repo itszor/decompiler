@@ -381,6 +381,7 @@ module OffsetMap = Map.Make
 type stack_access_kind =
     Saved_caller_reg
   | Outgoing_arg
+  | Incoming_arg
   | Local_var
   | Addressable_local_var
   | Local_var_or_spill_slot
@@ -402,6 +403,7 @@ let letter_for_offset_word omap offset =
     match kind_for_offset_word omap offset with
       Saved_caller_reg -> 'R'
     | Outgoing_arg -> 'A'
+    | Incoming_arg -> 'I'
     | Local_var_or_spill_slot -> 'V'
     | Local_var -> 'L'
     | Addressable_local_var -> '&'
