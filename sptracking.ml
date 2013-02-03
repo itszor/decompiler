@@ -177,7 +177,9 @@ let sp_track blk_arr =
   (* Pass 1: Walk over code by DFS successors.  *)
   scan blk_arr.(0) 0;
 
-  (* Pass 2: Attempt to resolve phi nodes.  *)
+  (* Pass 2: Attempt to resolve phi nodes.  FIXME: this doesn't do anything
+     yet!  It may or may not be sufficient to detect if a function does dynamic
+     stack allocation in a loop.  *)
   Array.iter
     (fun blk ->
       let code' = CS.fold_right

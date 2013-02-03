@@ -384,6 +384,7 @@ type stack_access_kind =
   | Incoming_arg
   | Local_var
   | Addressable_local_var
+  | Addressable_anon_var
   | Local_var_or_spill_slot
 
 exception Mixed
@@ -407,6 +408,7 @@ let letter_for_offset_word omap offset =
     | Local_var_or_spill_slot -> 'V'
     | Local_var -> 'L'
     | Addressable_local_var -> '&'
+    | Addressable_anon_var -> '@'
   with
     Not_found -> '.'
   | Mixed -> '*'
@@ -438,6 +440,167 @@ let string_of_offsetmap om =
   | _ -> ()
   end;
   prefix ^ (Buffer.contents buf)
+
+let mix_kind offset old_kind new_kind =
+  match old_kind, new_kind with
+    Saved_caller_reg, Saved_caller_reg -> Saved_caller_reg
+  | Saved_caller_reg, _
+  | _, Saved_caller_reg ->
+      Log.printf 3 "*** caller-saved reg collision, offset %d ***\n" offset;
+      Saved_caller_reg
+  | Outgoing_arg, Outgoing_arg -> Outgoing_arg
+  | Outgoing_arg, _
+  | _, Outgoing_arg ->
+      Log.printf 3 "*** outgoing arg collision, offset %d ***\n" offset;
+      Outgoing_arg
+  | _, replacement -> replacement
+
+let map_union a b =
+  OffsetMap.merge
+    (fun offset a_opt b_opt ->
+      match a_opt, b_opt with
+        Some x, Some y -> Some (mix_kind offset x y)
+      | Some x, None -> Some x
+      | None, Some y -> Some y
+      | None, None -> None) a b
+
+let rec record_kind_for_offset omap offset bytes kind =
+  match bytes with
+    0 -> omap
+  | n ->
+      begin try
+        let existing = OffsetMap.find offset omap in
+	let mixed = mix_kind offset existing kind in
+	OffsetMap.add offset mixed (record_kind_for_offset omap (succ offset)
+				     (pred bytes) kind)
+      with Not_found ->
+	OffsetMap.add offset kind (record_kind_for_offset omap (succ offset)
+				    (pred bytes) kind)
+      end
+
+let seek_lower offsetmap cfa_offset sp_coverage insn_addr =
+  let low_bound =
+    Coverage.interval_type (Coverage.find_range sp_coverage insn_addr) in
+  Log.printf 3 "low bound at %lx: %d\n" insn_addr low_bound;
+  let rec find_lower offset =
+    let pred_offset = pred offset in
+    if offset <= low_bound || OffsetMap.mem pred_offset offsetmap then
+      offset
+    else
+      find_lower pred_offset in
+  find_lower (Int32.to_int cfa_offset)
+
+let seek_higher offsetmap cfa_offset =
+  let rec find_higher offset =
+    let succ_offset = succ offset in
+    if offset >= -1 || OffsetMap.mem succ_offset offsetmap then
+      offset
+    else
+      find_higher succ_offset in
+  find_higher (Int32.to_int cfa_offset)
+
+let anonymous_accesses2 blkarr_offsetmap dwarf_vars defs addressable sp_cov =
+  let ht = Hashtbl.create 5 in
+  List.iter
+    (fun taken_address ->
+      match taken_address.insn_addr with
+        Some ia -> Hashtbl.add ht ia taken_address
+      | None -> ())
+    addressable;
+  Array.fold_left
+    (fun regions blk ->
+      let _, regions' = CS.fold_left
+        (fun (insn_addr, regions') (stmt, stmt_offsetmap) ->
+	  match stmt with
+	    C.Entity (CT.Insn_address ia) -> Some ia, regions'
+	  | _ ->
+	    let regions_ref = ref regions' in
+	    begin match insn_addr with
+	      None -> ()
+	    | Some ia ->
+	        while Hashtbl.mem ht ia do
+	          let taken_address = Hashtbl.find ht ia in
+		  if not (OffsetMap.mem (Int32.to_int taken_address.cfa_offset)
+					!stmt_offsetmap) then begin
+		    let upper_bound =
+		      seek_higher !stmt_offsetmap taken_address.cfa_offset
+		    and lower_bound =
+		      seek_lower !stmt_offsetmap taken_address.cfa_offset
+				 sp_cov ia in
+		    Log.printf 3 "Anonymous addressable region, [%d...%d]\n"
+		      lower_bound upper_bound;
+		    regions_ref := (lower_bound, upper_bound) :: !regions_ref
+		  end;
+		  Hashtbl.remove ht ia
+		done
+	    end;
+	    insn_addr, !regions_ref)
+	(None, regions)
+	blk.Block.code in
+      regions')
+    []
+    blkarr_offsetmap
+
+(* We might get overlapping addressable regions.  If two regions overlap, use
+   the intersection of both.  *)
+
+let prune_regions reg =
+  let sorted_reg =
+    List.sort (fun (a_lo, _) (b_lo, _) -> compare a_lo b_lo) reg in
+  let rec prune = function
+    [] -> []
+  | [one] -> [one]
+  | (a_lo, a_hi) :: (b_lo, b_hi) :: rest ->
+      if b_lo > a_hi then
+        (a_lo, a_hi) :: prune ((b_lo, b_hi) :: rest)
+      else if b_lo >= a_lo && a_hi <= b_hi then
+        prune ((b_lo, a_hi) :: rest)
+      else
+        prune ((b_lo, b_hi) :: rest) in
+  let pruned = prune sorted_reg in
+  Log.printf 3 "Pruned list:\n";
+  List.iter
+    (fun (lo, hi) -> Log.printf 3 "[%d...%d]\n" lo hi)
+    pruned;
+  pruned
+
+(* Merge any anonymous stack blocks which have their address taken.  These must
+   generally stay live throughout a function, but we can discount any points
+   where the stack pointer register is above the block in question.  *)
+
+let merge_anon_addressable blkarr_offsetmap sp_cov pruned_regions =
+  Array.map
+    (fun blk ->
+      let _, newseq = CS.fold_left
+        (fun (insn_addr, newseq) (stmt, stmt_offsetmap) ->
+	  let ia_ref = ref insn_addr in
+	  begin match stmt with
+	    C.Entity (CT.Insn_address ia) -> ia_ref := Some ia
+	  | _ -> ()
+	  end;
+	  let stmt_offsetmap' =
+	    match !ia_ref with
+	      None -> !stmt_offsetmap
+	    | Some ia ->
+	        try
+		  let lo_stack =
+		    Coverage.interval_type (Coverage.find_range sp_cov ia) in
+		  List.fold_right
+		    (fun (lo, hi) offsetmap ->
+		      if lo >= lo_stack then
+		        record_kind_for_offset offsetmap lo (hi - lo)
+					       Addressable_anon_var
+		      else
+		        offsetmap)
+		    pruned_regions
+		    !stmt_offsetmap
+		with Not_found ->
+		  !stmt_offsetmap in
+	  !ia_ref, CS.snoc newseq (stmt, ref stmt_offsetmap'))
+	(None, CS.empty)
+	blk.Block.code in
+      { blk with Block.code = newseq })
+    blkarr_offsetmap
 
 let anonymous_accesses blkarr_offsetmap dwarf_vars defs =
   Array.map

@@ -244,38 +244,6 @@ let add_offsetmap_to_blkarr blkarr =
     (CS.map (fun stmt -> stmt, ref OffsetMap.empty))
     blkarr
 
-let mix_kind offset old_kind new_kind =
-  match old_kind, new_kind with
-    Saved_caller_reg, Saved_caller_reg -> Saved_caller_reg
-  | Saved_caller_reg, _
-  | _, Saved_caller_reg ->
-      Log.printf 3 "*** caller-saved reg collision, offset %d ***\n" offset;
-      Saved_caller_reg
-  | _, replacement -> replacement
-
-let map_union a b =
-  OffsetMap.merge
-    (fun offset a_opt b_opt ->
-      match a_opt, b_opt with
-        Some x, Some y -> Some (mix_kind offset x y)
-      | Some x, None -> Some x
-      | None, Some y -> Some y
-      | None, None -> None) a b
-
-let rec record_kind_for_offset omap offset bytes kind =
-  match bytes with
-    0 -> omap
-  | n ->
-      begin try
-        let existing = OffsetMap.find offset omap in
-	let mixed = mix_kind offset existing kind in
-	OffsetMap.add offset mixed (record_kind_for_offset omap (succ offset)
-				     (pred bytes) kind)
-      with Not_found ->
-	OffsetMap.add offset kind (record_kind_for_offset omap (succ offset)
-				    (pred bytes) kind)
-      end
-
 let store defs accsz src offset offsetmap =
   let first_src = Ptrtracking.first_src defs src in
   Log.printf 4 "tracking %s for offset %ld\n"
