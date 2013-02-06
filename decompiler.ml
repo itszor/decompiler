@@ -380,9 +380,7 @@ let decompile_sym binf sym =
   Log.printf 2 "--- merging known variables from dwarf info ---\n";
   let blkarr_om = Dwptrtracking.merge_dwarf_vars blkarr_om dwarf_vars in
   Log.printf 2 "--- anonymous accesses ---\n";
-  let regions =
-    Ptrtracking.anonymous_accesses2 blkarr_om dwarf_vars defs addressable
-				    sp_cov in
+  let regions = Ptrtracking.addressable_regions blkarr_om addressable sp_cov in
   let pruned_regions = Ptrtracking.prune_regions regions in
   let blkarr_om =
     Ptrtracking.merge_anon_addressable blkarr_om sp_cov pruned_regions in

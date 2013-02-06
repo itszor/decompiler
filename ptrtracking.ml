@@ -499,7 +499,7 @@ let seek_higher offsetmap cfa_offset =
       find_higher succ_offset in
   find_higher (Int32.to_int cfa_offset)
 
-let anonymous_accesses2 blkarr_offsetmap dwarf_vars defs addressable sp_cov =
+let addressable_regions blkarr_offsetmap addressable sp_cov =
   let ht = Hashtbl.create 5 in
   List.iter
     (fun taken_address ->
@@ -601,6 +601,23 @@ let merge_anon_addressable blkarr_offsetmap sp_cov pruned_regions =
 	blk.Block.code in
       { blk with Block.code = newseq })
     blkarr_offsetmap
+
+type load_info =
+  {
+    load_cfa_offset : int32;
+    load_insn_addr : int32 option
+  }
+
+type store_info =
+  {
+    store_cfa_offset : int32;
+    store_insn_addr : int32 option
+  }
+
+type stack_access =
+    Addressable_entity of addressable_entity
+  | Load of load_info
+  | Store of store_info
 
 let anonymous_accesses blkarr_offsetmap dwarf_vars defs =
   Array.map
