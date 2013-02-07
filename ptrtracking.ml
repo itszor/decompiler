@@ -282,12 +282,23 @@ let replace_stack_references blk_arr coverage vars inforec =
     blk_arr';
   blk_arr', !stack_refs
 
+type stack_access_type =
+    Escape_by_store
+  | Escape_by_fncall
+  | Escape_by_phiarg
+
 type addressable_entity =
   {
     code : C.code;
+    access_type : stack_access_type;
     cfa_offset : int32;
     insn_addr : int32 option
   }
+
+let string_of_access_type = function
+    Escape_by_store -> "store"
+  | Escape_by_fncall -> "fn arg"
+  | Escape_by_phiarg -> "phi arg"
 
 let string_of_optional_insn_addr = function
     Some x -> Printf.sprintf "address 0x%lx" x
@@ -302,17 +313,20 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
   let maybe_addressable insn_addr thing code =
     try
       let offset = cfa_offset code defs in
-      Log.printf 3 "%s %s equivalent to cfa offset %ld (at %s)\n" thing
+      Log.printf 3 "%s %s equivalent to cfa offset %ld (at %s)\n"
+		 (string_of_access_type thing)
 		 (C.string_of_code code) offset
 		 (string_of_optional_insn_addr insn_addr);
       let new_ent = {
         code = code;
 	cfa_offset = offset;
-	insn_addr = insn_addr
+	insn_addr = insn_addr;
+	access_type = thing
       } in
       addressable := new_ent :: !addressable
     with Not_constant_cfa_offset ->
-      Log.printf 4 "%s %s not equivalent to cfa offset (at %s)\n" thing
+      Log.printf 4 "%s %s not equivalent to cfa offset (at %s)\n"
+		 (string_of_access_type thing)
 		 (C.string_of_code code)
 		 (string_of_optional_insn_addr insn_addr) in
   Array.iter
@@ -329,7 +343,7 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 	      | C.Store (accsz, addr, src) ->
 	          begin match accsz with
 		    Irtypes.Word ->
-		      maybe_addressable !insn_addr "stored value" src
+		      maybe_addressable !insn_addr Escape_by_store src
 		  | _ -> ()
 		  end;
 		  node
@@ -342,8 +356,8 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 			Log.printf 3 "Using %s for src of phi arg %s\n"
 			  (string_of_optional_insn_addr def.Defs.src_insn_addr)
 			  (C.string_of_code phiarg);
-			maybe_addressable def.Defs.src_insn_addr "phi arg"
-					  phiarg
+			maybe_addressable def.Defs.src_insn_addr
+					  Escape_by_phiarg phiarg
 		      with Not_found ->
 			Log.printf 3 "No def for %s\n"
 			  (C.string_of_code phiarg))
@@ -362,7 +376,9 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 		      match node with
 		        C.Nary (Irtypes.Fnargs, _) -> node
 		      | C.Load (Irtypes.Word, addr) -> C.Protect node
-		      | _ -> maybe_addressable !insn_addr "arg" node; node)
+		      | _ ->
+			  maybe_addressable !insn_addr Escape_by_fncall node;
+			  node)
 		    args);
 		  ctlnode
 	      | _ -> ctlnode)
@@ -601,23 +617,6 @@ let merge_anon_addressable blkarr_offsetmap sp_cov pruned_regions =
 	blk.Block.code in
       { blk with Block.code = newseq })
     blkarr_offsetmap
-
-type load_info =
-  {
-    load_cfa_offset : int32;
-    load_insn_addr : int32 option
-  }
-
-type store_info =
-  {
-    store_cfa_offset : int32;
-    store_insn_addr : int32 option
-  }
-
-type stack_access =
-    Addressable_entity of addressable_entity
-  | Load of load_info
-  | Store of store_info
 
 let anonymous_accesses blkarr_offsetmap dwarf_vars defs =
   Array.map
