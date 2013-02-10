@@ -214,29 +214,31 @@ let rec stack_address_within_var location_list insn_addr sp_offset var_size =
 let mark_addressable_vars blk_arr dwarf_vars addressable =
   List.iter
     (fun addressable_ent ->
-      try
-	let var = List.find
-          (fun var ->
-	    match var.Function.var_location with
-	      Some loclist ->
-		let conv_loc = Locations.convert_dwarf_loclist loclist in
-		stack_address_within_var conv_loc
-		  addressable_ent.Ptrtracking.insn_addr
-		  addressable_ent.Ptrtracking.cfa_offset
-		  var.Function.var_size
-	    | None -> false)
-	  dwarf_vars in
-	let iaddr_str =
-	  Ptrtracking.string_of_optional_insn_addr
-	    addressable_ent.Ptrtracking.insn_addr in
-	Log.printf 3 "Found var for CFA offset %ld (%s): %s\n"
-	  addressable_ent.Ptrtracking.cfa_offset iaddr_str
-	  var.Function.var_name;
-	(* Mark that the variable is addressable.  *)
-	var.Function.var_addressable <- true
-      with Not_found ->
-        Log.printf 3 "Can't find var for CFA offset %ld\n"
-	  addressable_ent.Ptrtracking.cfa_offset)
+      if access_is_escape addressable_ent.access_type then begin
+	try
+	  let var = List.find
+            (fun var ->
+	      match var.Function.var_location with
+		Some loclist ->
+		  let conv_loc = Locations.convert_dwarf_loclist loclist in
+		  stack_address_within_var conv_loc
+		    addressable_ent.Ptrtracking.insn_addr
+		    addressable_ent.Ptrtracking.cfa_offset
+		    var.Function.var_size
+	      | None -> false)
+	    dwarf_vars in
+	  let iaddr_str =
+	    Ptrtracking.string_of_optional_insn_addr
+	      addressable_ent.Ptrtracking.insn_addr in
+	  Log.printf 3 "Found var for CFA offset %ld (%s): %s\n"
+	    addressable_ent.Ptrtracking.cfa_offset iaddr_str
+	    var.Function.var_name;
+	  (* Mark that the variable is addressable.  *)
+	  var.Function.var_addressable <- true
+	with Not_found ->
+          Log.printf 3 "Can't find var for CFA offset %ld\n"
+	    addressable_ent.Ptrtracking.cfa_offset
+      end)
     addressable
 
 let add_offsetmap_to_blkarr blkarr =
