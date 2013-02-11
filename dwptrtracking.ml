@@ -281,9 +281,6 @@ let unmark_outgoing_arg defs accsz offset offsetmap_ref =
   offsetmap_ref := scan (Irtypes.access_bytesize accsz) (Int32.to_int offset)
 			!offsetmap_ref
 
-let virtual_exit_idx blk_arr =
-  Block.find (fun blk -> blk.Block.id = Irtypes.Virtual_exit) blk_arr
-
 (*let mark_addressable addressable_ent offsetmap =
   match addressable_ent.Ptrtracking.var with
     Some var ->

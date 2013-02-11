@@ -143,9 +143,9 @@ let eabi_pre_prologue ft start_addr inforec real_entry_point ct_for_cu =
 let eabi_post_epilogue () =
   let insns =
     [C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 0));
-     C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 1));
+     (*C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 1));
      C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 2));
-     C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 3));
+     C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 3));*)
      C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 4));
      C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 5));
      C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 6));
@@ -383,6 +383,9 @@ let decompile_sym binf sym =
   let addressable =
     Ptrtracking.find_addressable blkarr_om inforec dwarf_vars cu_inf.ci_ctypes
 				 defs in
+  let addressable_tab =
+    Ptrtracking.tabulate_addressable blkarr_om addressable in
+  Ptrtracking.dump_addressable_table blkarr_om addressable_tab;
   Log.printf 2 "--- anonymous accesses ---\n";
   let regions = Ptrtracking.addressable_regions blkarr_om addressable sp_cov in
   let pruned_regions = Ptrtracking.prune_regions regions in

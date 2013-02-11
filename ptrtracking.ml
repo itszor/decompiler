@@ -2,6 +2,7 @@ open Defs
 
 module CS = Ir.IrCS
 module CT = Ir.IrCT
+module BS = Ir.IrBS
 module C = Ir.Ir
 
 let string_of_offset offset =
@@ -284,7 +285,7 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 				    Escape_by_fncall node !offsetmap_ref);
 			  node)
 		    args);
-		  create_node idx seq_no !ia_ref Fncall (C.Nullary Irtypes.Nop)
+		  create_node idx seq_no !ia_ref Fncall (C.Control ctlnode)
 			      0l !offsetmap_ref;
 		  ctlnode
 	      (* FIXME: Handle other external call types...  *)
@@ -296,32 +297,108 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
     blk_arr;
   !addressable
 
+let virtual_exit_idx blk_arr =
+  Block.find (fun blk -> blk.Block.id = Irtypes.Virtual_exit) blk_arr
+
 let tabulate_addressable blk_arr addressable =
   let num_blocks = Array.length blk_arr in
+  let num_addressable = List.length addressable in
   let arr = Array.make num_blocks [] in
   (* Partition ADDRESSABLE_ENTITIES into blocks.  *)
   List.iter
     (fun acc ->
       arr.(acc.block) <-
-        { acc with reachable_forwards = Boolset.make num_blocks;
-	  reachable_backwards = Boolset.make num_blocks } :: arr.(acc.block))
+        { acc with reachable_forwards = Boolset.make num_addressable;
+	  reachable_backwards = Boolset.make num_addressable }
+	:: arr.(acc.block))
     addressable;
   (* Sort each block's ADDRESSABLE_ENTITIES into decreasing SEQ_NO order.  *)
   let arr = Array.map
     (fun acclist -> List.sort (fun a b -> compare b.seq_no a.seq_no) acclist)
     arr in
   (* Now renumber so that SEQ_NO are in monotonically increasing order across
-     blocks (also reversing each list).  *)
+     blocks.  *)
   let midx = ref 0 in
   for i = 0 to num_blocks - 1 do
-    let renlist, midx' = List.fold_left
-      (fun (new_list, idx) acc ->
+    let renlist, midx' = List.fold_right
+      (fun acc (new_list, idx) ->
 	{ acc with seq_no = idx } :: new_list, succ idx)
-      ([], !midx)
-      arr.(i) in
-    arr.(i) <- renlist;
+      arr.(i)
+      ([], !midx) in
+    arr.(i) <- List.rev renlist;
     midx := midx'
   done;
+  let reachable_start =
+    Array.init num_blocks (fun _ -> Boolset.make num_addressable)
+  and reachable_end =
+    Array.init num_blocks (fun _ -> Boolset.make num_addressable) in
+  (* Analyze reachability.  First, do a backwards scan to determine forwards
+     reachability for each access node.  *)
+  let rec scan_backwards blkid cur_reachable =
+    let at_end = Boolset.union cur_reachable reachable_end.(blkid) in
+    let made_change = not (Boolset.equal at_end reachable_end.(blkid)) in
+    reachable_end.(blkid) <- at_end;
+    let at_start, newaccesslist =
+      List.fold_right
+	(fun access (reachable_bits, newlist) ->
+	  let new_node =
+	    { access with reachable_forwards =
+		Boolset.union access.reachable_forwards reachable_bits }
+	  and new_reachable =
+	    Boolset.update reachable_bits access.seq_no true in
+          new_reachable, new_node :: newlist)
+	arr.(blkid)
+	(at_end, []) in
+    let new_reachable = Boolset.union reachable_start.(blkid) at_start in
+    let made_change = made_change ||
+      not (Boolset.equal new_reachable reachable_start.(blkid)) in
+    reachable_start.(blkid) <- new_reachable;
+    arr.(blkid) <- newaccesslist;
+    blk_arr.(blkid).Block.visited <- true;
+    List.iter
+      (fun blk ->
+        let idx = blk.Block.dfnum in
+	if made_change || not blk_arr.(idx).Block.visited then
+	  scan_backwards idx new_reachable)
+      blk_arr.(blkid).Block.predecessors in
+  Block.clear_visited blk_arr;
+  let virtual_exit = virtual_exit_idx blk_arr in
+  scan_backwards (virtual_exit) reachable_end.(virtual_exit);
+  (* Now do a forwards scan to determine backwards reachability.  *)
+  let reachable_start =
+    Array.init num_blocks (fun _ -> Boolset.make num_addressable)
+  and reachable_end =
+    Array.init num_blocks (fun _ -> Boolset.make num_addressable) in
+  let rec scan_forwards blkid cur_reachable =
+    let at_start = Boolset.union cur_reachable reachable_start.(blkid) in
+    let made_change = not (Boolset.equal at_start reachable_start.(blkid)) in
+    reachable_start.(blkid) <- at_start;
+    let at_end, newaccesslist =
+      List.fold_left
+        (fun (reachable_bits, newlist) access ->
+	  let new_node =
+	    { access with reachable_backwards =
+	        Boolset.union access.reachable_backwards reachable_bits }
+	  and new_reachable =
+	    Boolset.update reachable_bits access.seq_no true in
+	  new_reachable, new_node :: newlist)
+	(at_start, [])
+	arr.(blkid) in
+    let new_reachable = Boolset.union reachable_end.(blkid) at_end in
+    let made_change = made_change
+		      || not (Boolset.equal new_reachable
+				reachable_end.(blkid)) in
+    reachable_end.(blkid) <- new_reachable;
+    arr.(blkid) <- List.rev newaccesslist;
+    blk_arr.(blkid).Block.visited <- true;
+    List.iter
+      (fun blk ->
+        let idx = blk.Block.dfnum in
+	if made_change || not blk_arr.(idx).Block.visited then
+	  scan_forwards idx new_reachable)
+      blk_arr.(blkid).Block.successors in
+  Block.clear_visited blk_arr;
+  scan_forwards 0 reachable_start.(0);
   arr
 
 exception Mixed
@@ -377,6 +454,28 @@ let string_of_offsetmap om =
   | _ -> ()
   end;
   prefix ^ (Buffer.contents buf)
+
+let dump_addressable_table blk_arr addressable_tab =
+  Log.printf 3 "Stack-access/addressable table:\n";
+  Array.iteri
+    (fun idx accesslist ->
+      Log.printf 3 "Block %s:\n"
+        (BS.string_of_blockref blk_arr.(idx).Block.id);
+      List.iter
+        (fun access ->
+	  Log.printf 3 "seqno: %d  code: %s  cfa_offset: %ld  access: %s\n"
+	    access.seq_no (C.string_of_code access.code) access.cfa_offset
+	    (string_of_access_type access.access_type);
+	  Log.printf 4 "stack: %s\n" (string_of_offsetmap access.offsetmap);
+	  Log.printf 5 "reachable fwd: [%s]\n"
+	    (String.concat ", " (List.map string_of_int
+	      (Boolset.elements access.reachable_forwards)));
+	  Log.printf 5 "reachable bwd: [%s]\n\n"
+	    (String.concat ", " (List.map string_of_int
+	      (Boolset.elements access.reachable_backwards))))
+	accesslist;
+      Log.printf 3 "\n")
+    addressable_tab
 
 let mix_kind offset old_kind new_kind =
   match old_kind, new_kind with
@@ -501,9 +600,10 @@ let prune_regions reg =
     pruned;
   pruned
 
-(* Merge any anonymous stack blocks which have their address taken.  These must
-   generally stay live throughout a function, but we can discount any points
-   where the stack pointer register is above the block in question.  *)
+(* Merge any anonymous stack blocks which have their address taken with a
+   function's stack offset map.  These must generally stay live throughout a
+   function, but we can discount any points where the stack pointer register is
+   above the block in question.  *)
 
 let merge_anon_addressable blkarr_offsetmap sp_cov pruned_regions =
   Array.map

@@ -85,3 +85,7 @@ let fold_left func base set =
 
 let elements set =
   fold_left (fun acc enum -> enum :: acc) [] set.set
+
+let equal a b =
+  a.size = b.size
+  && Ranlist.fold_right2 (fun a1 b1 acc -> acc && a1 = b1) a.set b.set true
