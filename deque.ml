@@ -40,45 +40,39 @@ let iter func deq =
   let fw, bk = deq in
   List.iter func fw; List.iter func bk
 
-exception Deconstruction
-
 let rec decon deq =
   match deq with
-    [], [] -> raise Deconstruction
-  | f::fw, bw -> f, (fw, bw)
+    [], [] -> None
+  | f::fw, bw -> Some (f, (fw, bw))
   | [], bw -> decon (List.rev bw, [])
 
 let rec noced deq =
   match deq with
-    [], [] -> raise Deconstruction
-  | fw, b::bw -> (fw, bw), b
+    [], [] -> None
+  | fw, b::bw -> Some ((fw, bw), b)
   | fw, [] -> noced ([], List.rev fw)
 
 (* "Head" and "tail" functions.  *)
 let hd deq =
-  try
-    let l, ls = decon deq in l
-  with Deconstruction ->
-    raise (Failure "hd")
+  match decon deq with
+    None -> raise (Failure "hd")
+  | Some (x, _) -> x
 
 let tl deq =
-  try
-    let l, ls = decon deq in ls
-  with Deconstruction ->
-    raise (Failure "tl")
+  match decon deq with
+    None -> raise (Failure "tl")
+  | Some (_, xs) -> xs
 
 (* "Tip" (of tail) and "mouse" functions.  *)
 let tp deq =
-  try
-    let ls, l = noced deq in l
-  with Deconstruction ->
-    raise (Failure "hd")
+  match noced deq with
+    None -> raise (Failure "tp")
+  | Some (_, x) -> x
 
 let ms deq =
-  try
-    let ls, l = noced deq in ls
-  with Deconstruction ->
-    raise (Failure "tl")
+  match noced deq with
+    None -> raise (Failure "ms")
+  | Some (xs, _) -> xs
 
 let is_empty = function
     [], [] -> true
@@ -92,37 +86,26 @@ let filter func (fw,bw) =
 
 let fold_right func deq base =
   let rec scan res deq =
-    if is_empty deq then
-      res
-    else
-      let ms, tp = noced deq in
-      scan (func tp res) ms
-  in
-    scan base deq
+    match noced deq with
+      None -> res
+    | Some (ms, tp) -> scan (func tp res) ms in
+  scan base deq
 
 let fold_left func base deq =
   let rec scan res deq =
-    if is_empty deq then
-      res
-    else
-      let hd, tl = decon deq in
-      scan (func res hd) tl
-  in
-    scan base deq
+    match decon deq with
+      None -> res
+    | Some (hd, tl) -> scan (func res hd) tl in
+  scan base deq
 
 let length (fw,bw) =
   List.length fw + List.length bw
 
 let nth deq idx =
   let rec scan deq num =
-    if is_empty deq then
-      raise (Failure "nth")
-    else
-      let hd, tl = decon deq in
-      if num = idx then
-        hd
-      else
-        scan tl (succ num) in
+    match decon deq with
+      None -> raise (Failure "nth")
+    | Some (hd, tl) -> if num = idx then hd else scan tl (succ num) in
   scan deq 0
 
 let printdeq d =

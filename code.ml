@@ -78,8 +78,8 @@ module type CODESEQ =
     val length : 'a t -> int
     val nth : 'a t -> int -> 'a
     val is_empty : 'a t -> bool
-    val decon : 'a t -> 'a * 'a t
-    val noced : 'a t -> 'a t * 'a
+    val decon : 'a t -> ('a * 'a t) option
+    val noced : 'a t -> ('a t * 'a) option
   end
 
 module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
@@ -226,24 +226,18 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
        a call (or similar) instruction.  We need to create a new block in those
        cases.  *)
     let insert_before_control cseq insn =
-      if CS.is_empty cseq then
-	CS.snoc cseq insn
-      else begin
-	match CS.noced cseq with
-          upto, ((Control _) as ctl) ->
-	    let cseq' = CS.snoc upto insn in
-	    CS.snoc cseq' ctl
-	| _, _ ->
-            CS.snoc cseq insn
-      end
+      match CS.noced cseq with
+	None -> CS.snoc cseq insn
+      | Some (upto, ((Control _) as ctl)) ->
+	  let cseq' = CS.snoc upto insn in
+	  CS.snoc cseq' ctl
+      | Some (_, _) -> CS.snoc cseq insn
 
     let finishes_with_control cseq =
-      if CS.is_empty cseq then
-        false
-      else
-        match CS.noced cseq with
-          _, Control _ -> true
-	| _, _ -> false
+      match CS.noced cseq with
+        None -> false
+      | Some (_, Control _) -> true
+      | Some (_, _) -> false
 
     let fold fn ?(ctl_fn = (fun ctl acc -> ctl, acc)) code acc =
       let rec scan e acc =

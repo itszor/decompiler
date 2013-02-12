@@ -73,9 +73,13 @@ let repair_jumptables binf secbits blockseq ht sym =
 		    let blocklist =
 		      blocklist_for_jumptable blockseq ht (Int32.add addr 8l)
 					      (Int32.to_int hi_bound + 1) in
-		    let drop_last, _ = CS.noced codeseq in
-		    CS.snoc drop_last (C.Control (C.CompJump
-				      (C.Reg (CT.Hard_reg idx_reg), blocklist)))
+		    begin match CS.noced codeseq with
+		      Some (drop_last, _) ->
+			CS.snoc drop_last (C.Control (C.CompJump
+					   (C.Reg (CT.Hard_reg idx_reg),
+						   blocklist)))
+		    | None -> failwith "?"
+		    end
 		  with Unrecognized_tablejump ->
 		    Log.printf 3
 		      "Unrecognized tablejump at 0x%lx\n" addr;
