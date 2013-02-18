@@ -15,12 +15,31 @@ TODO list for decompiler
 
 * SP tracking falls over if it hits a phi node: fixable or not? Might suggest alloca or other dynamic stack allocation.
 
+  - SP tracking is currently only used to provide a lower bound for "anonymous" addressable blocks, i.e. blocks whose address is taken, but which are not described in the debug info. We might be able to get away with incomplete or partial data.
+
 * Emission of types and data symbols.
 
 * Add loading of debug info for dependent libraries.
 
-* Use eabi.ml functions for incoming arguments as well as outgoing ones.
+* Use eabi.ml functions for incoming arguments as well as outgoing ones. [done]
 
 * Finish handling of stack accesses.
 
   - any unknown stack object which has its address taken will need to be invented, after determining an upper bound for its size. Any access falling within this region is then potentially a part of the same object.
+
+  - incomplete function arg information is causing the algorithm for this to
+    break.
+
+  - A pass should remove *all* stack accesses -- or fail. E.g. there should be a point after which we can guarantee there are no explicit references to the stack in the IR.
+
+* Finish conversion of IR to C AST (big task!).
+
+* Fix EABI returns -- e.g. returning struct values "by reference" on the stack.
+
+* A pass to convert set/use of flags register into higher-level comparisons.
+
+* Support holding struct values in registers -- mostly for argument passing, where we can't get away without it.
+
+* Minipool resolution and lookup of symbols for constant pointers should be split into separate passes, so constants constructed from code can be turned into symbol references.
+
+* Type reconstruction needs to be fixed.

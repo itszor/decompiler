@@ -58,33 +58,36 @@ let difference a b = combine (fun a b -> a land (lnot b)) a b
 
 let fold_right func set base =
   let _, res = Ranlist.fold_right
-    (fun elem (startbit, acc) ->
+    (fun elem (remain, acc) ->
       let accr = ref acc in
-      for bit = 0 to (bsize - 1) do
+      let chunksize = ((remain - 1) mod bsize) + 1 in
+      let chunklo = remain - chunksize in
+      for bit = chunksize - 1 downto 0 do
         if elem land (1 lsl bit) != 0 then
-          accr := func (startbit + bit) !accr
+          accr := func (chunklo + bit) !accr
       done;
-      (startbit + bsize, !accr))
-    set
-    (0, base)
+      (remain - chunksize, !accr))
+    set.set
+    (set.size, base)
   in
     res
 
 let fold_left func base set =
-  let _, res = Ranlist.fold_left
-    (fun (startbit, acc) elem ->
+  let _, _, res = Ranlist.fold_left
+    (fun (startbit, remain, acc) elem ->
       let accr = ref acc in
-      for bit = 0 to bsize - 1 do
+      let hibit = min remain bsize in
+      for bit = 0 to hibit - 1 do
         if elem land (1 lsl bit) != 0 then
 	  accr := func !accr (startbit + bit)
       done;
-      (startbit + bsize, !accr))
-    (0, base)
-    set in
+      (startbit + bsize, remain - bsize, !accr))
+    (0, set.size, base)
+    set.set in
   res
 
 let elements set =
-  fold_left (fun acc enum -> enum :: acc) [] set.set
+  fold_left (fun acc enum -> enum :: acc) [] set
 
 let equal a b =
   a.size = b.size

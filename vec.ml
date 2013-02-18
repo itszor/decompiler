@@ -74,7 +74,15 @@ let to_list ls =
 let to_list_rev ls =
   Ranlist.to_list ls.rlist
 
-let iter fn vec = Ranlist.iter fn vec.rlist
+let iter fn vec =
+  for i = 0 to vec.length - 1 do
+    fn (lookup vec i)
+  done
+
+let iteri fn vec =
+  for i = 0 to vec.length - 1 do
+    fn i (lookup vec i)
+  done
 
 let map fn vec =
   {
@@ -83,10 +91,10 @@ let map fn vec =
   }
 
 let append a b =
-  fold_left snoc b a
+  fold_left snoc a b
 
 let rev a =
-  fold_left snoc empty a
+  fold_right (fun a b -> snoc b a) a empty
 
 let length vec =
   vec.length

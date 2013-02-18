@@ -123,6 +123,7 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
       | Jump_ext of CT.abi * CT.addr
       | CompJump_ext of CT.abi * code
       | Virtual_exit
+      | Protect_ctl of control
     
     let get_last blk = CS.get_last blk
     
@@ -165,6 +166,7 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
     | CompJump_ext (abi, code) ->
         str "compjump_ext (%s, %s)" (CT.string_of_abi abi) (string_of_code code)
     | Virtual_exit -> "virtual_exit"
+    | Protect_ctl x -> str "protect_ctl (%s)" (string_of_control x)
     
     and string_of_code = function
       Reg r -> CT.string_of_reg r
@@ -288,7 +290,7 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
             let acc'' = scan c3 acc' in
 	    let acc''' = scan c2 acc'' in
 	    scan c1 acc'''
-	| Jump _ | Jump_ext _ | Virtual_exit -> acc' in
+	| Jump _ | Jump_ext _ | Virtual_exit | Protect_ctl _ -> acc' in
       scan code acc
 
     let map fn ?(ctl_fn = fun x -> x) code =
@@ -345,7 +347,8 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
 	| Jump_ext _ as c -> c
 	| CompJump_ext (abi, dst) ->
 	    CompJump_ext (abi, scan dst)
-	| Virtual_exit -> Virtual_exit in
+	| Virtual_exit -> Virtual_exit
+	| Protect_ctl ctl -> ctl in
       scan code
     
     let iter fn ?(ctl_fn = fun x -> ()) code =

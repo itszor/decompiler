@@ -386,11 +386,12 @@ let decompile_sym binf sym =
   let addressable_tab =
     Ptrtracking.tabulate_addressable blkarr_om addressable in
   Ptrtracking.dump_addressable_table blkarr_om addressable_tab;
-  Log.printf 2 "--- anonymous accesses ---\n";
-  let regions = Ptrtracking.addressable_regions blkarr_om addressable sp_cov in
-  let pruned_regions = Ptrtracking.prune_regions regions in
+  Log.printf 2 "--- reachable addresses ---\n";
+  let ra = Ptrtracking.reachable_addresses addressable_tab sp_cov in
+  (*Ptrtracking.dump_reachable ra;*)
+  let merged_regions = Ptrtracking.merge_regions ra in
   let blkarr_om =
-    Ptrtracking.merge_anon_addressable blkarr_om sp_cov pruned_regions in
+    Ptrtracking.merge_anon_addressable blkarr_om sp_cov merged_regions in
   Dwptrtracking.dump_offsetmap_blkarr blkarr_om;
   (*Log.printf 2 "--- gather sp refs ---\n";
   let stack_coverage =

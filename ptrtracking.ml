@@ -168,7 +168,7 @@ let string_of_optional_insn_addr = function
 
 let find_addressable blk_arr inforec vars ctypes_for_cu defs =
   let addressable = ref [] in
-  let maybe_addressable blkidx seq_no insn_addr thing code offsetmap =
+  let maybe_addressable stmt blkidx seq_no insn_addr thing code offsetmap =
     try
       let offset = cfa_offset code defs in
       Log.printf 3 "%s %s equivalent to cfa offset %ld (at %s)\n"
@@ -176,7 +176,7 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 		 (C.string_of_code code) offset
 		 (string_of_optional_insn_addr insn_addr);
       let new_ent = {
-        code = code;
+        code = stmt;
 	cfa_offset = offset;
 	insn_addr = insn_addr;
 	access_type = thing;
@@ -222,15 +222,16 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 	          begin try
 		    let addr_offset = cfa_offset addr defs in
 		    let stored_addr_p =
-		      maybe_addressable idx seq_no !ia_ref
+		      maybe_addressable node idx seq_no !ia_ref
 			(Escape_by_stack_store addr_offset) src
 			!offsetmap_ref in
 		    if not stored_addr_p then
-		      create_node idx seq_no !ia_ref Stack_store addr
+		      create_node idx seq_no !ia_ref Stack_store node
 				  addr_offset !offsetmap_ref
 		  with Not_constant_cfa_offset ->
-		    ignore (maybe_addressable idx seq_no !ia_ref Escape_by_store
-					      src !offsetmap_ref)
+		    ignore (maybe_addressable node idx seq_no !ia_ref
+					      Escape_by_store src
+					      !offsetmap_ref)
 		  end;
 		  node
 	      | C.Store (_, addr, _) ->
@@ -239,7 +240,7 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 		     like we're storing to a stack slot.  *)
 	          begin try
 		    let addr_offset = cfa_offset addr defs in
-		    create_node idx seq_no !ia_ref Stack_store addr
+		    create_node idx seq_no !ia_ref Stack_store node
 				addr_offset !offsetmap_ref
 		  with Not_constant_cfa_offset -> ()
 		  end;
@@ -253,7 +254,7 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 			Log.printf 3 "Using %s for src of phi arg %s\n"
 			  (string_of_optional_insn_addr def.Defs.src_insn_addr)
 			  (C.string_of_code phiarg);
-			ignore (maybe_addressable idx seq_no
+			ignore (maybe_addressable node idx seq_no
 				  def.Defs.src_insn_addr Escape_by_phiarg
 				  phiarg !offsetmap_ref)
 		      with Not_found ->
@@ -264,7 +265,7 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 	      | C.Load (accsz, addr) ->
 	          begin try
 		    let addr_offset = cfa_offset addr defs in
-		    create_node idx seq_no !ia_ref Stack_load addr addr_offset
+		    create_node idx seq_no !ia_ref Stack_load node addr_offset
 				!offsetmap_ref
 		  with Not_constant_cfa_offset -> ()
 		  end;
@@ -281,13 +282,14 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 		        C.Nary (Irtypes.Fnargs, _) -> node
 		      | C.Load (Irtypes.Word, addr) -> C.Protect node
 		      | _ ->
-			  ignore (maybe_addressable idx seq_no !ia_ref
-				    Escape_by_fncall node !offsetmap_ref);
+			  ignore (maybe_addressable (C.Control ctlnode) idx
+				    seq_no !ia_ref Escape_by_fncall node
+				    !offsetmap_ref);
 			  node)
 		    args);
 		  create_node idx seq_no !ia_ref Fncall (C.Control ctlnode)
 			      0l !offsetmap_ref;
-		  ctlnode
+		  C.Protect_ctl ctlnode
 	      (* FIXME: Handle other external call types...  *)
 	      | _ -> ctlnode)
 	    stmt);
@@ -319,13 +321,14 @@ let tabulate_addressable blk_arr addressable =
   (* Now renumber so that SEQ_NO are in monotonically increasing order across
      blocks.  *)
   let midx = ref 0 in
+  let arr2 = Array.make num_blocks Vec.empty in
   for i = 0 to num_blocks - 1 do
     let renlist, midx' = List.fold_right
       (fun acc (new_list, idx) ->
-	{ acc with seq_no = idx } :: new_list, succ idx)
+	Vec.snoc new_list { acc with seq_no = idx }, succ idx)
       arr.(i)
-      ([], !midx) in
-    arr.(i) <- List.rev renlist;
+      (Vec.empty, !midx) in
+    arr2.(i) <- renlist;
     midx := midx'
   done;
   let reachable_start =
@@ -339,21 +342,21 @@ let tabulate_addressable blk_arr addressable =
     let made_change = not (Boolset.equal at_end reachable_end.(blkid)) in
     reachable_end.(blkid) <- at_end;
     let at_start, newaccesslist =
-      List.fold_right
+      Vec.fold_right
 	(fun access (reachable_bits, newlist) ->
 	  let new_node =
 	    { access with reachable_forwards =
 		Boolset.union access.reachable_forwards reachable_bits }
 	  and new_reachable =
 	    Boolset.update reachable_bits access.seq_no true in
-          new_reachable, new_node :: newlist)
-	arr.(blkid)
-	(at_end, []) in
+          new_reachable, Vec.snoc newlist new_node)
+	arr2.(blkid)
+	(at_end, Vec.empty) in
     let new_reachable = Boolset.union reachable_start.(blkid) at_start in
     let made_change = made_change ||
       not (Boolset.equal new_reachable reachable_start.(blkid)) in
     reachable_start.(blkid) <- new_reachable;
-    arr.(blkid) <- newaccesslist;
+    arr2.(blkid) <- Vec.rev newaccesslist;
     blk_arr.(blkid).Block.visited <- true;
     List.iter
       (fun blk ->
@@ -374,22 +377,22 @@ let tabulate_addressable blk_arr addressable =
     let made_change = not (Boolset.equal at_start reachable_start.(blkid)) in
     reachable_start.(blkid) <- at_start;
     let at_end, newaccesslist =
-      List.fold_left
+      Vec.fold_left
         (fun (reachable_bits, newlist) access ->
 	  let new_node =
 	    { access with reachable_backwards =
 	        Boolset.union access.reachable_backwards reachable_bits }
 	  and new_reachable =
 	    Boolset.update reachable_bits access.seq_no true in
-	  new_reachable, new_node :: newlist)
-	(at_start, [])
-	arr.(blkid) in
+	  new_reachable, Vec.snoc newlist new_node)
+	(at_start, Vec.empty)
+	arr2.(blkid) in
     let new_reachable = Boolset.union reachable_end.(blkid) at_end in
     let made_change = made_change
 		      || not (Boolset.equal new_reachable
 				reachable_end.(blkid)) in
     reachable_end.(blkid) <- new_reachable;
-    arr.(blkid) <- List.rev newaccesslist;
+    arr2.(blkid) <- newaccesslist;
     blk_arr.(blkid).Block.visited <- true;
     List.iter
       (fun blk ->
@@ -399,7 +402,167 @@ let tabulate_addressable blk_arr addressable =
       blk_arr.(blkid).Block.successors in
   Block.clear_visited blk_arr;
   scan_forwards 0 reachable_start.(0);
-  arr
+  arr2
+
+type blk_offset =
+  {
+    block_num : int;
+    offset : int
+  }
+
+(* Build an array mapping the sequential index number (of an access descriptor)
+   to the block number (indexed into an array of vectors) and offset into the
+   vector of that descriptor.  *)
+
+let build_index_table arr =
+  let len = Array.fold_right (fun vec ctr -> ctr + Vec.length vec) arr 0 in
+  let table_idx = Array.make len { block_num = -1; offset = -1 } in
+  Array.iteri
+    (fun blkno vec ->
+      Vec.iteri
+        (fun offs access ->
+	  table_idx.(access.seq_no) <- { block_num = blkno; offset = offs })
+	vec)
+    arr;
+  table_idx
+
+let beyond_stored_byte access_base store =
+  match store with
+    C.Store (accsz, _, _) -> access_base + (Irtypes.access_bytesize accsz)
+  | C.Load (accsz, _) -> access_base + (Irtypes.access_bytesize accsz)
+  | _ -> failwith "beyond_stored_byte"
+
+let lo_opt lo new_lo =
+  match lo with
+    None -> Some new_lo
+  | Some old_lo -> Some (min old_lo new_lo)
+
+let hi_opt hi new_hi =
+  match hi with
+    None -> Some new_hi
+  | Some old_hi -> Some (max old_hi new_hi)
+
+let seek_lower offsetmap cfa_offset sp_coverage insn_addr =
+  let low_bound =
+    Coverage.interval_type (Coverage.find_range sp_coverage insn_addr) in
+  let rec find_lower offset =
+    let pred_offset = pred offset in
+    if offset <= low_bound || OffsetMap.mem pred_offset offsetmap then
+      offset
+    else
+      find_lower pred_offset in
+  find_lower (Int32.to_int cfa_offset)
+
+let seek_higher offsetmap cfa_offset =
+  let rec find_higher offset =
+    let succ_offset = succ offset in
+    if offset >= -1 || OffsetMap.mem succ_offset offsetmap then
+      offset
+    else
+      find_higher succ_offset in
+  find_higher (Int32.to_int cfa_offset)
+
+let reachable_addresses arr sp_coverage =
+  let table_idx = build_index_table arr in
+  let get_node idx =
+    let entry = table_idx.(idx) in
+    Vec.lookup arr.(entry.block_num) entry.offset in
+  (* TRUE if offsetmap doesn't have any contents from LO to HI inclusive.  *)
+  let range_clear offsetmap lo hi =
+    let rec clear pos =
+      if pos > hi then
+        true
+      else if OffsetMap.mem pos offsetmap then
+        false
+      else
+        clear (succ pos) in
+    clear lo in
+  let maximise_bounds addr_taken_offset lo hi reachable fwd =
+    Boolset.fold_right
+      (fun idx (lo, hi) ->
+        let targ_node = get_node idx in
+	match targ_node.access_type with
+	  Stack_load
+	| Stack_store ->
+	    let range_lo, range_hi =
+	      if targ_node.cfa_offset >= addr_taken_offset then
+		Int32.to_int addr_taken_offset,
+		beyond_stored_byte (Int32.to_int targ_node.cfa_offset)
+				   targ_node.code
+	      else
+		Int32.to_int targ_node.cfa_offset,
+		Int32.to_int addr_taken_offset in
+	    if range_clear targ_node.offsetmap range_lo range_hi then
+	      lo_opt lo range_lo, hi_opt hi range_hi
+	    else
+	      lo, hi
+	| Fncall when fwd ->
+	    (* If we've stored a stack address somewhere, then we call a
+	       function, the function might write anywhere in the object whose
+	       address was taken.  Functions called before the address was
+	       stored are irrelevant though.  *)
+	    begin match targ_node.insn_addr with
+	      Some insn_addr ->
+		lo_opt lo (seek_lower targ_node.offsetmap addr_taken_offset
+				      sp_coverage insn_addr),
+		hi_opt hi (seek_higher targ_node.offsetmap addr_taken_offset)
+	    | None -> lo, hi
+	    end
+	| _ -> lo, hi)
+      reachable
+      (lo, hi) in
+  Array.fold_right
+    (fun access_vec rangelist ->
+      Vec.fold_right
+	(fun access rangelist ->
+	  match access.access_type with
+	    Escape_by_store
+	  | Escape_by_stack_store _ ->
+	      if not (OffsetMap.mem (Int32.to_int access.cfa_offset)
+				    access.offsetmap) then
+		let lo, hi =
+	          maximise_bounds access.cfa_offset None None
+				  access.reachable_forwards true in
+		let lo, hi =
+	          maximise_bounds access.cfa_offset lo hi
+				  access.reachable_backwards false in
+		begin match lo, hi with
+	          Some lo, Some hi ->
+		    Log.printf 3 "Escape by store: reachable range [%d...%d]\n"
+		      lo hi;
+		    (lo, hi) :: rangelist
+		| _ -> rangelist
+		end
+	      else
+	        rangelist
+	  | Escape_by_fncall ->
+	      if not (OffsetMap.mem (Int32.to_int access.cfa_offset)
+				    access.offsetmap) then
+		match access.insn_addr with
+	          Some insn_addr ->
+		    let lo = seek_lower access.offsetmap access.cfa_offset
+					sp_coverage insn_addr
+		    and hi = seek_higher access.offsetmap access.cfa_offset in
+		    Log.printf 3 "Escape by function call: reachable range \
+				 [%d...%d]\n" lo hi;
+		    (lo, hi) :: rangelist
+		| None -> rangelist
+	      else
+	        rangelist
+	  | Escape_by_phiarg ->
+	      (* FIXME: This isn't sufficient, I don't think.  *)
+	      rangelist
+	  | _ -> rangelist)
+	access_vec
+	rangelist)
+    arr
+    []
+
+let dump_reachable ra =
+  List.iter
+    (fun (lo, hi) -> Log.printf 3 "[%d...%d] " lo hi)
+    ra;
+  Log.printf 3 "\n"
 
 exception Mixed
 
@@ -461,7 +624,7 @@ let dump_addressable_table blk_arr addressable_tab =
     (fun idx accesslist ->
       Log.printf 3 "Block %s:\n"
         (BS.string_of_blockref blk_arr.(idx).Block.id);
-      List.iter
+      Vec.iter
         (fun access ->
 	  Log.printf 3 "seqno: %d  code: %s  cfa_offset: %ld  access: %s\n"
 	    access.seq_no (C.string_of_code access.code) access.cfa_offset
@@ -514,91 +677,25 @@ let rec record_kind_for_offset omap offset bytes kind =
 				    (pred bytes) kind)
       end
 
-let seek_lower offsetmap cfa_offset sp_coverage insn_addr =
-  let low_bound =
-    Coverage.interval_type (Coverage.find_range sp_coverage insn_addr) in
-  Log.printf 3 "low bound at %lx: %d\n" insn_addr low_bound;
-  let rec find_lower offset =
-    let pred_offset = pred offset in
-    if offset <= low_bound || OffsetMap.mem pred_offset offsetmap then
-      offset
-    else
-      find_lower pred_offset in
-  find_lower (Int32.to_int cfa_offset)
-
-let seek_higher offsetmap cfa_offset =
-  let rec find_higher offset =
-    let succ_offset = succ offset in
-    if offset >= -1 || OffsetMap.mem succ_offset offsetmap then
-      offset
-    else
-      find_higher succ_offset in
-  find_higher (Int32.to_int cfa_offset)
-
-let addressable_regions blkarr_offsetmap addressable sp_cov =
-  let ht = Hashtbl.create 5 in
-  List.iter
-    (fun taken_address ->
-      match taken_address.insn_addr with
-        Some ia -> Hashtbl.add ht ia taken_address
-      | None -> ())
-    addressable;
-  Array.fold_left
-    (fun regions blk ->
-      let _, regions' = CS.fold_left
-        (fun (insn_addr, regions') (stmt, stmt_offsetmap) ->
-	  match stmt with
-	    C.Entity (CT.Insn_address ia) -> Some ia, regions'
-	  | _ ->
-	    let regions_ref = ref regions' in
-	    begin match insn_addr with
-	      None -> ()
-	    | Some ia ->
-	        while Hashtbl.mem ht ia do
-	          let taken_address = Hashtbl.find ht ia in
-		  if not (OffsetMap.mem (Int32.to_int taken_address.cfa_offset)
-					!stmt_offsetmap) then begin
-		    let upper_bound =
-		      seek_higher !stmt_offsetmap taken_address.cfa_offset
-		    and lower_bound =
-		      seek_lower !stmt_offsetmap taken_address.cfa_offset
-				 sp_cov ia in
-		    Log.printf 3 "Anonymous addressable region, [%d...%d]\n"
-		      lower_bound upper_bound;
-		    regions_ref := (lower_bound, upper_bound) :: !regions_ref
-		  end;
-		  Hashtbl.remove ht ia
-		done
-	    end;
-	    insn_addr, !regions_ref)
-	(None, regions)
-	blk.Block.code in
-      regions')
-    []
-    blkarr_offsetmap
-
-(* We might get overlapping addressable regions.  If two regions overlap, use
-   the intersection of both.  *)
-
-let prune_regions reg =
+let merge_regions reg =
   let sorted_reg =
     List.sort (fun (a_lo, _) (b_lo, _) -> compare a_lo b_lo) reg in
-  let rec prune = function
+  let rec merge = function
     [] -> []
   | [one] -> [one]
   | (a_lo, a_hi) :: (b_lo, b_hi) :: rest ->
-      if b_lo > a_hi then
-        (a_lo, a_hi) :: prune ((b_lo, b_hi) :: rest)
-      else if b_lo >= a_lo && a_hi <= b_hi then
-        prune ((b_lo, a_hi) :: rest)
+      if a_hi < b_lo then
+        (a_lo, a_hi) :: merge ((b_lo, b_hi) :: rest)
+      else if a_hi > b_hi then
+        merge ((a_lo, a_hi) :: rest)
       else
-        prune ((b_lo, b_hi) :: rest) in
-  let pruned = prune sorted_reg in
-  Log.printf 3 "Pruned list:\n";
+        merge ((a_lo, b_hi) :: rest) in
+  let merged = merge sorted_reg in
+  Log.printf 3 "Merged list:\n";
   List.iter
     (fun (lo, hi) -> Log.printf 3 "[%d...%d]\n" lo hi)
-    pruned;
-  pruned
+    merged;
+  merged
 
 (* Merge any anonymous stack blocks which have their address taken with a
    function's stack offset map.  These must generally stay live throughout a
