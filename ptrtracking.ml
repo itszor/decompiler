@@ -210,7 +210,7 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
   Array.iteri
     (fun idx blk ->
       ignore (CS.fold_left
-        (fun (insn_addr, seq_no) (stmt, offsetmap_ref) ->
+        (fun (insn_addr, seq_no) (stmt, offsetmap) ->
 	  let ia_ref = ref insn_addr in
 	  ignore (C.map
 	    (fun node ->
@@ -224,14 +224,14 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 		    let stored_addr_p =
 		      maybe_addressable node idx seq_no !ia_ref
 			(Escape_by_stack_store addr_offset) src
-			!offsetmap_ref in
+			offsetmap in
 		    if not stored_addr_p then
 		      create_node idx seq_no !ia_ref Stack_store node
-				  addr_offset !offsetmap_ref
+				  addr_offset offsetmap
 		  with Not_constant_cfa_offset ->
 		    ignore (maybe_addressable node idx seq_no !ia_ref
 					      Escape_by_store src
-					      !offsetmap_ref)
+					      offsetmap)
 		  end;
 		  node
 	      | C.Store (_, addr, _) ->
@@ -241,7 +241,7 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 	          begin try
 		    let addr_offset = cfa_offset addr defs in
 		    create_node idx seq_no !ia_ref Stack_store node
-				addr_offset !offsetmap_ref
+				addr_offset offsetmap
 		  with Not_constant_cfa_offset -> ()
 		  end;
 		  node
@@ -256,7 +256,7 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 			  (C.string_of_code phiarg);
 			ignore (maybe_addressable node idx seq_no
 				  def.Defs.src_insn_addr Escape_by_phiarg
-				  phiarg !offsetmap_ref)
+				  phiarg offsetmap)
 		      with Not_found ->
 			Log.printf 3 "No def for %s\n"
 			  (C.string_of_code phiarg))
@@ -266,7 +266,7 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 	          begin try
 		    let addr_offset = cfa_offset addr defs in
 		    create_node idx seq_no !ia_ref Stack_load node addr_offset
-				!offsetmap_ref
+				offsetmap
 		  with Not_constant_cfa_offset -> ()
 		  end;
 	          (* If an address is indirected, it doesn't force it to be
@@ -284,11 +284,11 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 		      | _ ->
 			  ignore (maybe_addressable (C.Control ctlnode) idx
 				    seq_no !ia_ref Escape_by_fncall node
-				    !offsetmap_ref);
+				    offsetmap);
 			  node)
 		    args);
 		  create_node idx seq_no !ia_ref Fncall (C.Control ctlnode)
-			      0l !offsetmap_ref;
+			      0l offsetmap;
 		  C.Protect_ctl ctlnode
 	      (* FIXME: Handle other external call types...  *)
 	      | _ -> ctlnode)
@@ -714,7 +714,7 @@ let merge_anon_addressable blkarr_offsetmap sp_cov pruned_regions =
 	  end;
 	  let stmt_offsetmap' =
 	    match !ia_ref with
-	      None -> !stmt_offsetmap
+	      None -> stmt_offsetmap
 	    | Some ia ->
 	        try
 		  let lo_stack =
@@ -727,10 +727,10 @@ let merge_anon_addressable blkarr_offsetmap sp_cov pruned_regions =
 		      else
 		        offsetmap)
 		    pruned_regions
-		    !stmt_offsetmap
+		    stmt_offsetmap
 		with Not_found ->
-		  !stmt_offsetmap in
-	  !ia_ref, CS.snoc newseq (stmt, ref stmt_offsetmap'))
+		  stmt_offsetmap in
+	  !ia_ref, CS.snoc newseq (stmt, stmt_offsetmap'))
 	(None, CS.empty)
 	blk.Block.code in
       { blk with Block.code = newseq })

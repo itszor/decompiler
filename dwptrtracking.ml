@@ -243,7 +243,7 @@ let mark_addressable_vars blk_arr dwarf_vars addressable =
 
 let add_offsetmap_to_blkarr blkarr =
   Block.map_code
-    (CS.map (fun stmt -> stmt, ref OffsetMap.empty))
+    (CS.map (fun stmt -> stmt, OffsetMap.empty))
     blkarr
 
 let store defs accsz src offset offsetmap =
@@ -313,8 +313,8 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
     offsetmap_at_start.(at) <- nom;
     made_change := !made_change || chg;
     blkarr_offsetmap.(at).Block.visited <- true;
-    let _, final_offsetmap = CS.fold_left
-      (fun (insn_addr, offsetmap_acc) (stmt, stmt_offsetmap) ->
+    let _, new_cs, final_offsetmap = CS.fold_left
+      (fun (insn_addr, new_cs, offsetmap_acc) (stmt, stmt_offsetmap) ->
         let ia_ref = ref insn_addr
 	and om_ref = ref offsetmap_acc in
         ignore (C.map
@@ -336,10 +336,10 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
 	    with Ptrtracking.Not_constant_cfa_offset ->
 	      C.Protect node)
 	  stmt);
-	stmt_offsetmap := !om_ref;
-	!ia_ref, !om_ref)
-      (None, cur_offsetmap)
+	!ia_ref, CS.snoc new_cs (stmt, !om_ref), !om_ref)
+      (None, CS.empty, cur_offsetmap)
       blkarr_offsetmap.(at).Block.code in
+    blkarr_offsetmap.(at) <- { blkarr_offsetmap.(at) with Block.code = new_cs };
     let nom, chg = merge_offsetmap offsetmap_at_end.(at) final_offsetmap in
     offsetmap_at_end.(at) <- nom;
     made_change := !made_change || chg;
@@ -359,8 +359,8 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
     made_change := !made_change || chg;
     Log.printf 3 "mark block %d visited\n" at;
     blkarr_offsetmap.(at).Block.visited <- true;
-    let _, start_offsetmap = CS.fold_right
-      (fun (stmt, stmt_offsetmap) (insn_addr, offsetmap_acc) ->
+    let _, new_cs, start_offsetmap = CS.fold_right
+      (fun (stmt, stmt_offsetmap) (insn_addr, new_cs, offsetmap_acc) ->
         let ia_ref = ref insn_addr
 	and om_ref = ref offsetmap_acc
 	and remove_offset_for_store = ref None in
@@ -396,7 +396,7 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
 		node
 	    | _ -> node)
 	  stmt);
-	stmt_offsetmap := !om_ref;
+	let new_cs' = CS.cons (stmt, !om_ref) new_cs in
 	begin match !remove_offset_for_store with
 	  None -> ()
 	| Some (addr, accsz, offset) ->
@@ -404,9 +404,10 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
 	      (C.string_of_code addr) offset;
 	    unmark_outgoing_arg defs accsz offset om_ref
 	end;
-	!ia_ref, !om_ref)
+	!ia_ref, new_cs', !om_ref)
       blkarr_offsetmap.(at).Block.code
-      (None, cur_offsetmap) in
+      (None, CS.empty, cur_offsetmap) in
+    blkarr_offsetmap.(at) <- { blkarr_offsetmap.(at) with Block.code = new_cs };
     let nom, chg = merge_offsetmap offsetmap_at_start.(at) start_offsetmap in
     offsetmap_at_start.(at) <- nom;
     made_change := !made_change || chg;
@@ -454,7 +455,8 @@ let merge_dwarf_vars blkarr_offsetmap dwarf_vars =
 	(fun blk ->
 	  let _, codeseq' = CS.fold_left
 	    (fun (insn_addr, newseq) (stmt, stmt_offsetmap) ->
-	      let ia_ref = ref insn_addr in
+	      let ia_ref = ref insn_addr
+	      and om_ref = ref stmt_offsetmap in
 	      begin match stmt with
 		C.Entity (CT.Insn_address ia) ->
 		  ia_ref := Some ia
@@ -474,14 +476,14 @@ let merge_dwarf_vars blkarr_offsetmap dwarf_vars =
 				Addressable_local_var
 			      else
 				Local_var in
-			    stmt_offsetmap := record_kind_for_offset
-			      !stmt_offsetmap o dwvar.Function.var_size typ
+			    om_ref := record_kind_for_offset !om_ref o
+					dwvar.Function.var_size typ
 			| _ -> ())
 		      locs
 		  end
 	      | None -> ()
 	      end;
-	      !ia_ref, CS.snoc newseq (stmt, stmt_offsetmap))
+	      !ia_ref, CS.snoc newseq (stmt, !om_ref))
 	    (None, CS.empty)
 	    blk.Block.code in
 	  { blk with Block.code = codeseq' })
@@ -496,7 +498,7 @@ let dump_offsetmap_blkarr barr =
       ignore (CS.fold_left
         (fun _ (code, offsets) ->
 	  Log.printf 3 "%s\t%s\n" (C.string_of_code code)
-		     (string_of_offsetmap !offsets))
+		     (string_of_offsetmap offsets))
 	()
         block.Block.code))
     barr
