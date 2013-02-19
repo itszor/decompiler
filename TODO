@@ -9,6 +9,8 @@ TODO list for decompiler
 
 * Handle scopes/nested scopes properly (by matching to basic blocks?)
 
+  - source file "reconstruct.ml" might be a start at this, but not really.
+
 * Speed up symbol access/mapping symbols (add suitable indices). [partly done]
 
 * Add parallel-set support for 'S' flag support etc. (done -- no 'S' flag support yet though.)

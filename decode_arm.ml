@@ -1410,11 +1410,8 @@ let decode_insn_byterev ibits =
 
 let decode_insn ibits =
   bitmatch ibits with
-   { b0 : 8 : bitstring;
-     b1 : 8 : bitstring;
-     b2 : 8 : bitstring;
-     b3 : 8 : bitstring } ->
-     let insn = Bitstring.concat [b3; b2; b1; b0] in
+   { b0 : 8; b1 : 8; b2 : 8; b3 : 8 } ->
+     let insn = BITSTRING { b3 : 8; b2 : 8; b1 : 8; b0 : 8 } in
      decode_insn_byterev insn
 
 let decode_insns ibits num_insns =

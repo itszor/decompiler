@@ -27,13 +27,13 @@ PACKAGES := -package bitstring,bitstring.syntax,num,unix,FrontC
 # Source plus generated files.
 OCAMLSRC := log.ml coverage.ml elfreader.ml dwarfreader.ml dwarfprint.ml \
 	    line.ml decode_arm.ml insn.ml symbols.ml mapping.ml emit.ml \
-	    deque.ml ranlist.ml vec.ml boolset.ml getoption.ml code.ml block.ml \
-	    ctype.ml function.ml irtypes.ml ir.ml eabi.ml typedb.ml builtin.ml \
-	    slice_section.ml binary_info.ml insn_to_ir.ml plt.ml dfs.ml \
-	    dominator.ml phi.ml defs.ml ce.ml dce.ml minipool.ml \
-	    locations.ml sptracking.ml ptrtracking.ml dwptrtracking.ml \
-	    resolve_section.ml jumptable.ml restructure.ml vartypes.ml \
-	    ctree.ml decompiler.ml
+	    deque.ml ranlist.ml vec.ml boolset.ml getoption.ml code.ml \
+	    block.ml ctype.ml function.ml irtypes.ml ir.ml eabi.ml typedb.ml \
+	    builtin.ml slice_section.ml binary_info.ml external.ml \
+	    insn_to_ir.ml plt.ml dfs.ml dominator.ml phi.ml defs.ml ce.ml \
+	    dce.ml minipool.ml locations.ml sptracking.ml ptrtracking.ml \
+	    dwptrtracking.ml resolve_section.ml jumptable.ml restructure.ml \
+	    vartypes.ml ctree.ml decompiler.ml
 
 # OCAMLOBJ := $(shell < .depend $(OCAMLDSORT) -byte $(OCAMLSRC))
 ifeq ($(BUILD),opt)

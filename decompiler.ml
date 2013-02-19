@@ -31,6 +31,11 @@ module LabelSet = Set.Make
     let compare = compare
   end)
 
+let gcinfo nm =
+  Log.printf 3 "~~~ %s: allocated %f MB (%f secs) ~~~\n" nm
+    (Gc.allocated_bytes () /. (1024.0 *. 1024.0)) (Sys.time ());
+  Log.flush ()
+
 (* Return a list of addresses which (could be) labels/block start addresses
    for INSN.  *)
 
@@ -64,8 +69,9 @@ let code_for_sym binf section mapping_syms sym =
     let map = Mapping.mapping_for_addr mapping_syms binf.strtab insn_addr in
     match map with
       Mapping.ARM ->
+	let bits = Bitstring.dropbits (i * 32) sym_bits in
         let decoded
-	  = Decode_arm.decode_insn (Bitstring.dropbits (i * 32) sym_bits) in
+	  = Decode_arm.decode_insn bits in
         Log.printf 3 "%lx : %s\n" insn_addr (Mapping.string_of_mapping map);
 	if decoded.Insn.opcode = Insn.BAD then
 	  Log.printf 1 "Didn't decode insn at %lx successfully.\n" insn_addr;
@@ -304,10 +310,12 @@ let graphviz blk_arr =
 let decompile_sym binf sym =
   let symname = Symbols.symbol_name sym binf.strtab in
   Log.printf 1 "*** decompiling '%s' ***\n" symname;
+  gcinfo "start of decompile_sym";
   let entry_point = sym.Elfreader.st_value in
   Log.printf 3 "entry point: %lx\n" entry_point;
   let entry_point_ba = Irtypes.BlockAddr entry_point in
   let code = code_for_sym binf binf.text binf.mapping_syms sym in
+  gcinfo "after code_for_sym";
   let cu_offset_for_sym = cu_offset_for_address binf entry_point in
   let cu_inf = Hashtbl.find binf.cu_hash cu_offset_for_sym in
   let base_addr_for_cu = cu_inf.ci_baseaddr in
@@ -326,6 +334,7 @@ let decompile_sym binf sym =
   let blockseq, ht =
     bs_of_code_hash ft binf inforec code entry_point entry_point_ba
 		    cu_inf.ci_ctypes in
+  gcinfo "after creating block seq";
   Log.printf 2 "--- initial blockseq ---\n";
   dump_blockseq blockseq;
   let entry_point_ref = Hashtbl.find ht entry_point_ba in
@@ -333,27 +342,32 @@ let decompile_sym binf sym =
   Log.printf 2 "--- find & repair jump tables ---\n";
   let blockseq =
     Jumptable.repair_jumptables binf binf.text blockseq ht sym in
+  gcinfo "after jump table repair";
   dump_blockseq blockseq;
   Log.printf 2 "--- build DFS graph ---\n";
   IrDfs.pred_succ ~whole_program:false blockseq ht Irtypes.Virtual_exit;
   IrDfs.dfs blockseq ht Irtypes.Virtual_entry;
   let blockseq = IrDfs.remove_unreachable blockseq in
   let blk_arr = IrDfs.blockseq_to_dfs_array blockseq in
+  gcinfo "after DFS";
   Log.printf 2 "--- after doing DFS ---\n";
   print_blockseq_dfsinfo blk_arr;
   flush stdout;
   IrDominator.dominators blk_arr;
   IrDominator.computedf blk_arr;
+  gcinfo "after dominator computation";
   Log.printf 2 "--- after computing dominators ---\n";
   print_blockseq_dfsinfo blk_arr;
-  graphviz blk_arr;
+  (*graphviz blk_arr;*)
   Log.printf 2 "--- SSA conversion (1) ---\n";
   let regset = IrPhiPlacement.place blk_arr in
   IrPhiPlacement.rename blk_arr 0 regset;
+  gcinfo "after ssa rename (1)";
   dump_blockarr blk_arr;
   (* Insert type info for function's locals here.  *)
   Log.printf 2 "--- gather info (1) ---\n";
   Typedb.gather_info blk_arr inforec;
+  gcinfo "after gather info";
   Log.printf 2 "--- strip ids ---\n";
   let blk_arr = strip_ids blk_arr in
   Log.printf 2 "--- minipool resolution ---\n";
@@ -361,6 +375,7 @@ let decompile_sym binf sym =
     Minipool.minipool_resolve binf.elfbits binf.ehdr binf.shdr_arr binf.symbols
 			      binf.mapping_syms binf.strtab blk_arr inforec
 			      cu_inf.ci_ctypes in
+  gcinfo "after minipool resolution";
   dump_blockarr blk_arr;
   (*Log.printf 1 "--- sp tracking ---\n";
   let sp_var_set = Sptracking.sp_track blk_arr' vars cu_inf.ci_ctypes in
@@ -369,20 +384,26 @@ let decompile_sym binf sym =
   let defs = Defs.get_defs blk_arr in
   Log.printf 2 "--- sp tracking ---\n";
   let sp_cov = Sptracking.sp_track blk_arr in
+  gcinfo "after sp tracking";
   Log.printf 2 "--- propagating stack references ---\n";
   let blkarr_om = Dwptrtracking.scan_stack_accesses blk_arr dwarf_vars 0 defs in
+  gcinfo "after propagation";
   Log.printf 2 "--- find addressable variables (1) ---\n";
   let addressable =
     Ptrtracking.find_addressable blkarr_om inforec dwarf_vars cu_inf.ci_ctypes
 				 defs in
+  gcinfo "after find addressable (1)";
   Log.printf 2 "--- marking address-taken vars ---\n";
   Dwptrtracking.mark_addressable_vars blk_arr dwarf_vars addressable;
+  gcinfo "after marking addressable";
   Log.printf 2 "--- merging known variables from dwarf info ---\n";
   let blkarr_om = Dwptrtracking.merge_dwarf_vars blkarr_om dwarf_vars in
+  gcinfo "after dwarf var merge";
   Log.printf 2 "--- find addressable variables (2) ---\n";
   let addressable =
     Ptrtracking.find_addressable blkarr_om inforec dwarf_vars cu_inf.ci_ctypes
 				 defs in
+  gcinfo "after find addressable (2)";
   let addressable_tab =
     Ptrtracking.tabulate_addressable blkarr_om addressable in
   Ptrtracking.dump_addressable_table blkarr_om addressable_tab;
@@ -390,8 +411,10 @@ let decompile_sym binf sym =
   let ra = Ptrtracking.reachable_addresses addressable_tab sp_cov in
   (*Ptrtracking.dump_reachable ra;*)
   let merged_regions = Ptrtracking.merge_regions ra in
+  gcinfo "after finding anonymous addressable regions";
   let blkarr_om =
     Ptrtracking.merge_anon_addressable blkarr_om sp_cov merged_regions in
+  gcinfo "after merging anon addressable";
   Dwptrtracking.dump_offsetmap_blkarr blkarr_om;
   (*Log.printf 2 "--- gather sp refs ---\n";
   let stack_coverage =
@@ -426,16 +449,21 @@ let decompile_sym binf sym =
 				      ".rodata" in
   Slice_section.slice blk_arr binf.rodata_sliced
     binf.shdr_arr.(rodata_sec).sh_addr ".rodata" symname;
+  gcinfo "after slicing rodata";
   Log.printf 2 "--- removing prologue/epilogue code ---\n";
   let blk_arr = Ce.remove_prologue_and_epilogue blk_arr ft in
+  gcinfo "after prologue/epilogue removal";
   dump_blockarr blk_arr;
   Log.printf 2 "--- remove dead code ---\n";
   let blk_arr = Dce.remove_dead_code blk_arr in
+  gcinfo "after dead code removal";
   dump_blockarr blk_arr;
   Log.printf 2 "--- restructuring ---\n";
   let rstr = Restructure.restructure blk_arr ft cu_inf.ci_ctypes in
+  gcinfo "after restructuring";
   Log.printf 2 "--- choose variable names and types ---\n";
   let vars = Vartypes.choose_vartypes blk_arr cu_inf.ci_ctypes inforec in
+  gcinfo "after choosing vartypes";
   (*Log.printf 3 "--- add arg types to vars hash ---\n";
   Hashtbl.iter (fun k v -> Hashtbl.add vars k v) arg_vars;*)
   (* Convert more aggregate/array accesses here.  *)
@@ -445,7 +473,9 @@ let decompile_sym binf sym =
 				   cu_inf.ci_ctypes in*)
   Log.printf 2 "--- eliminate phi nodes ---\n";
   IrPhiPlacement.eliminate blk_arr;
+  gcinfo "after phi node elimination";
   dump_blockarr blk_arr;
+  gcinfo "end of decompile_sym";
   (*stack_coverage*)
   ft, vars, blk_arr
 

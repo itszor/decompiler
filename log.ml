@@ -7,3 +7,6 @@ let printf level fmt =
     Printf.fprintf !logfile fmt
   else
     Printf.ifprintf !logfile fmt
+
+let flush () =
+  flush !logfile
