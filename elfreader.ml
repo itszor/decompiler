@@ -240,6 +240,68 @@ type arm_rel = R_ARM_NONE
 	     | R_ARM_ALU_SBREL_11_0
 	     | R_ARM_ALU_SBREL_19_12
 	     | R_ARM_ALU_SBREL_27_20
+	     | R_ARM_TARGET1
+	     | R_ARM_SBREL31
+	     | R_ARM_V4BX
+	     | R_ARM_TARGET2
+	     | R_ARM_PREL31
+	     | R_ARM_MOVW_ABS_NC
+	     | R_ARM_MOVT_ABS
+	     | R_ARM_MOVW_PREL_NC
+	     | R_ARM_MOVT_PREL
+	     | R_ARM_THM_MOVW_ABS_NC
+	     | R_ARM_THM_MOVT_ABS
+	     | R_ARM_THM_MOVW_PREL_NC
+	     | R_ARM_THM_MOVT_PREL
+	     | R_ARM_THM_JUMP19
+	     | R_ARM_THM_JUMP6
+	     | R_ARM_THM_ALU_PREL_11_0
+	     | R_ARM_THM_PC12
+	     | R_ARM_ABS32_NOI
+	     | R_ARM_REL32_NOI
+	     | R_ARM_ALU_PC_G0_NC
+	     | R_ARM_ALU_PC_G0
+	     | R_ARM_ALU_PC_G1_NC
+	     | R_ARM_ALU_PC_G1
+	     | R_ARM_ALU_PC_G2
+	     | R_ARM_LDR_PC_G1
+	     | R_ARM_LDR_PC_G2
+	     | R_ARM_LDRS_PC_G0
+	     | R_ARM_LDRS_PC_G1
+	     | R_ARM_LDRS_PC_G2
+	     | R_ARM_LDC_PC_G0
+	     | R_ARM_LDC_PC_G1
+	     | R_ARM_LDC_PC_G2
+	     | R_ARM_ALU_SB_G0_NC
+	     | R_ARM_ALU_SB_G0
+	     | R_ARM_ALU_SB_G1_NC
+	     | R_ARM_ALU_SB_G1
+	     | R_ARM_ALU_SB_G2
+	     | R_ARM_LDR_SB_G0
+	     | R_ARM_LDR_SB_G1
+	     | R_ARM_LDR_SB_G2
+	     | R_ARM_LDRS_SB_G0
+	     | R_ARM_LDRS_SB_G1
+	     | R_ARM_LDRS_SB_G2
+	     | R_ARM_LDC_SB_G0
+	     | R_ARM_LDC_SB_G1
+	     | R_ARM_LDC_SB_G2
+	     | R_ARM_MOVW_BREL_NC
+	     | R_ARM_MOVT_BREL
+	     | R_ARM_MOVW_BREL
+	     | R_ARM_THM_MOVW_BREL_NC
+	     | R_ARM_THM_MOVT_BREL
+	     | R_ARM_THM_MOVW_BREL
+	     | R_ARM_TLS_GOTDESC
+	     | R_ARM_TLS_CALL
+	     | R_ARM_TLS_DESCSEQ
+	     | R_ARM_THM_TLS_CALL
+	     | R_ARM_PLT32_ABS
+	     | R_ARM_GOT_ABS
+	     | R_ARM_GOT_PREL
+	     | R_ARM_GOT_BREL12
+	     | R_ARM_GOTOFF12
+	     | R_ARM_GOTRELAX
 	     | R_ARM_GNU_VTENTRY
 	     | R_ARM_GNU_VTINHERIT
 	     | R_ARM_THM_PC11
@@ -249,6 +311,7 @@ type arm_rel = R_ARM_NONE
 	     | R_ARM_TLS_LDO32
 	     | R_ARM_TLS_IE32
 	     | R_ARM_TLS_LE32
+	     | R_ARM_PRIVATE of int
 	     | R_ARM_RXPC25
 	     | R_ARM_RSBREL32
 	     | R_ARM_THM_RPC22
@@ -292,6 +355,7 @@ let decode_arm_rel = function
   | 35 -> R_ARM_ALU_SBREL_11_0
   | 36 -> R_ARM_ALU_SBREL_19_12
   | 37 -> R_ARM_ALU_SBREL_27_20
+  | 57 -> R_ARM_ALU_PC_G0_NC
   | 100 -> R_ARM_GNU_VTENTRY
   | 101 -> R_ARM_GNU_VTINHERIT
   | 102 -> R_ARM_THM_PC11
@@ -301,6 +365,7 @@ let decode_arm_rel = function
   | 106 -> R_ARM_TLS_LDO32
   | 107 -> R_ARM_TLS_IE32
   | 108 -> R_ARM_TLS_LE32
+  | x when x >= 112 && x <= 127 -> R_ARM_PRIVATE (x - 112)
   | 249 -> R_ARM_RXPC25
   | 250 -> R_ARM_RSBREL32
   | 251 -> R_ARM_THM_RPC22
@@ -308,7 +373,7 @@ let decode_arm_rel = function
   | 253 -> R_ARM_RABS22
   | 254 -> R_ARM_RPC24
   | 255 -> R_ARM_RBASE
-  | _ -> raise (Elf_read_error "decode_arm_rel")
+  | x -> raise (Elf_read_error (Printf.sprintf "decode_arm_rel (%d)" x))
 
 type elf_rel =
 {
