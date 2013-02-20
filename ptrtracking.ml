@@ -97,12 +97,12 @@ module OffsetMap = struct
   include BatIMap
 
   let equal eq a b =
-    fold2_range
-      (fun _ _ aopt bopt acc ->
+    forall2_range 
+      (fun _ _ aopt bopt ->
 	match aopt, bopt with
-          None, None -> acc
-	| Some x, Some y when eq x y -> acc
-	| _, _ -> false) a b true
+          None, None -> true
+	| Some x, Some y when eq x y -> true
+	| _, _ -> false) a b
 end
 
 type stack_access_kind =
@@ -660,13 +660,13 @@ let mix_kind offsetlo offsethi old_kind new_kind =
   | _, replacement -> replacement
 
 let map_union a b =
-  OffsetMap.fold2_range
-    (fun lo hi a_opt b_opt newmap ->
+  OffsetMap.merge ~eq:(=)
+    (fun lo hi a_opt b_opt ->
       match a_opt, b_opt with
-        Some x, Some y -> OffsetMap.add_range lo hi (mix_kind lo hi x y) newmap
-      | Some x, None -> OffsetMap.add_range lo hi x newmap
-      | None, Some y -> OffsetMap.add_range lo hi y newmap
-      | None, None -> newmap) a b (OffsetMap.empty (=))
+        Some x, Some y -> Some (mix_kind lo hi x y)
+      | Some x, None -> Some x
+      | None, Some y -> Some y
+      | None, None -> None) a b
 
 let rec record_kind_for_offset omap offset bytes kind =
   match bytes with
