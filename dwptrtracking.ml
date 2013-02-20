@@ -243,7 +243,7 @@ let mark_addressable_vars blk_arr dwarf_vars addressable =
 
 let add_offsetmap_to_blkarr blkarr =
   Block.map_code
-    (CS.map (fun stmt -> stmt, OffsetMap.empty))
+    (CS.map (fun stmt -> stmt, (OffsetMap.empty (=))))
     blkarr
 
 let store defs accsz src offset offsetmap =
@@ -302,8 +302,8 @@ let merge_offsetmap oldmap newmap =
 
 let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
   let num_blks = Array.length blkarr in
-  let offsetmap_at_start = Array.make num_blks OffsetMap.empty
-  and offsetmap_at_end = Array.make num_blks OffsetMap.empty in
+  let offsetmap_at_start = Array.make num_blks (OffsetMap.empty (=))
+  and offsetmap_at_end = Array.make num_blks (OffsetMap.empty (=)) in
   let blkarr_offsetmap = add_offsetmap_to_blkarr blkarr in
   (* Propagate stores forwards.  *)
   let rec scan_f cur_offsetmap at =
@@ -419,7 +419,7 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
 	  scan_b start_offsetmap dest_dfnum)
       blkarr_offsetmap.(at).Block.predecessors in
   Block.clear_visited blkarr_offsetmap;
-  scan_f OffsetMap.empty entrypoint;
+  scan_f (OffsetMap.empty (=)) entrypoint;
   Block.clear_visited blkarr_offsetmap;
   let v_exit = virtual_exit_idx blkarr_offsetmap in
   Log.printf 3 "Using virtual exit block index %d\n" v_exit;

@@ -93,11 +93,17 @@ let cfa_offset addr defs =
       find_pointer_cfa_offset_equiv defs base (Int32.neg imm)
   | _ -> raise Not_constant_cfa_offset
 
-module OffsetMap = Map.Make
-  (struct
-    type t = int
-    let compare = compare
-  end)
+module OffsetMap = struct
+  include BatIMap
+
+  let equal eq a b =
+    fold2_range
+      (fun _ _ aopt bopt acc ->
+	match aopt, bopt with
+          None, None -> acc
+	| Some x, Some y when eq x y -> acc
+	| _, _ -> false) a b true
+end
 
 type stack_access_kind =
     Saved_caller_reg
@@ -640,28 +646,31 @@ let dump_addressable_table blk_arr addressable_tab =
       Log.printf 3 "\n")
     addressable_tab
 
-let mix_kind offset old_kind new_kind =
+let mix_kind offsetlo offsethi old_kind new_kind =
+  let offstr =
+    if offsetlo = offsethi then string_of_int offsetlo
+    else Printf.sprintf "%d...%d" offsetlo offsethi in
   match old_kind, new_kind with
     Saved_caller_reg, Saved_caller_reg -> Saved_caller_reg
   | Saved_caller_reg, _
   | _, Saved_caller_reg ->
-      Log.printf 3 "*** caller-saved reg collision, offset %d ***\n" offset;
+      Log.printf 3 "*** caller-saved reg collision, offset %s ***\n" offstr;
       Saved_caller_reg
   | Outgoing_arg, Outgoing_arg -> Outgoing_arg
   | Outgoing_arg, _
   | _, Outgoing_arg ->
-      Log.printf 3 "*** outgoing arg collision, offset %d ***\n" offset;
+      Log.printf 3 "*** outgoing arg collision, offset %s ***\n" offstr;
       Outgoing_arg
   | _, replacement -> replacement
 
 let map_union a b =
-  OffsetMap.merge
-    (fun offset a_opt b_opt ->
+  OffsetMap.fold2_range
+    (fun lo hi a_opt b_opt newmap ->
       match a_opt, b_opt with
-        Some x, Some y -> Some (mix_kind offset x y)
-      | Some x, None -> Some x
-      | None, Some y -> Some y
-      | None, None -> None) a b
+        Some x, Some y -> OffsetMap.add_range lo hi (mix_kind lo hi x y) newmap
+      | Some x, None -> OffsetMap.add_range lo hi x newmap
+      | None, Some y -> OffsetMap.add_range lo hi y newmap
+      | None, None -> newmap) a b (OffsetMap.empty (=))
 
 let rec record_kind_for_offset omap offset bytes kind =
   match bytes with
@@ -669,7 +678,7 @@ let rec record_kind_for_offset omap offset bytes kind =
   | n ->
       begin try
         let existing = OffsetMap.find offset omap in
-	let mixed = mix_kind offset existing kind in
+	let mixed = mix_kind offset offset existing kind in
 	OffsetMap.add offset mixed (record_kind_for_offset omap (succ offset)
 				     (pred bytes) kind)
       with Not_found ->

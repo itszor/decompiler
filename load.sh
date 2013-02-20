@@ -21,6 +21,7 @@ ledit ocaml -init <(cat << EOF
 #require "bitstring";;
 #require "bitstring.syntax";;
 #require "FrontC";;
+#require "batteries";;
 ${loads[@]}
 open Decompiler;;
 EOF
