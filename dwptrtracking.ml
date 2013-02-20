@@ -243,7 +243,20 @@ let mark_addressable_vars blk_arr dwarf_vars addressable =
 
 let add_offsetmap_to_blkarr blkarr =
   Block.map_code
-    (CS.map (fun stmt -> stmt, (OffsetMap.empty (=))))
+    (fun cseq ->
+      let _, newseq = CS.fold_left
+	(fun (insn_addr, newseq) stmt ->
+          let ia_ref = ref insn_addr in
+	  let newseq' =
+	    match stmt with
+	      C.Entity (CT.Insn_address ia) ->
+		ia_ref := Some ia;
+		newseq
+	    | _ -> CS.snoc newseq (!ia_ref, stmt, OffsetMap.empty (=)) in
+	  !ia_ref, newseq')
+	(None, CS.empty)
+	cseq in
+      newseq)
     blkarr
 
 let store defs accsz src offset offsetmap =
@@ -313,18 +326,14 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
     offsetmap_at_start.(at) <- nom;
     made_change := !made_change || chg;
     blkarr_offsetmap.(at).Block.visited <- true;
-    let _, new_cs, final_offsetmap = CS.fold_left
-      (fun (insn_addr, new_cs, offsetmap_acc) (stmt, stmt_offsetmap) ->
-        let ia_ref = ref insn_addr
-	and om_ref = ref offsetmap_acc in
+    let new_cs, final_offsetmap = CS.fold_left
+      (fun (new_cs, offsetmap_acc) (insn_addr, stmt, stmt_offsetmap) ->
+	let om_ref = ref offsetmap_acc in
         ignore (C.map
 	  (fun node ->
 	    try
               match node with
-	        C.Entity (CT.Insn_address ia) ->
-		  ia_ref := Some ia;
-		  node
-	      | C.Store (accsz, addr, C.SSAReg src) ->
+	        C.Store (accsz, addr, C.SSAReg src) ->
 		  let offset = Ptrtracking.cfa_offset addr defs in
 		  store defs accsz src offset om_ref;
 		  C.Protect node
@@ -336,8 +345,8 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
 	    with Ptrtracking.Not_constant_cfa_offset ->
 	      C.Protect node)
 	  stmt);
-	!ia_ref, CS.snoc new_cs (stmt, !om_ref), !om_ref)
-      (None, CS.empty, cur_offsetmap)
+	CS.snoc new_cs (insn_addr, stmt, !om_ref), !om_ref)
+      (CS.empty, cur_offsetmap)
       blkarr_offsetmap.(at).Block.code in
     blkarr_offsetmap.(at) <- { blkarr_offsetmap.(at) with Block.code = new_cs };
     let nom, chg = merge_offsetmap offsetmap_at_end.(at) final_offsetmap in
@@ -359,19 +368,15 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
     made_change := !made_change || chg;
     Log.printf 3 "mark block %d visited\n" at;
     blkarr_offsetmap.(at).Block.visited <- true;
-    let _, new_cs, start_offsetmap = CS.fold_right
-      (fun (stmt, stmt_offsetmap) (insn_addr, new_cs, offsetmap_acc) ->
-        let ia_ref = ref insn_addr
-	and om_ref = ref offsetmap_acc
+    let new_cs, start_offsetmap = CS.fold_right
+      (fun (insn_addr, stmt, stmt_offsetmap) (new_cs, offsetmap_acc) ->
+	let om_ref = ref offsetmap_acc
 	and remove_offset_for_store = ref None in
 	ignore (C.map
 	  (fun node ->
 	    try
 	      match node with
-	        C.Entity (CT.Insn_address ia) ->
-		  ia_ref := Some ia;
-		  node
-	      | C.Store (accsz, addr, C.SSAReg src) ->
+	        C.Store (accsz, addr, C.SSAReg src) ->
 	          let offset = Ptrtracking.cfa_offset addr defs in
 		  remove_offset_for_store := Some (addr, accsz, offset);
 	          C.Protect node
@@ -396,7 +401,7 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
 		node
 	    | _ -> node)
 	  stmt);
-	let new_cs' = CS.cons (stmt, !om_ref) new_cs in
+	let new_cs' = CS.cons (insn_addr, stmt, !om_ref) new_cs in
 	begin match !remove_offset_for_store with
 	  None -> ()
 	| Some (addr, accsz, offset) ->
@@ -404,9 +409,9 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
 	      (C.string_of_code addr) offset;
 	    unmark_outgoing_arg defs accsz offset om_ref
 	end;
-	!ia_ref, new_cs', !om_ref)
+	new_cs', !om_ref)
       blkarr_offsetmap.(at).Block.code
-      (None, CS.empty, cur_offsetmap) in
+      (CS.empty, cur_offsetmap) in
     blkarr_offsetmap.(at) <- { blkarr_offsetmap.(at) with Block.code = new_cs };
     let nom, chg = merge_offsetmap offsetmap_at_start.(at) start_offsetmap in
     offsetmap_at_start.(at) <- nom;
@@ -453,16 +458,10 @@ let merge_dwarf_vars blkarr_offsetmap dwarf_vars =
         Locations.convert_dwarf_loclist_opt dwvar.Function.var_location in
       Array.map
 	(fun blk ->
-	  let _, codeseq' = CS.fold_left
-	    (fun (insn_addr, newseq) (stmt, stmt_offsetmap) ->
-	      let ia_ref = ref insn_addr
-	      and om_ref = ref stmt_offsetmap in
-	      begin match stmt with
-		C.Entity (CT.Insn_address ia) ->
-		  ia_ref := Some ia
-	      | _ -> ()
-	      end;
-	      begin match !ia_ref with
+	  let codeseq' = CS.fold_left
+	    (fun newseq (insn_addr, stmt, stmt_offsetmap) ->
+	      let om_ref = ref stmt_offsetmap in
+	      begin match insn_addr with
 		Some insn_addr ->
 		  if live_at_addr liveness insn_addr then begin
 		    List.iter
@@ -483,8 +482,8 @@ let merge_dwarf_vars blkarr_offsetmap dwarf_vars =
 		  end
 	      | None -> ()
 	      end;
-	      !ia_ref, CS.snoc newseq (stmt, !om_ref))
-	    (None, CS.empty)
+	      CS.snoc newseq (insn_addr, stmt, !om_ref))
+	    CS.empty
 	    blk.Block.code in
 	  { blk with Block.code = codeseq' })
 	blkarr_offsetmap')
@@ -496,9 +495,12 @@ let dump_offsetmap_blkarr barr =
     (fun block ->
       Log.printf 3 "block id \"%s\":\n" (BS.string_of_blockref block.Block.id);
       ignore (CS.fold_left
-        (fun _ (code, offsets) ->
-	  Log.printf 3 "%s\t%s\n" (C.string_of_code code)
-		     (string_of_offsetmap offsets))
+        (fun _ (insn_addr, code, offsets) ->
+	  Log.printf 3 "%s\t%s\t%s\n"
+	    (match insn_addr with
+	      None -> "[...]"
+	    | Some ia -> Printf.sprintf "[%.8lx]" ia) (C.string_of_code code)
+	    (string_of_offsetmap offsets))
 	()
         block.Block.code))
     barr

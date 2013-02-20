@@ -216,26 +216,22 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
   Array.iteri
     (fun idx blk ->
       ignore (CS.fold_left
-        (fun (insn_addr, seq_no) (stmt, offsetmap) ->
-	  let ia_ref = ref insn_addr in
+        (fun seq_no (insn_addr, stmt, offsetmap) ->
 	  ignore (C.map
 	    (fun node ->
 	      match node with
-	        C.Entity (CT.Insn_address ia) ->
-		  ia_ref := Some ia;
-		  node
-	      | C.Store (accsz, addr, src) when accsz = Irtypes.Word ->
+	        C.Store (accsz, addr, src) when accsz = Irtypes.Word ->
 	          begin try
 		    let addr_offset = cfa_offset addr defs in
 		    let stored_addr_p =
-		      maybe_addressable node idx seq_no !ia_ref
+		      maybe_addressable node idx seq_no insn_addr
 			(Escape_by_stack_store addr_offset) src
 			offsetmap in
 		    if not stored_addr_p then
-		      create_node idx seq_no !ia_ref Stack_store node
+		      create_node idx seq_no insn_addr Stack_store node
 				  addr_offset offsetmap
 		  with Not_constant_cfa_offset ->
-		    ignore (maybe_addressable node idx seq_no !ia_ref
+		    ignore (maybe_addressable node idx seq_no insn_addr
 					      Escape_by_store src
 					      offsetmap)
 		  end;
@@ -246,7 +242,7 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 		     like we're storing to a stack slot.  *)
 	          begin try
 		    let addr_offset = cfa_offset addr defs in
-		    create_node idx seq_no !ia_ref Stack_store node
+		    create_node idx seq_no insn_addr Stack_store node
 				addr_offset offsetmap
 		  with Not_constant_cfa_offset -> ()
 		  end;
@@ -271,7 +267,7 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 	      | C.Load (accsz, addr) ->
 	          begin try
 		    let addr_offset = cfa_offset addr defs in
-		    create_node idx seq_no !ia_ref Stack_load node addr_offset
+		    create_node idx seq_no insn_addr Stack_load node addr_offset
 				offsetmap
 		  with Not_constant_cfa_offset -> ()
 		  end;
@@ -289,18 +285,18 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 		      | C.Load (Irtypes.Word, addr) -> C.Protect node
 		      | _ ->
 			  ignore (maybe_addressable (C.Control ctlnode) idx
-				    seq_no !ia_ref Escape_by_fncall node
+				    seq_no insn_addr Escape_by_fncall node
 				    offsetmap);
 			  node)
 		    args);
-		  create_node idx seq_no !ia_ref Fncall (C.Control ctlnode)
+		  create_node idx seq_no insn_addr Fncall (C.Control ctlnode)
 			      0l offsetmap;
 		  C.Protect_ctl ctlnode
 	      (* FIXME: Handle other external call types...  *)
 	      | _ -> ctlnode)
 	    stmt);
-	  !ia_ref, succ seq_no)
-	(None, 0)
+	  succ seq_no)
+	0
 	blk.Block.code))
     blk_arr;
   !addressable
@@ -714,15 +710,10 @@ let merge_regions reg =
 let merge_anon_addressable blkarr_offsetmap sp_cov pruned_regions =
   Array.map
     (fun blk ->
-      let _, newseq = CS.fold_left
-        (fun (insn_addr, newseq) (stmt, stmt_offsetmap) ->
-	  let ia_ref = ref insn_addr in
-	  begin match stmt with
-	    C.Entity (CT.Insn_address ia) -> ia_ref := Some ia
-	  | _ -> ()
-	  end;
+      let newseq = CS.fold_left
+        (fun newseq (insn_addr, stmt, stmt_offsetmap) ->
 	  let stmt_offsetmap' =
-	    match !ia_ref with
+	    match insn_addr with
 	      None -> stmt_offsetmap
 	    | Some ia ->
 	        try
@@ -739,8 +730,8 @@ let merge_anon_addressable blkarr_offsetmap sp_cov pruned_regions =
 		    stmt_offsetmap
 		with Not_found ->
 		  stmt_offsetmap in
-	  !ia_ref, CS.snoc newseq (stmt, stmt_offsetmap'))
-	(None, CS.empty)
+	  CS.snoc newseq (insn_addr, stmt, stmt_offsetmap'))
+	CS.empty
 	blk.Block.code in
       { blk with Block.code = newseq })
     blkarr_offsetmap
