@@ -30,7 +30,8 @@ TODO list for decompiler
   - any unknown stack object which has its address taken will need to be invented, after determining an upper bound for its size. Any access falling within this region is then potentially a part of the same object.
 
   - incomplete function arg information is causing the algorithm for this to
-    break.
+    break. [Function arg information is now supposedly complete, but the algo
+    still doesn't work.]
 
   - A pass should remove *all* stack accesses -- or fail. E.g. there should be a point after which we can guarantee there are no explicit references to the stack in the IR.
 
