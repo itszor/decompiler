@@ -497,6 +497,7 @@ let try_function_call binf inforec dst_addr =
   let targ_sec_name = Elfreader.get_section_name binf.Binary_info.elfbits
 			binf.Binary_info.ehdr binf.Binary_info.shdr_arr
 			targ_sec in
+  (* We should probably be looking at ELF flags here not section name!  *)
   match targ_sec_name with
     ".text" ->
       begin try
@@ -538,10 +539,10 @@ let try_function_call binf inforec dst_addr =
 	  List.hd binf.Binary_info.symbols,
 	  Printf.sprintf "<plt@%lx>" dst_addr in
       begin try
-	let fn_inf = Builtin.builtin_function_type sym_name in
+	let ext_ctypes, fn_inf =
+	  External.lookup_function binf.Binary_info.libs sym_name in
 	CT.Plt_call, CT.Symbol (sym_name, sym),
-	  fn_args inforec dst_addr fn_inf.Function.args
-		  fn_inf.Function.arg_locs,
+	  fn_args2 dst_addr fn_inf ext_ctypes,
 	  fn_ret fn_inf.Function.return
       with Not_found ->
         CT.Plt_call, CT.Symbol (sym_name, sym), no_arg, no_arg

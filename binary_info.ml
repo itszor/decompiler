@@ -20,7 +20,13 @@ type cu_info = {
   ci_lines : Line.line_prog_hdr
 }
 
-type binary_info = {
+type lib_info =
+  {
+    lib_name : string;
+    lib_info : binary_info
+  }
+
+and binary_info = {
   elfbits : Bitstring.bitstring;
   ehdr : elf_ehdr;
   shdr_arr : elf_shdr array;
@@ -51,7 +57,9 @@ type binary_info = {
   (* Relocations from the .rel.plt section.  *)
   parsed_rel_plt : elf_rel array;
   (* Hashtbl of cu_infos, indexed by debug_info offset.  *)
-  cu_hash : (int32, cu_info) Hashtbl.t
+  cu_hash : (int32, cu_info) Hashtbl.t;
+  (* External libraries used by this binary.  *)
+  mutable libs : lib_info list
 }
 
 let index_dies_by_low_pc dieaddr_ht dies =
@@ -216,7 +224,8 @@ let open_file filename =
     parsed_aranges = ar;
     parsed_ranges = ranges;
     parsed_rel_plt = plt_rels;
-    cu_hash = Hashtbl.create 10
+    cu_hash = Hashtbl.create 10;
+    libs = []
   } in
   index_debug_data binf ar;
   binf

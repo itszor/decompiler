@@ -665,6 +665,7 @@ let _ =
   and list_compunits = ref false
   and selected_compunits = ref []
   and selected_funs = ref []
+  and liblist = ref []
   and gc_alarms = ref false
   and infile = ref "" in
   let argspec =
@@ -672,6 +673,9 @@ let _ =
        "Decompile all functions from all compilation units";
      "-i", Arg.Set_string infile, "Input file (ARM binary w/ debug info)";
      "-l", Arg.Set list_compunits, "List compilation units";
+     "-L", Arg.String
+	     (fun lib -> liblist := lib :: !liblist),
+	     "Add shared library to dynamic-link search list";
      "-g", Arg.Set_int Log.loglevel, "Set logging level";
      "-s", Arg.String
              (fun sel -> selected_compunits := sel :: !selected_compunits),
@@ -699,6 +703,9 @@ let _ =
 	binf.cu_hash;
       exit 0
     end;
+    (* Stick in a reference to the libraries we're using to look external
+       stuff up in.  *)
+    binf.libs <- List.map External.load_lib (List.rev !liblist);
     let select_cu =
       if !selected_compunits = [] then
 	(fun _ -> true)
