@@ -27,4 +27,14 @@ let builtin_function_type = function
 	local = false;
 	prototyped = true
       }
+  | "memset" ->
+      {
+	args = [| C_pointer C_void; C_int; C_unsigned C_int |];
+	arg_locs = [||];
+	arg_names = [| "s"; "c"; "n" |];
+	framebase_loc = None;
+	return = C_pointer C_void;
+	local = false;
+	prototyped = true
+      }
   | _ -> raise Not_found

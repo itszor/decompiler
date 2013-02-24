@@ -410,10 +410,10 @@ let decompile_sym binf sym =
   Log.printf 2 "--- reachable addresses ---\n";
   let ra = Ptrtracking.reachable_addresses addressable_tab sp_cov in
   (*Ptrtracking.dump_reachable ra;*)
-  let merged_regions = Ptrtracking.merge_regions ra in
+  let nonoverlapped_regions = Ptrtracking.nonoverlapping_ranges ra in
   gcinfo "after finding anonymous addressable regions";
   let blkarr_om =
-    Ptrtracking.merge_anon_addressable blkarr_om sp_cov merged_regions in
+    Ptrtracking.merge_anon_addressable blkarr_om sp_cov nonoverlapped_regions in
   gcinfo "after merging anon addressable";
   Dwptrtracking.dump_offsetmap_blkarr blkarr_om;
   (*Log.printf 2 "--- gather sp refs ---\n";

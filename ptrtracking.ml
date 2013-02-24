@@ -682,25 +682,35 @@ let rec record_kind_for_offset omap offset bytes kind =
 				    (pred bytes) kind)
       end
 
-let merge_regions reg =
-  let sorted_reg =
-    List.sort (fun (a_lo, _) (b_lo, _) -> compare a_lo b_lo) reg in
-  let rec merge = function
-    [] -> []
-  | [one] -> [one]
-  | (a_lo, a_hi) :: (b_lo, b_hi) :: rest ->
-      if a_hi < b_lo then
-        (a_lo, a_hi) :: merge ((b_lo, b_hi) :: rest)
-      else if a_hi > b_hi then
-        merge ((a_lo, a_hi) :: rest)
-      else
-        merge ((a_lo, b_hi) :: rest) in
-  let merged = merge sorted_reg in
-  Log.printf 3 "Merged list:\n";
-  List.iter
-    (fun (lo, hi) -> Log.printf 3 "[%d...%d]\n" lo hi)
-    merged;
-  merged
+(* Given a set of possibly overlapping (start,end) ranges, find a new set of
+   ranges which covers the same regions (using a non-zero "winding rule"), but
+   which does not contain any overlaps.  *)
+
+let nonoverlapping_ranges r =
+  let rs = List.sort (fun (a, _) (b, _) -> compare a b)
+    (List.fold_left (fun acc (l,h) -> (l, true) :: (h, false) :: acc) [] r) in
+  let rec build eqto depth acc = function
+    [] -> acc
+  | (r, true) :: rest ->
+      if r = eqto then build r (succ depth) acc rest
+      else if depth > 0 then build r (succ depth) ((eqto, r) :: acc) rest
+      else build r (succ depth) acc rest
+  | (r, false) :: rest ->
+      if r = eqto then build r (pred depth) acc rest
+      else if depth > 0 then build r (pred depth) ((eqto, r) :: acc) rest
+      else build r (pred depth) acc rest
+  and start depth acc = function
+    [] -> acc
+  | (r, true) :: rest -> build r (succ depth) acc rest
+  | (r, false) :: rest -> build r (pred depth) acc rest in
+  let res = start 0 [] rs in
+  if List.length res > 0 then begin
+    Log.printf 3 "De-overlapped list:\n";
+    List.iter
+      (fun (lo, hi) -> Log.printf 3 "[%d...%d]\n" lo hi)
+      res
+  end;
+  res
 
 (* Merge any anonymous stack blocks which have their address taken with a
    function's stack offset map.  These must generally stay live throughout a
