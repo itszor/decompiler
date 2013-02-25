@@ -76,6 +76,13 @@ let string_of_tag = function
   | DW_TAG_imported_unit -> "imported_unit"
   | DW_TAG_condition -> "condition"
   | DW_TAG_shared_type -> "shared_type"
+  | DW_TAG_GNU_BINCL -> "GNU_BINCL"
+  | DW_TAG_GNU_EINCL -> "GNU_EINCL"
+  | DW_TAG_GNU_template_template_param -> "GNU_template_template_param"
+  | DW_TAG_GNU_template_parameter_pack -> "GNU_template_parameter_pack"
+  | DW_TAG_GNU_formal_parameter_pack -> "GNU_formal_parameter_pack"
+  | DW_TAG_GNU_call_site -> "GNU_call_site"
+  | DW_TAG_GNU_call_site_parameter -> "GNU_call_site_parameter"
   | DW_TAG_lo_user x -> "lo_user+" ^ (string_of_int x)
 
 let is_inlined_aggregate = function

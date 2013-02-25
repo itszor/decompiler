@@ -120,6 +120,13 @@ type dwarf_tag =
   | DW_TAG_condition
   | DW_TAG_shared_type
   | DW_TAG_lo_user of int
+  | DW_TAG_GNU_BINCL
+  | DW_TAG_GNU_EINCL
+  | DW_TAG_GNU_template_template_param
+  | DW_TAG_GNU_template_parameter_pack
+  | DW_TAG_GNU_formal_parameter_pack
+  | DW_TAG_GNU_call_site
+  | DW_TAG_GNU_call_site_parameter
 
 let parse_tag = function
     0x01 -> DW_TAG_array_type
@@ -179,6 +186,13 @@ let parse_tag = function
   | 0x3d -> DW_TAG_imported_unit
   | 0x3f -> DW_TAG_condition
   | 0x40 -> DW_TAG_shared_type
+  | 0x4104 -> DW_TAG_GNU_BINCL
+  | 0x4105 -> DW_TAG_GNU_EINCL
+  | 0x4106 -> DW_TAG_GNU_template_template_param
+  | 0x4107 -> DW_TAG_GNU_template_parameter_pack
+  | 0x4108 -> DW_TAG_GNU_formal_parameter_pack
+  | 0x4109 -> DW_TAG_GNU_call_site
+  | 0x410a -> DW_TAG_GNU_call_site_parameter
   | x when x >= 0x4080 && x <= 0xffff -> DW_TAG_lo_user (x - 0x4080)
   | _ -> raise (Dwarf_parse_error "parse_tag")
 
@@ -593,6 +607,21 @@ type dwarf_op = [
   | `DW_OP_xderef
   | `DW_OP_xderef_size of int
   | `DW_OP_xor
+  | `DW_OP_implicit_value
+  | `DW_OP_stack_value
+  | `DW_OP_GNU_push_tls_address
+  | `DW_OP_GNU_uninit
+  | `DW_OP_GNU_encoded_addr
+  | `DW_OP_GNU_implicit_pointer
+  | `DW_OP_GNU_entry_value
+  | `DW_OP_GNU_const_type
+  | `DW_OP_GNU_regval_type
+  | `DW_OP_GNU_deref_type
+  | `DW_OP_GNU_convert
+  | `DW_OP_GNU_reinterpret
+  | `DW_OP_GNU_parameter_ref
+  | `DW_OP_GNU_addr_index
+  | `DW_OP_GNU_const_index
 ]
 
 let sign_extend x bit =
@@ -732,9 +761,43 @@ let parse_operation dwbits ~addr_size =
         let st, en_rest = parse_uleb128 st_en_rest in
 	let en, rest = parse_uleb128 en_rest in
         `DW_OP_bit_piece (st, en), rest
+  | { 0x9e : 8 : littleendian;
+      sz_blk_rest : -1 : bitstring } ->
+        let sz, blk_rest = parse_uleb128_int sz_blk_rest in
+	`DW_OP_implicit_value, Bitstring.dropbits (sz * 8) blk_rest
+  | { 0x9f : 8 : littleendian } -> `DW_OP_stack_value, next_byte
+  | { 0xe0 : 8 : littleendian } ->
+	failwith "`DW_OP_GNU_push_tls_address, next_byte"
+  | { 0xf0 : 8 : littleendian } ->
+	failwith "`DW_OP_GNU_uninit, next_byte"
+  | { 0xf1 : 8 : littleendian } ->
+	failwith "`DW_OP_GNU_encoded_addr, next_byte"
+  | { 0xf2 : 8 : littleendian } ->
+	failwith "`DW_OP_GNU_implicit_pointer, next_byte"
+  | { 0xf3 : 8 : littleendian;
+      sz_blk_rest : -1 : bitstring } ->
+	let sz, blk_rest = parse_uleb128_int sz_blk_rest in
+	`DW_OP_GNU_entry_value, Bitstring.dropbits (sz * 8) blk_rest
+  | { 0xf4 : 8 : littleendian } ->
+	failwith "`DW_OP_GNU_const_type, next_byte"
+  | { 0xf5 : 8 : littleendian } ->
+	failwith "`DW_OP_GNU_regval_type, next_byte"
+  | { 0xf6 : 8 : littleendian } ->
+	failwith "`DW_OP_GNU_deref_type, next_byte"
+  | { 0xf7 : 8 : littleendian } ->
+	failwith "`DW_OP_GNU_convert, next_byte"
+  | { 0xf9 : 8 : littleendian } ->
+	failwith "`DW_OP_GNU_reinterpret, next_byte"
+  | { 0xfa : 8 : littleendian } ->
+	failwith "`DW_OP_GNU_parameter_ref, next_byte"
+  | { 0xfb : 8 : littleendian } ->
+	failwith "`DW_OP_GNU_addr_index, next_byte"
+  | { 0xfc : 8 : littleendian } ->
+	failwith "`DW_OP_GNU_const_index, next_byte"
   | { x : 8 : littleendian } when x >= 0xe0 && x <= 0xff ->
       `DW_OP_lo_user (x - 0xe0), next_byte
-  | { x : 8 : littleendian } -> raise (Dwarf_parse_error ("parse_operation " ^ string_of_int x))
+  | { x : 8 : littleendian } ->
+	raise (Dwarf_parse_error ("parse_operation " ^ string_of_int x))
 
 type comp_unit_header =
   {
