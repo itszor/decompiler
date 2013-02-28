@@ -479,9 +479,9 @@ let reachable_addresses arr sp_coverage =
       else
         clear (succ pos) in
     clear lo in
-  let maximise_bounds addr_taken_offset lo hi reachable fwd =
+  let maximise_bounds addr_taken_offset lo hi reachable fwd rangelist =
     Boolset.fold_right
-      (fun idx (lo, hi) ->
+      (fun idx (lo, hi, rangelist) ->
         let targ_node = get_node idx in
 	match targ_node.access_type with
 	  Stack_load
@@ -495,9 +495,9 @@ let reachable_addresses arr sp_coverage =
 		Int32.to_int targ_node.cfa_offset,
 		Int32.to_int addr_taken_offset in
 	    if range_clear targ_node.offsetmap range_lo range_hi then
-	      lo_opt lo range_lo, hi_opt hi range_hi
+	      lo_opt lo range_lo, hi_opt hi range_hi, rangelist
 	    else
-	      lo, hi
+	      lo, hi, rangelist
 	| Fncall when fwd ->
 	    (* If we've stored a stack address somewhere, then we call a
 	       function, the function might write anywhere in the object whose
@@ -505,14 +505,15 @@ let reachable_addresses arr sp_coverage =
 	       stored are irrelevant though.  *)
 	    begin match targ_node.insn_addr with
 	      Some insn_addr ->
-		lo_opt lo (seek_lower targ_node.offsetmap addr_taken_offset
-				      sp_coverage insn_addr),
-		hi_opt hi (seek_higher targ_node.offsetmap addr_taken_offset)
-	    | None -> lo, hi
+	        let fnlo = seek_lower targ_node.offsetmap addr_taken_offset
+				      sp_coverage insn_addr
+		and fnhi = seek_higher targ_node.offsetmap addr_taken_offset in
+		lo, hi, (fnlo, fnhi) :: rangelist
+	    | None -> lo, hi, rangelist
 	    end
-	| _ -> lo, hi)
+	| _ -> lo, hi, rangelist)
       reachable
-      (lo, hi) in
+      (lo, hi, rangelist) in
   Array.fold_right
     (fun access_vec rangelist ->
       Vec.fold_right
@@ -522,12 +523,12 @@ let reachable_addresses arr sp_coverage =
 	  | Escape_by_stack_store _ ->
 	      if not (OffsetMap.mem (Int32.to_int access.cfa_offset)
 				    access.offsetmap) then
-		let lo, hi =
+		let lo, hi, rangelist =
 	          maximise_bounds access.cfa_offset None None
-				  access.reachable_forwards true in
-		let lo, hi =
+				  access.reachable_forwards true rangelist in
+		let lo, hi, rangelist =
 	          maximise_bounds access.cfa_offset lo hi
-				  access.reachable_backwards false in
+				  access.reachable_backwards false rangelist in
 		begin match lo, hi with
 	          Some lo, Some hi ->
 		    Log.printf 3 "Escape by store: reachable range [%d...%d]\n"
