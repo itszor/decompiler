@@ -46,3 +46,9 @@ TODO list for decompiler
 * Minipool resolution and lookup of symbols for constant pointers should be split into separate passes, so constants constructed from code can be turned into symbol references.
 
 * Type reconstruction needs to be fixed.
+
+* Change IR to be able to say, e.g.:
+
+  C.Set (C.Entity (CT.Local_var ("xxx", <location>)), C.Call (...))
+
+  i.e., changes to Local_var (to have a location), Call (& friends) to not terminate a basic block. This allows setting a result from a call in a more natural way, and means that code can be added to the end of a BB which contains a call (which currently does the wrong thing).

@@ -480,8 +480,8 @@ let add_real_incoming_args2 ft codeseq ct_for_cu =
   cseq'
 
 let fn_ret = function
-    Ctype.C_void -> C.Nullary Irtypes.Nop
-  | _ -> C.Set (C.Reg (CT.Hard_reg 0), C.Entity CT.Arg_out)
+    Ctype.C_void -> None
+  | _ -> Some (C.Reg (CT.Hard_reg 0))
 
 exception Calling of string
 exception Dest_not_function
@@ -490,7 +490,6 @@ exception Dest_not_function
 let symbol_for_plt_entry = ref (fun _ _ -> failwith "binding")
 
 let try_function_call binf inforec dst_addr =
-  let no_arg = C.Nullary Irtypes.Nop in
   let targ_sec = Elfreader.get_section_num_by_addr binf.Binary_info.elfbits
 		   binf.Binary_info.ehdr binf.Binary_info.shdr_arr
 		   dst_addr in
@@ -527,7 +526,7 @@ let try_function_call binf inforec dst_addr =
 	  ~filter:(fun sym -> not (Mapping.is_mapping_symbol sym))
 	  binf.Binary_info.symbols dst_addr in
 	let symname = Symbols.symbol_name sym binf.Binary_info.strtab in
-	CT.EABI, CT.Symbol (symname, sym), no_arg, no_arg
+	CT.EABI, CT.Symbol (symname, sym), C.Nary (Irtypes.Fnargs, []), None
       end
   | ".plt" ->
       let sym, sym_name =
@@ -545,7 +544,8 @@ let try_function_call binf inforec dst_addr =
 	  fn_args2 dst_addr fn_inf ext_ctypes,
 	  fn_ret fn_inf.Function.return
       with Not_found ->
-        CT.Plt_call, CT.Symbol (sym_name, sym), no_arg, no_arg
+        CT.Plt_call, CT.Symbol (sym_name, sym), C.Nary (Irtypes.Fnargs, []),
+	None
       end
   | x -> raise (Calling x)
 
@@ -557,7 +557,10 @@ let convert_bl binf inforec addr insn =
       let call_addr = Int32.add addr i in
       let abi, call_code, passes, returns =
         try_function_call binf inforec call_addr in
-      C.Control (C.Call_ext (abi, call_code, passes, ret_addr, returns))
+      begin match returns with
+        None -> C.Call_ext (abi, call_code, passes)
+      | Some r -> C.Set (r, C.Call_ext (abi, call_code, passes))
+      end
   | _ -> failwith "unexpected bx operand"
 
 let convert_cmp cmptype addr insn =

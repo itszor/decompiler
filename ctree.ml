@@ -144,6 +144,8 @@ let rec convert_expr ct_for_cu vars op =
       Cabs.CONSTANT (Cabs.CONST_STRING str)
   | C.Entity (CT.Symbol_addr (nm, elfsym)) ->
       Cabs.UNARY (Cabs.ADDROF, Cabs.VARIABLE nm)
+  | C.Call_ext (_, callee, args) ->
+      convert_extcall ct_for_cu vars callee args
   | C.Nullary Irtypes.Nop ->
       Cabs.NOTHING
   | _ ->
@@ -227,31 +229,11 @@ and convert_args ct_for_cu vars args =
   | C.Nullary Irtypes.Nop -> []
   | _ -> failwith "unexpected"
 
-and convert_extcall ct_for_cu vars callee args returnto ret fallthru acc =
+and convert_extcall ct_for_cu vars callee args =
   match callee with
     CT.Symbol (name, _)
   | CT.Finf_sym (name, _, _) ->
-      let ret_var =
-        match ret with
-	  C.Nullary Irtypes.Nop -> None
-	| C.Set (dst, C.Entity CT.Arg_out) ->
-	    Some (convert_expr ct_for_cu vars dst)
-	| _ -> failwith "unexpected" in
-      let call_insn =
-        Cabs.CALL (Cabs.VARIABLE name, convert_args ct_for_cu vars args) in
-      let call_expr =
-        match ret_var with
-          None -> Cabs.COMPUTATION call_insn
-	| Some dst ->
-            Cabs.COMPUTATION (Cabs.BINARY (Cabs.ASSIGN, dst, call_insn)) in
-      let acc' = seq_append acc call_expr in
-      begin match fallthru with
-        Some fallthru when fallthru.Block.id = returnto ->
-	  acc'
-      | _ ->
-	  let goto = Cabs.GOTO (Ir.IrBS.string_of_blockref returnto) in
-	  seq_append acc' goto
-      end
+      Cabs.CALL (Cabs.VARIABLE name, convert_args ct_for_cu vars args)
   | CT.Absolute _ -> failwith "unimplemented"
 
 and convert_return ct_for_cu vars retcode acc =
@@ -300,9 +282,7 @@ and convert_compjump ct_for_cu vars swval dests fallthru acc =
 
 and convert_control ct_for_cu vars ctl fallthru acc =
   match ctl with
-    C.Call_ext (_, callee, args, returnto, ret) ->
-      convert_extcall ct_for_cu vars callee args returnto ret fallthru acc
-  | C.Return retcode ->
+    C.Return retcode ->
       convert_return ct_for_cu vars retcode acc
   | C.Branch (cond, trueblk, falseblk) ->
       convert_branch ct_for_cu vars cond trueblk falseblk fallthru acc
@@ -333,6 +313,9 @@ let convert_block blk fallthru ct_for_cu vars seq =
       | C.Control ctl ->
           convert_control ct_for_cu vars ctl fallthru acc
       | C.Entity (CT.Insn_address _) -> acc
+      | C.Call_ext (_, dst, args) ->
+          seq_append acc (Cabs.COMPUTATION (convert_extcall ct_for_cu vars dst
+					    args))
       | _ ->
           Log.printf 1 "unsupported: %s\n" (C.string_of_code insn);
 	  acc)

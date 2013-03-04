@@ -274,26 +274,20 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 	          (* If an address is indirected, it doesn't force it to be
 		     addressable.  *)
 	          C.Protect node
-	      | _ -> node)
-            ~ctl_fn:(fun ctlnode ->
-	      match ctlnode with
-		C.Call_ext (_, _, args, _, _) ->
+	      | C.Call_ext (_, _, args) ->
 		  ignore (C.map
 		    (fun node ->
 		      match node with
 		        C.Nary (Irtypes.Fnargs, _) -> node
 		      | C.Load (Irtypes.Word, addr) -> C.Protect node
 		      | _ ->
-			  ignore (maybe_addressable (C.Control ctlnode) idx
-				    seq_no insn_addr Escape_by_fncall node
-				    offsetmap);
+			  ignore (maybe_addressable node idx seq_no insn_addr
+				    Escape_by_fncall node offsetmap);
 			  node)
 		    args);
-		  create_node idx seq_no insn_addr Fncall (C.Control ctlnode)
-			      0l offsetmap;
-		  C.Protect_ctl ctlnode
-	      (* FIXME: Handle other external call types...  *)
-	      | _ -> ctlnode)
+		  create_node idx seq_no insn_addr Fncall node 0l offsetmap;
+		  C.Protect node
+	      | _ -> node)
 	    stmt);
 	  succ seq_no)
 	0

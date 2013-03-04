@@ -101,6 +101,9 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
       | Entity of CT.entity
       | Parallel of code array
       | Concat of code array
+      | Call of BS.blockref * code
+      | CompCall of code * code
+      | Call_ext of CT.abi * CT.addr * code
       (* Just for iterating over code sequences.  Don't process "protected"
          child nodes.  *)
       | Protect of code
@@ -110,16 +113,13 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
     (* FIXME: Seems like these need sanitizing a bit.  *)
     and control =
         TailCall of BS.blockref * code
-      | Call of BS.blockref * code * BS.blockref * code
       | Jump of BS.blockref
       | Branch of code * BS.blockref * BS.blockref
       | Return of code
       | CompTailCall of code * code
-      | CompCall of code * code * BS.blockref * code
       | CompJump of code * BS.blockref list
       (* External branches to OS routines, libraries, etc.  *)
       | TailCall_ext of CT.abi * CT.addr * code
-      | Call_ext of CT.abi * CT.addr * code * BS.blockref * code
       | Jump_ext of CT.abi * CT.addr
       | CompJump_ext of CT.abi * code
       | Virtual_exit
@@ -133,10 +133,6 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
       TailCall (tailr, targs) ->
 	str "tailcall (%s, %s)" (BS.string_of_blockref tailr)
 	  (string_of_code targs)
-    | Call (callr, cargs, retr, rargs) ->
-        str "call (%s, %s, %s, %s)" (BS.string_of_blockref callr)
-	  (string_of_code cargs) (BS.string_of_blockref retr)
-	  (string_of_code rargs)
     | Jump jumpr ->
         str "jump (%s)" (BS.string_of_blockref jumpr)
     | CompJump (jumpc, targs) ->
@@ -150,17 +146,9 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
     | CompTailCall (tailc, targs) ->
         str "tailcall_ind (%s, %s)" (string_of_code tailc)
 	  (string_of_code targs)
-    | CompCall (callc, cargs, retr, rargs) ->
-        str "call_ind (%s, %s, %s, %s)" (string_of_code callc)
-	  (string_of_code cargs) (BS.string_of_blockref retr)
-	  (string_of_code rargs)
     | TailCall_ext (abi, addr, targs) ->
         str "tailcall_ext (%s, %s, %s)" (CT.string_of_abi abi)
 	  (CT.string_of_addr addr) (string_of_code targs)
-    | Call_ext (abi, addr, cargs, retr, rargs) ->
-        str "call_ext (%s, %s, %s, %s, %s)" (CT.string_of_abi abi)
-	  (CT.string_of_addr addr) (string_of_code cargs)
-	  (BS.string_of_blockref retr) (string_of_code rargs)
     | Jump_ext (abi, addr) ->
         str "jump_ext (%s, %s)" (CT.string_of_abi abi) (CT.string_of_addr addr)
     | CompJump_ext (abi, code) ->
@@ -200,6 +188,13 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
     | Concat arr ->
         str "concat { %s }" (String.concat "; " (Array.to_list
 	  (Array.map string_of_code arr)))
+    | Call (callr, cargs) ->
+        str "call (%s, %s)" (BS.string_of_blockref callr) (string_of_code cargs)
+    | CompCall (callc, cargs) ->
+        str "call_ind (%s, %s)" (string_of_code callc) (string_of_code cargs)
+    | Call_ext (abi, addr, cargs) ->
+        str "call_ext (%s, %s, %s)" (CT.string_of_abi abi)
+	  (CT.string_of_addr addr) (string_of_code cargs)
     | Entity e -> CT.string_of_entity e
     | Protect x -> str "*protect* (%s)" (string_of_code x)
     | With_id (id, x) -> str "%s[with-id %d]" (string_of_code x) id
@@ -272,6 +267,13 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
 	    Array.fold_right scan parr acc'
 	| Concat carr ->
 	    Array.fold_right scan carr acc'
+	| Call (_, args) ->
+	    scan args acc'
+	| CompCall (cdst, cargs) ->
+	    let acc'' = scan cdst acc' in
+	    scan cargs acc''
+	| Call_ext (_, _, cargs) ->
+	    scan cargs acc'
 	| Protect child ->
 	    acc'
 	| With_id (_, node) ->
@@ -282,14 +284,9 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
 	  TailCall (_, code) | Branch (code, _, _) | CompJump (code, _)
 	| TailCall_ext (_, _, code) | Return code | CompJump_ext (_, code) ->
             scan code acc'
-	| Call (_, c1, _, c2) | CompTailCall (c1, c2)
-	| Call_ext (_, _, c1, _, c2) ->
+	| CompTailCall (c1, c2) ->
             let acc'' = scan c2 acc' in
 	    scan c1 acc''
-	| CompCall (c1, c2, _, c3) ->
-            let acc'' = scan c3 acc' in
-	    let acc''' = scan c2 acc'' in
-	    scan c1 acc'''
 	| Jump _ | Jump_ext _ | Virtual_exit | Protect_ctl _ -> acc' in
       scan code acc
 
@@ -319,6 +316,12 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
 	    Parallel (Array.map scan parr)
 	| Concat carr ->
 	    Concat (Array.map scan carr)
+	| Call (br, args) ->
+	    Call (br, scan args)
+	| CompCall (dst, args) ->
+	    CompCall (scan dst, scan args)
+	| Call_ext (abi, dst, args) ->
+	    Call_ext (abi, dst, scan args)
 	| Protect child ->
 	    child
 	| With_id (id, node) ->
@@ -327,8 +330,6 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
 	match ctl_fn e with
 	  TailCall (br, code) ->
 	    TailCall (br, scan code)
-	| Call (call, carg, ret, retarg) ->
-	    Call (call, scan carg, ret, scan retarg)
 	| Jump _ as c -> c
 	| Branch (code, tr, fa) ->
 	    Branch (scan code, tr, fa)
@@ -336,14 +337,10 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
 	    Return (scan code)
 	| CompTailCall (dst, arg) ->
 	    CompTailCall (scan dst, scan arg)
-	| CompCall (dst, arg, ret, retarg) ->
-	    CompCall (scan dst, scan arg, ret, scan retarg)
 	| CompJump (code, dl) ->
 	    CompJump (scan code, dl)
 	| TailCall_ext (abi, addr, code) ->
 	    TailCall_ext (abi, addr, scan code)
-	| Call_ext (abi, addr, arg, ret, retarg) ->
-	    Call_ext (abi, addr, scan arg, ret, scan retarg)
 	| Jump_ext _ as c -> c
 	| CompJump_ext (abi, dst) ->
 	    CompJump_ext (abi, scan dst)

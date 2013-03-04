@@ -380,26 +380,23 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
 	          let offset = Ptrtracking.cfa_offset addr defs in
 		  remove_offset_for_store := Some (addr, accsz, offset);
 	          C.Protect node
+	      | C.Call_ext (_, _, args) ->
+	          ignore (C.map
+		    (fun node ->
+		      try
+			match node with
+			  C.Load (accsz, addr) ->
+			    let offset = Ptrtracking.cfa_offset addr defs in
+			    outgoing_arg defs accsz offset om_ref;
+			    C.Protect node
+			| _ -> node
+		      with Ptrtracking.Not_constant_cfa_offset ->
+			C.Protect node)
+		    args);
+		  node
 	      | _ -> node
 	    with Ptrtracking.Not_constant_cfa_offset ->
 	      C.Protect node)
-	  ~ctl_fn:(fun node ->
-	    match node with
-	      C.Call_ext (_, _, args, _, _) ->
-	        ignore (C.map
-		  (fun node ->
-		    try
-		      match node with
-			C.Load (accsz, addr) ->
-			  let offset = Ptrtracking.cfa_offset addr defs in
-			  outgoing_arg defs accsz offset om_ref;
-			  C.Protect node
-		      | _ -> node
-		    with Ptrtracking.Not_constant_cfa_offset ->
-		      C.Protect node)
-		  args);
-		node
-	    | _ -> node)
 	  stmt);
 	let new_cs' = CS.cons (insn_addr, stmt, !om_ref) new_cs in
 	begin match !remove_offset_for_store with

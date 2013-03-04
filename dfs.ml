@@ -19,14 +19,6 @@ module Dfs (CT : Code.CODETYPES) (CS : Code.CODESEQ) (BS : Code.BLOCKSEQ) =
             C.Jump dst ->
               link hd dst;
               scan (BS.tail lst) retstk
-          | C.Call (call, _, ret, _) ->
-              if whole_program then begin
-                link hd call;
-                scan (BS.tail lst) (ret::retstk)
-              end else begin
-                link hd ret;
-                scan (BS.tail lst) retstk
-              end
           | C.Branch (_, tru, fals) ->
               link hd tru;
               link hd fals;
@@ -48,9 +40,6 @@ module Dfs (CT : Code.CODETYPES) (CS : Code.CODESEQ) (BS : Code.BLOCKSEQ) =
           | C.CompJump_ext _ ->
 	      (* This is used for the exit of the function.  *)
 	      link hd virtual_exit;
-	      scan (BS.tail lst) retstk
-	  | C.Call_ext (_, _, _, ret, _) ->
-	      link hd ret;
 	      scan (BS.tail lst) retstk
           (* FIXME: Several control types not implemented here.  *)
 	  | _ -> scan (BS.tail lst) retstk

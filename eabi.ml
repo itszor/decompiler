@@ -51,7 +51,16 @@ let make_arg_accum () =
     stack_offset = 0
   }
 
+let hidden_struct_return ft ct_for_cu =
+  let rtype = ft.Function.return in
+  let typesize = Ctype.type_size ct_for_cu rtype in
+  typesize > 4 && Ctype.aggregate_type ct_for_cu rtype
+
 let eabi_arg_loc ft argno arg_accum ct_for_cu =
+  if argno = 0 && hidden_struct_return ft ct_for_cu then begin
+    assert (arg_accum.next_arg_reg = 0);
+    arg_accum.next_arg_reg <- 1
+  end;
   let argtype = ft.Function.args.(argno) in
   let typesize = Ctype.type_size ct_for_cu argtype in
   let padded_size = (typesize + 3) land (lnot 3) in
@@ -77,4 +86,19 @@ let eabi_arg_loc ft argno arg_accum ct_for_cu =
     (* Wholly on the stack.  *)
     arg_accum.stack_offset <- aligned_offset + padded_size;
     on_stack 0 aligned_offset regs_required
+  end
+
+let eabi_return_loc ft ct_for_cu =
+  if hidden_struct_return ft ct_for_cu then
+    C.Nullary Irtypes.Nop (* no.  *)
+  else begin
+    match ft.Function.return with
+      Ctype.C_void -> C.Nullary Irtypes.Nop
+    | _ ->
+      let tsize = Ctype.type_size ct_for_cu ft.Function.return in
+      if tsize <= 4 then
+	C.Set (C.Reg (CT.Hard_reg 0), C.Entity CT.Arg_out)
+      else
+	(* FIXME!  *)
+	C.Set (C.Reg (CT.Hard_reg 0), C.Entity CT.Arg_out)
   end
