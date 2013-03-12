@@ -172,7 +172,8 @@ let string_of_optional_insn_addr = function
 (* For each phi node result (LHS), find a set of CFA-relative offsets.  *)
 
 let phi_nodes blk_arr defs =
-  let graph = Dgraph.make () in
+  let graph = Dgraph.make ()
+  and ht = Hashtbl.create 10 in
   Array.iter
     (fun blk ->
       CS.iter
@@ -181,13 +182,40 @@ let phi_nodes blk_arr defs =
 	    C.Set (C.SSAReg dst, C.Phi phiargs) ->
 	      Array.iter
 	        (function
-		  C.SSAReg src -> Dgraph.add_edge src dst graph
+		  C.SSAReg src -> Dgraph.add_edge dst src graph
 		| _ -> ())
-		phiargs
+		phiargs;
+	      Hashtbl.add ht dst phiargs
 	  | _ -> ())
 	blk.Block.code)
     blk_arr;
-  graph
+  let tgraph = Dgraph.tsort graph in
+  let offsets_ht = Hashtbl.create 10 in
+  List.iter
+    (fun ((r, rn) as ssareg) ->
+      let phiargs = Hashtbl.find ht ssareg in
+      Array.iter
+        (fun phiarg ->
+	  try
+	    let offset = cfa_offset phiarg defs in
+	    Hashtbl.add offsets_ht ssareg offset;
+	    begin match phiarg with
+	      C.SSAReg regarg ->
+		List.iter
+		  (fun offset -> Hashtbl.add offsets_ht ssareg offset)
+		  (Hashtbl.find_all offsets_ht regarg)
+	    | _ -> ()
+	    end
+	  with Not_constant_cfa_offset -> ())
+	phiargs)
+    tgraph;
+  List.iter
+    (fun ssareg ->
+      let offsets = Hashtbl.find_all offsets_ht ssareg in
+      Log.printf 3 "Phi node: %s, offsets %s\n"
+        (Typedb.string_of_ssa_reg (fst ssareg) (snd ssareg))
+	(String.concat ", " (List.map Int32.to_string offsets)))
+    tgraph
 
 (* Find a list of ADDRESSABLE_ENTITY nodes pertaining to addressability of
    stack locations.  *)

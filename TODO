@@ -56,3 +56,5 @@ TODO list for decompiler
 * Fix defs.ml (and elsewhere?) for Concat & Parallel codes.
 
 * Handle escape_by_phiarg in ptrtracking.ml.
+
+* Oops, phi nodes don't form a DAG. We'll have to iterate instead!
