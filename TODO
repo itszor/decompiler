@@ -21,7 +21,7 @@ TODO list for decompiler
 
 * Emission of types and data symbols.
 
-* Add loading of debug info for dependent libraries.
+* Add loading of debug info for dependent libraries. [done]
 
 * Use eabi.ml functions for incoming arguments as well as outgoing ones. [done]
 
@@ -37,7 +37,7 @@ TODO list for decompiler
 
 * Finish conversion of IR to C AST (big task!).
 
-* Fix EABI returns -- e.g. returning struct values "by reference" on the stack.
+* Fix EABI returns -- e.g. returning struct values "by reference" on the stack. [done]
 
 * A pass to convert set/use of flags register into higher-level comparisons.
 
@@ -51,4 +51,8 @@ TODO list for decompiler
 
   C.Set (C.Entity (CT.Local_var ("xxx", <location>)), C.Call (...))
 
-  i.e., changes to Local_var (to have a location), Call (& friends) to not terminate a basic block. This allows setting a result from a call in a more natural way, and means that code can be added to the end of a BB which contains a call (which currently does the wrong thing).
+  i.e., changes to Local_var (to have a location), Call (& friends) to not terminate a basic block. This allows setting a result from a call in a more natural way, and means that code can be added to the end of a BB which contains a call (which currently does the wrong thing). [done]
+
+* Fix defs.ml (and elsewhere?) for Concat & Parallel codes.
+
+* Handle escape_by_phiarg in ptrtracking.ml.

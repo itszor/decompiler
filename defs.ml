@@ -23,7 +23,11 @@ let count_uses blk_arr defs =
 	  ignore (C.map
 	    (fun node ->
 	      match node with
-		C.Set (dst, src) -> C.Set (C.Protect dst, src)
+	        C.Set (C.Binary _, src) ->
+		  (* This is an ugly hack concerning the representation used
+		     for aggregate return. FIXME?  *)
+		  node
+	      | C.Set (dst, src) -> C.Set (C.Protect dst, src)
 	      | C.SSAReg regid ->
 	          begin try
 		    let dinf = Hashtbl.find defs regid in

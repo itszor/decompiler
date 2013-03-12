@@ -42,7 +42,6 @@ let gcinfo nm =
 let targets addr insn labelset =
   match insn.Insn.opcode with
     Insn.B
-  | Insn.Bl
   | Insn.Bx
   | Insn.Conditional (_, Insn.B)
   | Insn.Conditional (_, Insn.Bl)

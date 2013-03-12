@@ -169,6 +169,26 @@ let string_of_optional_insn_addr = function
     Some x -> Printf.sprintf "address 0x%lx" x
   | None -> "unknown address"
 
+(* For each phi node result (LHS), find a set of CFA-relative offsets.  *)
+
+let phi_nodes blk_arr defs =
+  let graph = Dgraph.make () in
+  Array.iter
+    (fun blk ->
+      CS.iter
+        (fun (insn_addr, stmt, offsetmap) ->
+	  match stmt with
+	    C.Set (C.SSAReg dst, C.Phi phiargs) ->
+	      Array.iter
+	        (function
+		  C.SSAReg src -> Dgraph.add_edge src dst graph
+		| _ -> ())
+		phiargs
+	  | _ -> ())
+	blk.Block.code)
+    blk_arr;
+  graph
+
 (* Find a list of ADDRESSABLE_ENTITY nodes pertaining to addressability of
    stack locations.  *)
 
@@ -220,7 +240,7 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 	  ignore (C.map
 	    (fun node ->
 	      match node with
-	        C.Store (accsz, addr, src) when accsz = Irtypes.Word ->
+	        C.Store (Irtypes.Word, addr, src) ->
 	          begin try
 		    let addr_offset = cfa_offset addr defs in
 		    let stored_addr_p =
@@ -544,9 +564,13 @@ let reachable_addresses arr sp_coverage =
 				 [%d...%d]\n" lo hi;
 		    (lo, hi) :: rangelist
 		| None -> rangelist
-	      else
+	      else begin
+	        Log.printf 4 "Not counting offset %ld for escape by function \
+			      call\n" access.cfa_offset;
 	        rangelist
+	      end
 	  | Escape_by_phiarg ->
+	      Log.printf 3 "Warning: escape by phi arg not implemented\n";
 	      (* FIXME: This isn't sufficient, I don't think.  *)
 	      rangelist
 	  | _ -> rangelist)

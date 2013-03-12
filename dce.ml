@@ -14,7 +14,9 @@ let remove_dead_code_once blk_arr =
 	  C.map
 	    (fun node ->
 	      match node with
-		C.Set (C.SSAReg regid, _) ->
+	        C.Set (_, (C.Call _ | C.Call_ext _ | C.CompCall _)) ->
+		  C.Protect node
+	      | C.Set (C.SSAReg regid, _) ->
 		  begin try
 	            let def = Hashtbl.find defs regid in
 		    if def.num_uses > 0 then

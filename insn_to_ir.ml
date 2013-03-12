@@ -372,7 +372,7 @@ let rec code_for_location loc =
 	    assert (lo == cursor);
 	    (code_for_location code) :: build (lo + size) remain in
       let codeparts = build 0 sorted_parts in
-      C.Concat (Array.of_list codeparts)
+      C.Concat (Array.of_list (List.rev codeparts))
   | Locations.Within_range _ -> failwith "unexpected within_range"
 
 let fn_args2 callee_addr ft ct_for_cu =
@@ -477,11 +477,18 @@ let add_real_incoming_args2 ft codeseq ct_for_cu =
       CS.snoc cseq insn, succ argnum)
     (codeseq, 0)
     args in
-  cseq'
+  if Eabi.hidden_struct_return ft ct_for_cu then
+    CS.snoc cseq' (C.Set (C.Reg (CT.Hard_reg 0),
+			  C.Nullary
+			    (Irtypes.Incoming_aggr_return ft.Function.return)))
+  else
+    cseq'
 
-let fn_ret = function
-    Ctype.C_void -> None
-  | _ -> Some (C.Reg (CT.Hard_reg 0))
+let fn_ret ft ct_for_cu =
+  let loc_opt = Eabi.eabi_return_loc ft ct_for_cu in
+  match loc_opt with
+    Some loc -> Some (code_for_location loc)
+  | None -> None
 
 exception Calling of string
 exception Dest_not_function
@@ -518,7 +525,7 @@ let try_function_call binf inforec dst_addr =
 	    ~compunit_baseaddr:cu_inf.Binary_info.ci_baseaddr in
 	let ct_sym = CT.Finf_sym (symname, fn_inf, sym) in
 	let passes = fn_args2 dst_addr fn_inf cu_inf.Binary_info.ci_ctypes
-	and returns = fn_ret fn_inf.Function.return in
+	and returns = fn_ret fn_inf cu_inf.Binary_info.ci_ctypes in
 	CT.EABI, ct_sym, passes, returns
       with Not_found ->
 	(* No debug info for this one.  *)
@@ -542,7 +549,7 @@ let try_function_call binf inforec dst_addr =
 	  External.lookup_function binf.Binary_info.libs sym_name in
 	CT.Plt_call, CT.Symbol (sym_name, sym),
 	  fn_args2 dst_addr fn_inf ext_ctypes,
-	  fn_ret fn_inf.Function.return
+	  fn_ret fn_inf ext_ctypes
       with Not_found ->
         CT.Plt_call, CT.Symbol (sym_name, sym), C.Nary (Irtypes.Fnargs, []),
 	None

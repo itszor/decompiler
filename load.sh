@@ -1,7 +1,7 @@
 #!/bin/bash
 
 loads=()
-for x in log.cmo coverage.cmo elfreader.cmo dwarfreader.cmo \
+for x in log.cmo dgraph.cmo coverage.cmo elfreader.cmo dwarfreader.cmo \
   dwarfprint.cmo line.cmo insn.cmo decode_arm.cmo symbols.cmo mapping.cmo \
   emit.cmo deque.cmo ranlist.cmo vec.cmo boolset.cmo getoption.cmo code.cmo \
   block.cmo ctype.cmo irtypes.cmo ir.cmo eabi.cmo typedb.cmo ctype.cmo \

@@ -90,15 +90,18 @@ let eabi_arg_loc ft argno arg_accum ct_for_cu =
 
 let eabi_return_loc ft ct_for_cu =
   if hidden_struct_return ft ct_for_cu then
-    C.Nullary Irtypes.Nop (* no.  *)
+    (* This is kind of a weird representation.  At this point, we can probably
+       do with just the size of the returned data: we need to add this to the
+       stack map for the function, then resolve any accesses to the returned
+       object.  *)
+    Some (In (C.Binary (Irtypes.Aggr_return, C.Reg (CT.Hard_reg 0),
+			C.Immed (Int32.of_int
+				  (Ctype.type_size ct_for_cu
+						   ft.Function.return)))))
   else begin
     match ft.Function.return with
-      Ctype.C_void -> C.Nullary Irtypes.Nop
+      Ctype.C_void -> None
     | _ ->
       let tsize = Ctype.type_size ct_for_cu ft.Function.return in
-      if tsize <= 4 then
-	C.Set (C.Reg (CT.Hard_reg 0), C.Entity CT.Arg_out)
-      else
-	(* FIXME!  *)
-	C.Set (C.Reg (CT.Hard_reg 0), C.Entity CT.Arg_out)
+      Some (in_hard_registers 0 ((tsize + 3) / 4))
   end

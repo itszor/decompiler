@@ -48,6 +48,8 @@ module IrCT =
     | Special -> "special"
     | Undefined -> "undefined"
     | Incoming_sp -> "incoming_sp"
+    | Incoming_aggr_return ct -> Printf.sprintf "incoming_aggr_return(%s)"
+	(Ctype.string_of_ctype ct)
     | Declaration ct -> Printf.sprintf "declaration(%s)"
 	(Ctype.string_of_ctype ct)
     
@@ -117,6 +119,7 @@ module IrCT =
     | Vcmp -> "vcmp"
     | Vcmpe -> "vcmpe"
     | Div -> "div"
+    | Aggr_return -> "aggr_return"
 
     let string_of_triop = function
       Adc -> "adc"

@@ -6,6 +6,7 @@ type ir_nulop =
   | Undefined
   | Special
   | Incoming_sp
+  | Incoming_aggr_return of Ctype.ctype
   | Declaration of Ctype.ctype
 
 type ir_unop =
@@ -79,6 +80,7 @@ type ir_binop =
   | Vcmp
   | Vcmpe
   | Div
+  | Aggr_return
 
 type ir_triop =
     Adc
