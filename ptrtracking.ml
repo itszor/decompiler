@@ -171,7 +171,7 @@ let string_of_optional_insn_addr = function
 
 (* For each phi node result (LHS), find a set of CFA-relative offsets.  *)
 
-let phi_nodes blk_arr defs =
+(*let phi_nodes blk_arr defs =
   let graph = Dgraph.make ()
   and ht = Hashtbl.create 10 in
   Array.iter
@@ -215,7 +215,89 @@ let phi_nodes blk_arr defs =
       Log.printf 3 "Phi node: %s, offsets %s\n"
         (Typedb.string_of_ssa_reg (fst ssareg) (snd ssareg))
 	(String.concat ", " (List.map Int32.to_string offsets)))
-    tgraph
+    tgraph*)
+
+module SSARegOffsetMap = Map.Make (struct
+  type t = CT.reg * int
+  let compare = compare
+end)
+
+module OffsetSet = Set.Make (Int32)
+
+let mark_offset ssareg offset map =
+  if SSARegOffsetMap.mem ssareg map then
+    let set = SSARegOffsetMap.find ssareg map in
+    SSARegOffsetMap.add ssareg (OffsetSet.add offset set) map
+  else
+    SSARegOffsetMap.add ssareg (OffsetSet.singleton offset) map
+
+let offset_marked_p ssareg offset map =
+  SSARegOffsetMap.mem ssareg map
+  && OffsetSet.mem offset (SSARegOffsetMap.find ssareg map)
+
+let mark_offset_modified ssareg offset map =
+  if offset_marked_p ssareg offset map then
+    map, false
+  else
+    mark_offset ssareg offset map, true
+
+let union_offsets_modified ssareg plus_ssareg map =
+  let set = try SSARegOffsetMap.find ssareg map
+	    with Not_found -> OffsetSet.empty
+  and plus_set = try SSARegOffsetMap.find plus_ssareg map
+		 with Not_found -> OffsetSet.empty in
+  let union_set = OffsetSet.union set plus_set in
+  SSARegOffsetMap.add ssareg union_set map, not (OffsetSet.equal set union_set)
+
+let phi_nodes blk_arr defs =
+  let ht = Hashtbl.create 10 in
+  let philist = Array.fold_right
+    (fun blk acc ->
+      CS.fold_right
+        (fun (_, stmt, _) acc ->
+	  match stmt with
+	    C.Set (C.SSAReg dst, C.Phi phiargs) -> (dst, phiargs) :: acc
+	  | _ -> acc)
+	blk.Block.code
+	acc)
+    blk_arr
+    [] in
+  let offsetmap = ref SSARegOffsetMap.empty in
+  List.iter
+    (fun (dst, phiargs) ->
+      Array.iter
+        (fun phiarg ->
+	  try
+	    let offset = cfa_offset phiarg defs in
+	    offsetmap := mark_offset dst offset !offsetmap
+	  with Not_constant_cfa_offset -> ())
+	phiargs)
+    philist;
+  let rec iter () =
+    let made_changes = ref false in
+    List.iter
+      (fun (dst, phiargs) ->
+        Array.iter
+	  (function
+	    C.SSAReg regsrc ->
+	      let offsetmap', changed =
+	        union_offsets_modified dst regsrc !offsetmap in
+	      offsetmap := offsetmap';
+	      made_changes := !made_changes || changed
+	  | _ -> ())
+	  phiargs)
+      philist;
+    if !made_changes then
+      iter () in
+  iter ();
+  SSARegOffsetMap.iter
+    (fun dst set ->
+      Log.printf 3 "Phi node: %s: offsets [%s]\n"
+        (Typedb.string_of_ssa_reg (fst dst) (snd dst))
+	(String.concat ", " (List.map Int32.to_string
+				      (OffsetSet.elements set))))
+    !offsetmap;
+  !offsetmap
 
 (* Find a list of ADDRESSABLE_ENTITY nodes pertaining to addressability of
    stack locations.  *)
