@@ -61,4 +61,4 @@ TODO list for decompiler
 
 * Ahhh, but cfa_offset has to be able to return a whole list of offsets, since different paths through the function might end up with any SSA name pointing to different parts of the stack. Maybe we should also dataflow "forward" rather than backward, so we can tell if we're losing stack offsets (by adding dynamic amounts to pointers). [done, mostly]
 
-* I think we need a pass prior to track_all_stack_refs to identify adds/subs which are within loops, i.e. induction variables. Maybe make use of dgraph.
+* I think we need a pass prior to track_all_stack_refs to identify adds/subs which are within loops, i.e. induction variables. Maybe make use of dgraph. [strongly connected components algo implemented -- we will use this.]
