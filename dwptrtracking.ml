@@ -9,7 +9,9 @@ module C = Ir.Ir
 (* We can sometimes tell the names and proper types of registers too -- that's
    not handled at present, and probably won't be handled here anyway.  *)
 
-let fb_relative_var_loc loc =
+(* FIXME: Needs refactoring once stack resolution is working fully!  *)
+
+(*let fb_relative_var_loc loc =
   match loc with
     Dwarfreader.Loc_expr (`DW_OP_fbreg offs) -> offs
   (*| Dwarfreader.Loc_list _ -> failwith "unimplemented"*)
@@ -183,7 +185,7 @@ let pointer_tracking blk_arr inforec dwarf_vars ?vartype_hash ctypes_for_cu =
 	blk.Block.code in
       { blk with Block.code = code' })
     blk_arr in
-  blk_arr', !stack_vars
+  blk_arr', !stack_vars *)
 
 let rec stack_address_within_var location_list insn_addr sp_offset var_size =
   match insn_addr with

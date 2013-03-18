@@ -1,4 +1,7 @@
-(* Mutable directed graph.  *)
+(* Mutable directed graph.
+   Adding/removing edges/nodes repeatedly will deplete the Earth's limited
+   resources (the nodes hashtbl will grow, and node_ctr values aren't ever
+   recycled), so don't do that.  *)
 
 type 'a t =
 {
@@ -46,9 +49,13 @@ let has_edge a b graph =
     BatISet.mem nb set
   with Not_found -> false
 
+(* Delete a node, and any edge which connects to that node.  Probably not very
+   useful.  Doesn't throw an exception if the node doesn't exist.  *)
+
 let remove_node a graph =
   let na = Hashtbl.find graph.nodes a in
-  graph.edges <- BatIMap.remove na graph.edges
+  graph.edges <- BatIMap.remove na
+    (BatIMap.map (fun set -> BatISet.remove na set) graph.edges)
 
 let remove_edge a b graph =
   let na = Hashtbl.find graph.nodes a
@@ -71,6 +78,15 @@ type mark = Unmarked | Temporary | Permanent
 
 exception Not_DAG
 
+let inverse_tab graph =
+  let iht = Hashtbl.create 20 in
+  (* Build an inverse hash table from node numbers to nodes.  Only put actual
+     nodes in it (not things we might have removed).  *)
+  Hashtbl.iter
+    (fun k v -> if BatIMap.mem v graph.edges then Hashtbl.add iht v k)
+    graph.nodes;
+  iht
+
 (* Assuming GRAPH is a DAG, build a topologically-sorted dependency list, such
    that items earlier in the list are not dependent on those later in the
    list.  An edge is a dependency if FROM depends on TO in the following:
@@ -80,12 +96,7 @@ exception Not_DAG
    The exception Not_DAG is raised if the graph contains cycles.  *)
 
 let tsort graph =
-  let iht = Hashtbl.create 20 in
-  (* Build an inverse hash table from node numbers to nodes.  Only put actual
-     nodes in it (not things we might have removed).  *)
-  Hashtbl.iter
-    (fun k v -> if BatIMap.mem v graph.edges then Hashtbl.add iht v k)
-    graph.nodes;
+  let iht = inverse_tab graph in
   let marks = Array.make graph.node_ctr Unmarked in
   let rec visit node_num outlist =
     match marks.(node_num) with
@@ -112,3 +123,54 @@ let tsort graph =
     else
       ol in
   List.rev_map (fun nn -> Hashtbl.find iht nn) (iter [])
+
+(* Return a list of lists of nodes representing the strongly-connected
+   components in GRAPH.
+   This is a straightforward implementation of Tarjan's algorithm from:
+
+     http://en.wikipedia.org/wiki/Tarjan%E2%80%99s_strongly_connected_\
+       components_algorithm
+   
+   albeit with the flaw of not using a constant-time algorithm to determine
+   if a node is on the stack.  *)
+
+let strongly_connected_components graph =
+  let iht = inverse_tab graph
+  and node_index = Array.make graph.node_ctr None
+  and node_lowlink = Array.make graph.node_ctr 0
+  and index = ref 0
+  and stack = ref []
+  and scc_out = ref [] in
+  let rec strong_connect v =
+    node_index.(v) <- Some !index;
+    node_lowlink.(v) <- !index;
+    incr index;
+    stack := v :: !stack;
+    let to_set = BatIMap.find v graph.edges in
+    BatISet.iter
+      (fun w ->
+        match node_index.(w) with
+	  None ->
+	    strong_connect w;
+	    node_lowlink.(v) <- min node_lowlink.(v) node_lowlink.(w)
+	| Some w_index ->
+	    if List.mem w !stack then
+	      node_lowlink.(v) <- min node_lowlink.(v) w_index)
+      to_set;
+    match node_index.(v) with
+      Some v_index ->
+        if v_index = node_lowlink.(v) then
+	  let rec build_scc scc = function
+	    w::rest ->
+	      if w = v then begin stack := rest; w :: scc end
+	      else build_scc (w :: scc) rest
+	  | [] -> failwith "build_scc" in
+	  scc_out := (build_scc [] !stack) :: !scc_out
+    | _ -> () in
+  Hashtbl.iter
+    (fun num _ ->
+      match node_index.(num) with
+	None -> strong_connect num
+      | _ -> ())
+    iht;
+  List.map (List.map (fun nn -> Hashtbl.find iht nn)) !scc_out

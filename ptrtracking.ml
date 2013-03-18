@@ -169,54 +169,6 @@ let string_of_optional_insn_addr = function
     Some x -> Printf.sprintf "address 0x%lx" x
   | None -> "unknown address"
 
-(* For each phi node result (LHS), find a set of CFA-relative offsets.  *)
-
-(*let phi_nodes blk_arr defs =
-  let graph = Dgraph.make ()
-  and ht = Hashtbl.create 10 in
-  Array.iter
-    (fun blk ->
-      CS.iter
-        (fun (insn_addr, stmt, offsetmap) ->
-	  match stmt with
-	    C.Set (C.SSAReg dst, C.Phi phiargs) ->
-	      Array.iter
-	        (function
-		  C.SSAReg src -> Dgraph.add_edge dst src graph
-		| _ -> ())
-		phiargs;
-	      Hashtbl.add ht dst phiargs
-	  | _ -> ())
-	blk.Block.code)
-    blk_arr;
-  let tgraph = Dgraph.tsort graph in
-  let offsets_ht = Hashtbl.create 10 in
-  List.iter
-    (fun ((r, rn) as ssareg) ->
-      let phiargs = Hashtbl.find ht ssareg in
-      Array.iter
-        (fun phiarg ->
-	  try
-	    let offset = cfa_offset phiarg defs in
-	    Hashtbl.add offsets_ht ssareg offset;
-	    begin match phiarg with
-	      C.SSAReg regarg ->
-		List.iter
-		  (fun offset -> Hashtbl.add offsets_ht ssareg offset)
-		  (Hashtbl.find_all offsets_ht regarg)
-	    | _ -> ()
-	    end
-	  with Not_constant_cfa_offset -> ())
-	phiargs)
-    tgraph;
-  List.iter
-    (fun ssareg ->
-      let offsets = Hashtbl.find_all offsets_ht ssareg in
-      Log.printf 3 "Phi node: %s, offsets %s\n"
-        (Typedb.string_of_ssa_reg (fst ssareg) (snd ssareg))
-	(String.concat ", " (List.map Int32.to_string offsets)))
-    tgraph*)
-
 module SSARegOffsetMap = Map.Make (struct
   type t = CT.reg * int
   let compare = compare
@@ -241,15 +193,16 @@ let mark_offset_modified ssareg offset map =
   else
     mark_offset ssareg offset map, true
 
-let union_offsets_modified ssareg plus_ssareg map =
-  let set = try SSARegOffsetMap.find ssareg map
-	    with Not_found -> OffsetSet.empty
-  and plus_set = try SSARegOffsetMap.find plus_ssareg map
-		 with Not_found -> OffsetSet.empty in
+let find_or_empty def map =
+  try SSARegOffsetMap.find def map
+  with Not_found -> OffsetSet.empty
+
+let union_offsets_modified ssareg plus_set map =
+  let set = find_or_empty ssareg map in
   let union_set = OffsetSet.union set plus_set in
   SSARegOffsetMap.add ssareg union_set map, not (OffsetSet.equal set union_set)
 
-let phi_nodes blk_arr defs =
+(*let phi_nodes blk_arr defs =
   let ht = Hashtbl.create 10 in
   let philist = Array.fold_right
     (fun blk acc ->
@@ -293,6 +246,70 @@ let phi_nodes blk_arr defs =
   SSARegOffsetMap.iter
     (fun dst set ->
       Log.printf 3 "Phi node: %s: offsets [%s]\n"
+        (Typedb.string_of_ssa_reg (fst dst) (snd dst))
+	(String.concat ", " (List.map Int32.to_string
+				      (OffsetSet.elements set))))
+    !offsetmap;
+  !offsetmap *)
+
+exception Unhandled
+
+let track_all_stack_refs defs =
+  let offsetmap = ref SSARegOffsetMap.empty in
+  let rec iter () =
+    let changed = ref false in
+    let mark_offset def offset =
+      let offsetmap', this_changed =
+        mark_offset_modified def offset !offsetmap in
+      offsetmap := offsetmap';
+      changed := !changed || this_changed
+    and dup_mapped_offset def mapfn src =
+      let mapped_src =
+        OffsetSet.fold
+          (fun elt map -> OffsetSet.add (mapfn elt) map)
+	  (find_or_empty src !offsetmap)
+	  OffsetSet.empty in
+      let offsetmap', this_changed =
+	union_offsets_modified def mapped_src !offsetmap in
+      offsetmap := offsetmap';
+      changed := !changed || this_changed in
+    Hashtbl.iter
+      (fun def info ->
+        match info.src with
+          C.Nullary Irtypes.Incoming_sp ->
+	    mark_offset def 0l
+	| C.SSAReg sreg ->
+	    dup_mapped_offset def (fun x -> x) sreg
+	| C.Binary (Irtypes.Add, C.SSAReg reg, C.Immed imm) ->
+            dup_mapped_offset def (fun x -> Int32.add x imm) reg
+	| C.Binary (Irtypes.Sub, C.SSAReg reg, C.Immed imm) ->
+            dup_mapped_offset def (fun x -> Int32.sub x imm) reg
+	| C.Phi phiargs ->
+            Array.iter
+	      (function
+		C.SSAReg phireg ->
+		  dup_mapped_offset def (fun x -> x) phireg
+	      | _ -> ())
+	      phiargs
+	| C.Load _ | C.Call_ext _ -> ()
+        | _ ->
+	    begin try
+	      C.iter (function
+	        C.SSAReg reg ->
+		  let set = find_or_empty reg !offsetmap in
+		  if OffsetSet.cardinal set > 0 then
+		    raise Unhandled
+	      | _ -> ()) info.src
+	    with Unhandled ->
+	      Log.printf 3 "Can't track: %s\n" (C.string_of_code info.src)
+	    end)
+      defs;
+    if !changed then
+      iter () in
+  iter ();
+  SSARegOffsetMap.iter
+    (fun dst set ->
+      Log.printf 3 "SSA reg %s: offsets [%s]\n"
         (Typedb.string_of_ssa_reg (fst dst) (snd dst))
 	(String.concat ", " (List.map Int32.to_string
 				      (OffsetSet.elements set))))
