@@ -1,7 +1,7 @@
 (* Mutable directed graph.
    Adding/removing edges/nodes repeatedly will deplete the Earth's limited
-   resources (the nodes hashtbl will grow, and node_ctr values aren't ever
-   recycled), so don't do that.  *)
+   resources (node_ctr values aren't ever recycled, and some functions use
+   arrays with node_ctr as the size), so don't do that.  *)
 
 type 'a t =
 {
@@ -50,12 +50,16 @@ let has_edge a b graph =
   with Not_found -> false
 
 (* Delete a node, and any edge which connects to that node.  Probably not very
-   useful.  Doesn't throw an exception if the node doesn't exist.  *)
+   useful.  *)
 
 let remove_node a graph =
   let na = Hashtbl.find graph.nodes a in
   graph.edges <- BatIMap.remove na
-    (BatIMap.map (fun set -> BatISet.remove na set) graph.edges)
+    (BatIMap.map (fun set -> BatISet.remove na set) graph.edges);
+  Hashtbl.remove graph.nodes a
+
+(* Remove an edge.  This doesn't remove the actual nodes, just removes the
+   connection between them.  *)
 
 let remove_edge a b graph =
   let na = Hashtbl.find graph.nodes a
