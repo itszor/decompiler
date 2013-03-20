@@ -388,7 +388,8 @@ let decompile_sym binf sym =
   let blkarr_om = Dwptrtracking.scan_stack_accesses blk_arr dwarf_vars 0 defs in
   gcinfo "after propagation";
   Log.printf 2 "--- gathering stack-relative offsets ---\n";
-  Ptrtracking.track_all_stack_refs defs;
+  let defloops = Ptrtracking.find_def_loops defs in
+  Ptrtracking.track_all_stack_refs defs defloops;
   Log.printf 2 "--- find addressable variables (1) ---\n";
   let addressable =
     Ptrtracking.find_addressable blkarr_om inforec dwarf_vars cu_inf.ci_ctypes

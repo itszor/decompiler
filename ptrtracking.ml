@@ -174,7 +174,23 @@ module SSARegOffsetMap = Map.Make (struct
   let compare = compare
 end)
 
-module OffsetSet = Set.Make (Int32)
+type offset =
+    Offset of int32
+  | Induction of int32 * int32
+
+let string_of_offset = function
+    Offset x -> Int32.to_string x
+  | Induction (st, ind) -> Printf.sprintf "%ld(%s...)" st (string_of_offset ind)
+
+module OffsetSet = Set.Make (struct
+  type t = offset
+  let compare = compare
+end)
+
+module SSARegSet = Set.Make (struct
+  type t = CT.reg * int
+  let compare = compare
+end)
 
 let mark_offset ssareg offset map =
   if SSARegOffsetMap.mem ssareg map then
@@ -252,9 +268,54 @@ let union_offsets_modified ssareg plus_set map =
     !offsetmap;
   !offsetmap *)
 
+let find_def_loops defs =
+  let graph = Dgraph.make () in
+  Hashtbl.iter
+    (fun def info ->
+      match info.src with
+        C.SSAReg sreg -> Dgraph.add_edge def sreg graph
+      | C.Binary ((Irtypes.Add | Irtypes.Sub), C.SSAReg reg, C.Immed _) ->
+          Dgraph.add_edge def reg graph
+      | C.Phi phiargs ->
+          Array.iter
+	    (function
+	      C.SSAReg phireg -> Dgraph.add_edge def phireg graph
+	    | _ -> ())
+	    phiargs
+      | C.Load _ | C.Call_ext _ -> ()
+      | _ ->
+	  C.iter
+	    (function
+	      C.SSAReg reg ->
+	        Log.printf 3 "Adding dependency for %s on %s\n"
+		  (Typedb.string_of_ssa_reg (fst def) (snd def))
+		  (C.string_of_code info.src);
+	        Dgraph.add_edge def reg graph
+	    | _ -> ())
+	    info.src)
+    defs;
+  let sccs = Dgraph.strongly_connected_components graph in
+  Log.printf 3 "Defs which form loops:\n";
+  let any = ref false in
+  let loopregs = List.fold_right
+    (fun one_scc loopregs ->
+      if List.length one_scc > 1 then begin
+	Log.printf 3 "[%s]\n" (String.concat ", "
+          (List.map (fun (r,rn) -> Typedb.string_of_ssa_reg r rn) one_scc));
+	any := true;
+	List.fold_right
+	  (fun sreg acc -> SSARegSet.add sreg acc) one_scc loopregs
+      end else
+        loopregs)
+    sccs
+    SSARegSet.empty in
+  if not !any then
+    Log.printf 3 "(none)\n";
+  loopregs
+
 exception Unhandled
 
-let track_all_stack_refs defs =
+let track_all_stack_refs defs defloops =
   let offsetmap = ref SSARegOffsetMap.empty in
   let rec iter () =
     let changed = ref false in
@@ -277,13 +338,32 @@ let track_all_stack_refs defs =
       (fun def info ->
         match info.src with
           C.Nullary Irtypes.Incoming_sp ->
-	    mark_offset def 0l
+	    mark_offset def (Offset 0l)
 	| C.SSAReg sreg ->
 	    dup_mapped_offset def (fun x -> x) sreg
 	| C.Binary (Irtypes.Add, C.SSAReg reg, C.Immed imm) ->
-            dup_mapped_offset def (fun x -> Int32.add x imm) reg
+            dup_mapped_offset def
+	      (function
+	        Offset x ->
+		  if SSARegSet.mem def defloops then
+		    Induction (x, imm)
+		  else
+		    Offset (Int32.add x imm)
+	      | Induction (st, ind) when ind = imm ->
+	          Induction (st, ind)
+	      (* If this fails, we'll have to think of something smarter...  *)
+	      | _ -> failwith "induction") reg
 	| C.Binary (Irtypes.Sub, C.SSAReg reg, C.Immed imm) ->
-            dup_mapped_offset def (fun x -> Int32.sub x imm) reg
+            dup_mapped_offset def
+	      (function
+	        Offset x ->
+		  if SSARegSet.mem def defloops then
+		    Induction (x, Int32.neg imm)
+		  else
+		    Offset (Int32.sub x imm)
+	      | Induction (st, ind) when ind = Int32.neg imm ->
+	          Induction (st, ind)
+	      | _ -> failwith "induction") reg
 	| C.Phi phiargs ->
             Array.iter
 	      (function
@@ -311,7 +391,7 @@ let track_all_stack_refs defs =
     (fun dst set ->
       Log.printf 3 "SSA reg %s: offsets [%s]\n"
         (Typedb.string_of_ssa_reg (fst dst) (snd dst))
-	(String.concat ", " (List.map Int32.to_string
+	(String.concat ", " (List.map string_of_offset
 				      (OffsetSet.elements set))))
     !offsetmap;
   !offsetmap
