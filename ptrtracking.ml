@@ -296,20 +296,18 @@ let find_def_loops defs =
     defs;
   let sccs = Dgraph.strongly_connected_components graph in
   Log.printf 3 "Defs which form loops:\n";
-  let any = ref false in
   let loopregs = List.fold_right
     (fun one_scc loopregs ->
       if List.length one_scc > 1 then begin
 	Log.printf 3 "[%s]\n" (String.concat ", "
           (List.map (fun (r,rn) -> Typedb.string_of_ssa_reg r rn) one_scc));
-	any := true;
 	List.fold_right
 	  (fun sreg acc -> SSARegSet.add sreg acc) one_scc loopregs
       end else
         loopregs)
     sccs
     SSARegSet.empty in
-  if not !any then
+  if SSARegSet.is_empty loopregs then
     Log.printf 3 "(none)\n";
   loopregs
 
