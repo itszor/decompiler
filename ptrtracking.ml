@@ -394,6 +394,24 @@ let track_all_stack_refs defs defloops =
     !offsetmap;
   !offsetmap
 
+let cfa_offsets addr offsetmap =
+  let map_offsets_from_sreg fn sreg =
+    OffsetSet.fold
+      (fun ofs acc ->
+	match ofs with
+	  Offset o -> o :: acc
+	| Induction (st, ind) -> st :: acc)
+      (find_or_empty sreg offsetmap)
+      [] in
+  match addr with
+    C.SSAReg sreg ->
+      map_offsets_from_sreg (fun x -> x) sreg
+  | C.Binary (Irtypes.Add, C.SSAReg sreg, C.Immed imm) ->
+      map_offsets_from_sreg (fun offs -> Int32.add offs imm) sreg
+  | C.Binary (Irtypes.Sub, C.SSAReg sreg, C.Immed imm) ->
+      map_offsets_from_sreg (fun offs -> Int32.sub offs imm) sreg
+  | _ -> raise Not_constant_cfa_offset
+
 (* Find a list of ADDRESSABLE_ENTITY nodes pertaining to addressability of
    stack locations.  *)
 
