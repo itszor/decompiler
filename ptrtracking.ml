@@ -5,7 +5,7 @@ module CT = Ir.IrCT
 module BS = Ir.IrBS
 module C = Ir.Ir
 
-let string_of_offset offset =
+let string_of_i32offset offset =
   if offset < 0l then
     Int32.to_string offset
   else
@@ -58,7 +58,7 @@ exception Not_constant_cfa_offset
 
 let find_pointer_cfa_offset_equiv defs ptr_reg offset =
   Log.printf 4 "Looking for CFA offset for %s%s: " (C.string_of_code ptr_reg)
-	     (string_of_offset offset);
+	     (string_of_i32offset offset);
   try
     let def_chain =
       match ptr_reg with
@@ -73,7 +73,7 @@ let find_pointer_cfa_offset_equiv defs ptr_reg offset =
 	  | _ -> false)
 	def_chain in
     let cfa_offset = Int32.add def_offset offset in
-    Log.printf 4 "found, CFA%s.\n" (string_of_offset cfa_offset);
+    Log.printf 4 "found, CFA%s.\n" (string_of_i32offset cfa_offset);
     cfa_offset    
   with Untrackable | Not_found ->
     Log.printf 4 "not found.\n";
@@ -105,6 +105,23 @@ module OffsetMap = struct
 	| _, _ -> false) a b
 end
 
+type offset =
+    Offset of int32
+  | Induction of int32 * int32
+
+let string_of_offset = function
+    Offset x -> Int32.to_string x
+  | Induction (st, ind) ->
+      Printf.sprintf "%ld(%s...)" st (string_of_i32offset ind)
+
+let string_of_i32s offs =
+  String.concat ", " (List.map Int32.to_string offs)
+
+module OffsetSet = Set.Make (struct
+  type t = offset
+  let compare = compare
+end)
+
 type stack_access_kind =
     Saved_caller_reg
   | Outgoing_arg
@@ -124,9 +141,8 @@ type stack_access_kind =
 
 type stack_access_type =
     Escape_by_store
-  | Escape_by_stack_store of int32
+  | Escape_by_stack_store of int32 list
   | Escape_by_fncall
-  | Escape_by_phiarg
   | Stack_load
   | Stack_store
   | Fncall
@@ -135,7 +151,7 @@ type addressable_entity =
   {
     code : C.code;
     access_type : stack_access_type;
-    cfa_offset : int32;
+    cfa_offsets : int32 list;
     insn_addr : int32 option;
     block : int;
     seq_no : int;
@@ -147,21 +163,21 @@ type addressable_entity =
 let string_of_access_type = function
     Escape_by_store -> "store stack address (not to stack)"
   | Escape_by_stack_store offs ->
-      Printf.sprintf "store stack address (to stack offset %ld)" offs
+      Printf.sprintf "store stack address (to stack offsets [%s])"
+	(string_of_i32s offs)
   | Escape_by_fncall -> "stack address used as fn arg"
-  | Escape_by_phiarg -> "stack address used as phi arg"
   | Stack_load -> "load from stack slot"
   | Stack_store -> "store to stack slot"
   | Fncall -> "fncall"
 
 let access_is_escape = function
     Escape_by_store | Escape_by_stack_store _ | Escape_by_fncall
-  | Escape_by_phiarg | Fncall -> true
+  | Fncall -> true
   | Stack_load | Stack_store -> false
 
 let stack_slot acc =
   match acc.access_type with
-    Stack_store | Stack_load -> acc.cfa_offset
+    Stack_store | Stack_load -> acc.cfa_offsets
   | Escape_by_stack_store foo -> foo
   | _ -> raise Not_found
 
@@ -171,19 +187,6 @@ let string_of_optional_insn_addr = function
 
 module SSARegOffsetMap = Map.Make (struct
   type t = CT.reg * int
-  let compare = compare
-end)
-
-type offset =
-    Offset of int32
-  | Induction of int32 * int32
-
-let string_of_offset = function
-    Offset x -> Int32.to_string x
-  | Induction (st, ind) -> Printf.sprintf "%ld(%s...)" st (string_of_offset ind)
-
-module OffsetSet = Set.Make (struct
-  type t = offset
   let compare = compare
 end)
 
@@ -415,47 +418,53 @@ let cfa_offsets addr offsetmap =
 (* Find a list of ADDRESSABLE_ENTITY nodes pertaining to addressability of
    stack locations.  *)
 
-let find_addressable blk_arr inforec vars ctypes_for_cu defs =
+let find_addressable blk_arr inforec vars ctypes_for_cu defs def_cfa_offsets =
   let addressable = ref [] in
   let maybe_addressable stmt blkidx seq_no insn_addr thing code offsetmap =
     try
-      let offset = cfa_offset code defs in
-      Log.printf 3 "%s %s equivalent to cfa offset %ld (at %s)\n"
-		 (string_of_access_type thing)
-		 (C.string_of_code code) offset
-		 (string_of_optional_insn_addr insn_addr);
-      let new_ent = {
-        code = stmt;
-	cfa_offset = offset;
-	insn_addr = insn_addr;
-	access_type = thing;
-	block = blkidx;
-	seq_no = seq_no;
-	reachable_forwards = Boolset.empty;
-	reachable_backwards = Boolset.empty;
-	offsetmap = offsetmap
-      } in
-      addressable := new_ent :: !addressable;
-      true
+      let offsets = cfa_offsets code def_cfa_offsets in
+      match offsets with
+        [] -> false
+      | _ ->
+	  Log.printf 3 "%s %s equivalent to cfa offsets [%s] (at %s)\n"
+		     (string_of_access_type thing)
+		     (C.string_of_code code) (string_of_i32s offsets)
+		     (string_of_optional_insn_addr insn_addr);
+	  let new_ent = {
+            code = stmt;
+	    cfa_offsets = offsets;
+	    insn_addr = insn_addr;
+	    access_type = thing;
+	    block = blkidx;
+	    seq_no = seq_no;
+	    reachable_forwards = Boolset.empty;
+	    reachable_backwards = Boolset.empty;
+	    offsetmap = offsetmap
+	  } in
+	  addressable := new_ent :: !addressable;
+	  true
     with Not_constant_cfa_offset ->
       Log.printf 4 "%s %s not equivalent to cfa offset (at %s)\n"
 		 (string_of_access_type thing)
 		 (C.string_of_code code)
 		 (string_of_optional_insn_addr insn_addr);
       false
-  and create_node blkidx seq_no insn_addr thing code offset offsetmap =
-    let new_ent = {
-      code = code;
-      cfa_offset = offset;
-      insn_addr = insn_addr;
-      access_type = thing;
-      block = blkidx;
-      seq_no = seq_no;
-      reachable_forwards = Boolset.empty;
-      reachable_backwards = Boolset.empty;
-      offsetmap = offsetmap
-    } in
-    addressable := new_ent :: !addressable in
+  and create_node blkidx seq_no insn_addr thing code offsets offsetmap =
+    match offsets with
+      [] -> ()
+    | _ ->
+        let new_ent = {
+	  code = code;
+	  cfa_offsets = offsets;
+	  insn_addr = insn_addr;
+	  access_type = thing;
+	  block = blkidx;
+	  seq_no = seq_no;
+	  reachable_forwards = Boolset.empty;
+	  reachable_backwards = Boolset.empty;
+	  offsetmap = offsetmap
+	} in
+	addressable := new_ent :: !addressable in
   Array.iteri
     (fun idx blk ->
       ignore (CS.fold_left
@@ -465,14 +474,14 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 	      match node with
 	        C.Store (Irtypes.Word, addr, src) ->
 	          begin try
-		    let addr_offset = cfa_offset addr defs in
+		    let addr_offsets = cfa_offsets addr def_cfa_offsets in
 		    let stored_addr_p =
 		      maybe_addressable node idx seq_no insn_addr
-			(Escape_by_stack_store addr_offset) src
+			(Escape_by_stack_store addr_offsets) src
 			offsetmap in
 		    if not stored_addr_p then
 		      create_node idx seq_no insn_addr Stack_store node
-				  addr_offset offsetmap
+				  addr_offsets offsetmap
 		  with Not_constant_cfa_offset ->
 		    ignore (maybe_addressable node idx seq_no insn_addr
 					      Escape_by_store src
@@ -484,34 +493,17 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 		     for doubleword stores might do).  Just note when it looks
 		     like we're storing to a stack slot.  *)
 	          begin try
-		    let addr_offset = cfa_offset addr defs in
+		    let addr_offsets = cfa_offsets addr def_cfa_offsets in
 		    create_node idx seq_no insn_addr Stack_store node
-				addr_offset offsetmap
+				addr_offsets offsetmap
 		  with Not_constant_cfa_offset -> ()
 		  end;
 		  node
-	      | C.Phi phiargs ->
-	          Array.iter
-		    (fun phiarg ->
-		      try
-			let def =
-			  Hashtbl.find defs (Defs.ssa_id_of_code phiarg) in
-			Log.printf 3 "Using %s for src of phi arg %s\n"
-			  (string_of_optional_insn_addr def.Defs.src_insn_addr)
-			  (C.string_of_code phiarg);
-			ignore (maybe_addressable node idx seq_no
-				  def.Defs.src_insn_addr Escape_by_phiarg
-				  phiarg offsetmap)
-		      with Not_found ->
-			Log.printf 3 "No def for %s\n"
-			  (C.string_of_code phiarg))
-		    phiargs;
-		  node
 	      | C.Load (accsz, addr) ->
 	          begin try
-		    let addr_offset = cfa_offset addr defs in
-		    create_node idx seq_no insn_addr Stack_load node addr_offset
-				offsetmap
+		    let addr_offsets = cfa_offsets addr def_cfa_offsets in
+		    create_node idx seq_no insn_addr Stack_load node
+				addr_offsets offsetmap
 		  with Not_constant_cfa_offset -> ()
 		  end;
 	          (* If an address is indirected, it doesn't force it to be
@@ -528,7 +520,7 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs =
 				    Escape_by_fncall node offsetmap);
 			  node)
 		    args);
-		  create_node idx seq_no insn_addr Fncall node 0l offsetmap;
+		  create_node idx seq_no insn_addr Fncall node [] offsetmap;
 		  C.Protect node
 	      | _ -> node)
 	    stmt);
@@ -723,18 +715,24 @@ let reachable_addresses arr sp_coverage =
 	match targ_node.access_type with
 	  Stack_load
 	| Stack_store ->
-	    let range_lo, range_hi =
-	      if targ_node.cfa_offset >= addr_taken_offset then
-		Int32.to_int addr_taken_offset,
-		beyond_stored_byte (Int32.to_int targ_node.cfa_offset)
-				   targ_node.code
-	      else
-		Int32.to_int targ_node.cfa_offset,
-		Int32.to_int addr_taken_offset in
-	    if range_clear targ_node.offsetmap range_lo range_hi then
-	      lo_opt lo range_lo, hi_opt hi range_hi, rangelist
-	    else
-	      lo, hi, rangelist
+	    let lo', hi' =
+	      List.fold_right
+	        (fun cfa_offset (lo, hi) ->
+		  let range_lo, range_hi =
+		    if cfa_offset >= addr_taken_offset then
+		      Int32.to_int addr_taken_offset,
+		      beyond_stored_byte (Int32.to_int cfa_offset)
+					 targ_node.code
+		    else
+		      Int32.to_int cfa_offset,
+		      Int32.to_int addr_taken_offset in
+		  if range_clear targ_node.offsetmap range_lo range_hi then
+		    lo_opt lo range_lo, hi_opt hi range_hi
+		  else
+		    lo, hi)
+	        targ_node.cfa_offsets
+		(lo, hi) in
+	    lo', hi', rangelist
 	| Fncall when fwd ->
 	    (* If we've stored a stack address somewhere, then we call a
 	       function, the function might write anywhere in the object whose
@@ -758,48 +756,115 @@ let reachable_addresses arr sp_coverage =
 	  match access.access_type with
 	    Escape_by_store
 	  | Escape_by_stack_store _ ->
-	      if not (OffsetMap.mem (Int32.to_int access.cfa_offset)
-				    access.offsetmap) then
-		let lo, hi, rangelist =
-	          maximise_bounds access.cfa_offset None None
-				  access.reachable_forwards true rangelist in
-		let lo, hi, rangelist =
-	          maximise_bounds access.cfa_offset lo hi
-				  access.reachable_backwards false rangelist in
-		begin match lo, hi with
-	          Some lo, Some hi ->
-		    Log.printf 3 "Escape by store: reachable range [%d...%d]\n"
-		      lo hi;
-		    (lo, hi) :: rangelist
-		| _ -> rangelist
-		end
-	      else
-	        rangelist
+	      List.fold_right
+	        (fun cfa_offset rangelist ->
+		  if not (OffsetMap.mem (Int32.to_int cfa_offset)
+					access.offsetmap) then
+		    let lo, hi, rangelist =
+	              maximise_bounds cfa_offset None None
+				      access.reachable_forwards true
+				      rangelist in
+		    let lo, hi, rangelist =
+	              maximise_bounds cfa_offset lo hi
+				      access.reachable_backwards false
+				      rangelist in
+		    begin match lo, hi with
+	              Some lo, Some hi ->
+			Log.printf 3
+			  "Escape by store: reachable range [%d...%d]\n"
+			  lo hi;
+			(lo, hi) :: rangelist
+		    | _ -> rangelist
+		    end
+		  else
+	            rangelist)
+		access.cfa_offsets
+		rangelist
 	  | Escape_by_fncall ->
-	      if not (OffsetMap.mem (Int32.to_int access.cfa_offset)
-				    access.offsetmap) then
-		match access.insn_addr with
-	          Some insn_addr ->
-		    let lo = seek_lower access.offsetmap access.cfa_offset
-					sp_coverage insn_addr
-		    and hi = seek_higher access.offsetmap access.cfa_offset in
-		    Log.printf 3 "Escape by function call: reachable range \
-				 [%d...%d]\n" lo hi;
-		    (lo, hi) :: rangelist
-		| None -> rangelist
-	      else begin
-	        Log.printf 4 "Not counting offset %ld for escape by function \
-			      call\n" access.cfa_offset;
-	        rangelist
-	      end
-	  | Escape_by_phiarg ->
-	      Log.printf 3 "Warning: escape by phi arg not implemented\n";
-	      (* FIXME: This isn't sufficient, I don't think.  *)
-	      rangelist
+	      List.fold_right
+	        (fun cfa_offset rangelist ->
+		  if not (OffsetMap.mem (Int32.to_int cfa_offset)
+					access.offsetmap) then
+		    match access.insn_addr with
+	              Some insn_addr ->
+			let lo = seek_lower access.offsetmap cfa_offset
+					    sp_coverage insn_addr
+			and hi = seek_higher access.offsetmap cfa_offset in
+			Log.printf 3 "Escape by function call (CFA offset %s): \
+				      reachable range [%d...%d]\n"
+				      (string_of_i32offset cfa_offset) lo hi;
+			let rangelist' = (lo, hi) :: rangelist in
+			(* The called function may stash the address we pass to
+			   it, and subsequent function calls from the same
+			   caller may access the same object.  *)
+			let lo, hi, rangelist' =
+			  maximise_bounds cfa_offset None None
+					  access.reachable_forwards true
+					  rangelist' in
+			let lo, hi, rangelist' =
+			  maximise_bounds cfa_offset lo hi
+					  access.reachable_backwards false
+					  rangelist' in
+			begin match lo, hi with
+			  Some lo, Some hi -> (lo, hi) :: rangelist'
+			| _ -> rangelist'
+			end
+		    | None -> rangelist
+		  else begin
+	            Log.printf 4
+		      "Not counting offset %ld for escape by function call\n"
+		      cfa_offset;
+	            rangelist
+		  end)
+		access.cfa_offsets
+		rangelist
 	  | _ -> rangelist)
 	access_vec
 	rangelist)
     arr
+    []
+
+type gc_rangelist =
+  {
+    range : int * int;
+    mutable mark : bool;
+  }
+
+let filter_ranges arr rangelist =
+  let grl = List.map (fun ent -> { range = ent; mark = false }) rangelist in
+  Array.iter
+    (fun access_vec ->
+      Vec.iter
+        (fun access ->
+	  match access.access_type with
+	    Escape_by_store
+	  | Escape_by_stack_store _
+	  | Escape_by_fncall ->
+	      List.iter
+	        (fun grange ->
+		  let lo, hi = grange.range in
+		  List.iter
+		    (fun cfa_offset ->
+		      let cfa_offset = Int32.to_int cfa_offset in
+		      if cfa_offset >= lo && cfa_offset < hi then
+		        grange.mark <- true)
+		    access.cfa_offsets)
+		grl
+	  | _ -> ())
+	access_vec)
+    arr;
+  List.fold_right
+    (fun ent outp ->
+      if ent.mark then begin
+        Log.printf 3 "Retaining range %d...%d\n" (fst ent.range)
+		     (snd ent.range);
+        ent.range :: outp
+      end else begin
+        Log.printf 3 "Dropping range %d...%d\n" (fst ent.range)
+		   (snd ent.range);
+	outp
+      end)
+    grl
     []
 
 let dump_reachable ra =
@@ -870,8 +935,9 @@ let dump_addressable_table blk_arr addressable_tab =
         (BS.string_of_blockref blk_arr.(idx).Block.id);
       Vec.iter
         (fun access ->
-	  Log.printf 3 "seqno: %d  code: %s  cfa_offset: %ld  access: %s\n"
-	    access.seq_no (C.string_of_code access.code) access.cfa_offset
+	  Log.printf 3 "seqno: %d  code: %s  cfa_offsets: [%s]  access: %s\n"
+	    access.seq_no (C.string_of_code access.code)
+	    (string_of_i32s access.cfa_offsets)
 	    (string_of_access_type access.access_type);
 	  Log.printf 4 "stack: %s\n" (string_of_offsetmap access.offsetmap);
 	  Log.printf 5 "reachable fwd: [%s]\n"

@@ -26,7 +26,7 @@ PACKAGES := -package bitstring,bitstring.syntax,num,unix,FrontC,batteries
 
 # Source plus generated files.
 OCAMLSRC := log.ml dgraph.ml coverage.ml elfreader.ml dwarfreader.ml dwarfprint.ml \
-	    line.ml decode_arm.ml insn.ml symbols.ml mapping.ml emit.ml \
+	    line.ml decode_arm.ml insn.ml symbols.ml mapping.ml \
 	    deque.ml ranlist.ml vec.ml boolset.ml getoption.ml code.ml \
 	    block.ml ctype.ml function.ml irtypes.ml ir.ml eabi.ml typedb.ml \
 	    builtin.ml slice_section.ml binary_info.ml external.ml \

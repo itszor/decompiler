@@ -357,7 +357,7 @@ let decompile_sym binf sym =
   gcinfo "after dominator computation";
   Log.printf 2 "--- after computing dominators ---\n";
   print_blockseq_dfsinfo blk_arr;
-  (*graphviz blk_arr;*)
+  graphviz blk_arr;
   Log.printf 2 "--- SSA conversion (1) ---\n";
   let regset = IrPhiPlacement.place blk_arr in
   IrPhiPlacement.rename blk_arr 0 regset;
@@ -389,11 +389,11 @@ let decompile_sym binf sym =
   gcinfo "after propagation";
   Log.printf 2 "--- gathering stack-relative offsets ---\n";
   let defloops = Ptrtracking.find_def_loops defs in
-  Ptrtracking.track_all_stack_refs defs defloops;
+  let def_cfa_offsets = Ptrtracking.track_all_stack_refs defs defloops in
   Log.printf 2 "--- find addressable variables (1) ---\n";
   let addressable =
     Ptrtracking.find_addressable blkarr_om inforec dwarf_vars cu_inf.ci_ctypes
-				 defs in
+				 defs def_cfa_offsets in
   gcinfo "after find addressable (1)";
   Log.printf 2 "--- marking address-taken vars ---\n";
   Dwptrtracking.mark_addressable_vars blk_arr dwarf_vars addressable;
@@ -404,7 +404,7 @@ let decompile_sym binf sym =
   Log.printf 2 "--- find addressable variables (2) ---\n";
   let addressable =
     Ptrtracking.find_addressable blkarr_om inforec dwarf_vars cu_inf.ci_ctypes
-				 defs in
+				 defs def_cfa_offsets (* refresh? *) in
   gcinfo "after find addressable (2)";
   let addressable_tab =
     Ptrtracking.tabulate_addressable blkarr_om addressable in
@@ -413,6 +413,8 @@ let decompile_sym binf sym =
   let ra = Ptrtracking.reachable_addresses addressable_tab sp_cov in
   (*Ptrtracking.dump_reachable ra;*)
   let nonoverlapped_regions = Ptrtracking.nonoverlapping_ranges ra in
+  let nonoverlapped_regions =
+    Ptrtracking.filter_ranges addressable_tab nonoverlapped_regions in
   gcinfo "after finding anonymous addressable regions";
   let blkarr_om =
     Ptrtracking.merge_anon_addressable blkarr_om sp_cov nonoverlapped_regions in
