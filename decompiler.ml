@@ -412,14 +412,14 @@ let decompile_sym binf sym =
   Log.printf 2 "--- reachable addresses ---\n";
   let ra = Ptrtracking.reachable_addresses addressable_tab sp_cov in
   (*Ptrtracking.dump_reachable ra;*)
-  let nonoverlapped_regions = Ptrtracking.nonoverlapping_ranges ra in
+  (*let nonoverlapped_regions = Ptrtracking.nonoverlapping_ranges ra in
   let nonoverlapped_regions =
     Ptrtracking.filter_ranges addressable_tab nonoverlapped_regions in
   gcinfo "after finding anonymous addressable regions";
   let blkarr_om =
     Ptrtracking.merge_anon_addressable blkarr_om sp_cov nonoverlapped_regions in
   gcinfo "after merging anon addressable";
-  Dwptrtracking.dump_offsetmap_blkarr blkarr_om;
+  Dwptrtracking.dump_offsetmap_blkarr blkarr_om;*)
   (*Log.printf 2 "--- gather sp refs ---\n";
   let stack_coverage =
     Ptrtracking.find_stack_references blk_arr inforec dwarf_vars

@@ -63,4 +63,8 @@ TODO list for decompiler
 
 * I think we need a pass prior to track_all_stack_refs to identify adds/subs which are within loops, i.e. induction variables. Maybe make use of dgraph. [done]
 
-* Fix find_addressable to use set-of-CFA-offsets-per-def infrastructure above, instead of cfa_offset.
+* Fix find_addressable to use set-of-CFA-offsets-per-def infrastructure above, instead of cfa_offset. [done]
+
+* Use tuple of (address, insn) for later passes.
+
+* Spread anon addressable regions less far -- i.e. only as far as they are actually reachable, according to the addressable entities in a function. Hopefully that will get rid of the outgoing arg collisions?
