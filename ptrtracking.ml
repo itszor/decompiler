@@ -705,7 +705,7 @@ let seek_higher offsetmap cfa_offset =
 type cfa_range_item =
   {
     range : int * int;
-    mutable live_at : int list;
+    mutable live_at : BatISet.t;
     mutable mark : bool;
   }
 
@@ -744,7 +744,7 @@ let reachable_addresses arr sp_coverage =
 		      Int32.to_int addr_taken_offset in
 		  if range_clear targ_node.offsetmap range_lo range_hi then
 		    lo_opt lo'' range_lo, hi_opt hi'' range_hi,
-		      targ_node.seq_no :: live_at''
+		      BatISet.add targ_node.seq_no live_at''
 		  else
 		    lo'', hi'', live_at'')
 	        targ_node.cfa_offsets
@@ -764,7 +764,7 @@ let reachable_addresses arr sp_coverage =
 			      [%d...%d]\n" addr_taken_offset fnlo fnhi;
 		let rangenode = {
 		  range = fnlo, fnhi;
-		  live_at = [targ_node.seq_no];
+		  live_at = BatISet.singleton targ_node.seq_no;
 		  mark = false
 		} in
 		lo, hi, live_at, rangenode :: rangelist
@@ -785,7 +785,7 @@ let reachable_addresses arr sp_coverage =
 		  if not (OffsetMap.mem (Int32.to_int cfa_offset)
 					access.offsetmap) then
 		    let lo, hi, live_at, rangelist =
-	              maximise_bounds cfa_offset None None []
+	              maximise_bounds cfa_offset None None BatISet.empty
 				      access.reachable_forwards true
 				      rangelist in
 		    let lo, hi, live_at, rangelist =
@@ -829,7 +829,7 @@ let reachable_addresses arr sp_coverage =
 				      (string_of_i32offset cfa_offset) lo hi;
 			let rangenode = {
 			  range = lo, hi;
-			  live_at = [access.seq_no];
+			  live_at = BatISet.singleton access.seq_no;
 			  mark = false
 			} in
 			let rangelist' = rangenode :: rangelist in
@@ -837,7 +837,7 @@ let reachable_addresses arr sp_coverage =
 			   it, and subsequent function calls from the same
 			   caller may access the same object.  *)
 			let lo, hi, live_at, rangelist' =
-			  maximise_bounds cfa_offset None None []
+			  maximise_bounds cfa_offset None None BatISet.empty
 					  access.reachable_forwards true
 					  rangelist' in
 			let lo, hi, live_at, rangelist' =
@@ -897,7 +897,7 @@ let filter_ranges arr rangelist =
       if ent.mark then begin
         Log.printf 3 "Retaining range %d...%d\n" (fst ent.range)
 		     (snd ent.range);
-        ent.range :: outp
+        ent :: outp
       end else begin
         Log.printf 3 "Dropping range %d...%d\n" (fst ent.range)
 		   (snd ent.range);
@@ -908,7 +908,11 @@ let filter_ranges arr rangelist =
 
 let dump_reachable ra =
   List.iter
-    (fun (lo, hi) -> Log.printf 3 "[%d...%d] " lo hi)
+    (fun ent ->
+      let lo, hi = ent.range in
+      Log.printf 3 "[%d...%d], live at [%s]\n" lo hi
+	(String.concat ", " (List.map string_of_int
+	  (BatISet.elements ent.live_at))))
     ra;
   Log.printf 3 "\n"
 
@@ -1060,16 +1064,49 @@ let nonoverlapping_ranges r =
   end;
   res
 
+let ranges_only ranges =
+  List.map (fun r -> r.range) ranges
+
+let overlaps_p lo1 hi1 lo2 hi2 =
+  not (hi1 <= lo2 || hi2 <= lo1)
+
+let reattach_liveness nonoverlapped_regions reachable =
+  List.map
+    (fun (r_lo, r_hi) ->
+      let iset = List.fold_right
+        (fun targ acc ->
+	  let t_lo, t_hi = targ.range in
+	  if overlaps_p r_lo r_hi t_lo t_hi then
+	    BatISet.union targ.live_at acc
+	  else
+	    acc)
+	reachable
+	BatISet.empty in
+      { range = (r_lo, r_hi); mark = false; live_at = iset })
+    nonoverlapped_regions
+
 (* Merge any anonymous stack blocks which have their address taken with a
    function's stack offset map.  These must generally stay live throughout a
    function, but we can discount any points where the stack pointer register is
    above the block in question.  *)
 
-let merge_anon_addressable blkarr_offsetmap sp_cov pruned_regions =
+let merge_anon_addressable blkarr_offsetmap sp_cov addressable_tab
+			   pruned_regions =
+  let atht = Hashtbl.create 5 in
+  (* We need to access this data all inside out now.  Build a table from
+     sequential indices (used by "live_at" from cfa_range_item) to a block
+     index and addressable entity.   *)
+  Array.iteri
+    (fun blkidx accesslist ->
+      Vec.iter
+        (fun access ->
+	  Hashtbl.add atht access.seq_no (blkidx, access))
+	accesslist)
+    addressable_tab;
   Array.map
     (fun blk ->
-      let newseq = CS.fold_left
-        (fun newseq (insn_addr, stmt, stmt_offsetmap) ->
+      let newseq, _ = CS.fold_left
+        (fun (newseq, idx) (insn_addr, stmt, stmt_offsetmap) ->
 	  let stmt_offsetmap' =
 	    match insn_addr with
 	      None -> stmt_offsetmap
@@ -1078,18 +1115,33 @@ let merge_anon_addressable blkarr_offsetmap sp_cov pruned_regions =
 		  let lo_stack =
 		    Coverage.interval_type (Coverage.find_range sp_cov ia) in
 		  List.fold_right
-		    (fun (lo, hi) offsetmap ->
-		      if lo >= lo_stack then
-		        record_kind_for_offset offsetmap lo (hi - lo)
-					       Addressable_anon_var
-		      else
+		    (fun region offsetmap ->
+		      let lo, hi = region.range in
+		      if lo >= lo_stack then begin
+		        BatISet.fold
+			  (fun seqno acc ->
+			    let accblk, accinf = Hashtbl.find atht seqno in
+			    if blk.Block.dfnum = accblk
+			       && idx = accinf.index then begin
+			      Log.printf 3
+				"Merging region [%d...%d] in blk %s at idx %d\n"
+			        lo hi (BS.string_of_blockref
+				  blkarr_offsetmap.(accblk).Block.id)
+				accinf.index;
+		              record_kind_for_offset acc lo (hi - lo)
+						     Addressable_anon_var
+			    end else
+			      acc)
+			  region.live_at
+			  offsetmap
+		      end else
 		        offsetmap)
 		    pruned_regions
 		    stmt_offsetmap
 		with Not_found ->
 		  stmt_offsetmap in
-	  CS.snoc newseq (insn_addr, stmt, stmt_offsetmap'))
-	CS.empty
+	  CS.snoc newseq (insn_addr, stmt, stmt_offsetmap'), succ idx)
+	(CS.empty, 0)
 	blk.Block.code in
       { blk with Block.code = newseq })
     blkarr_offsetmap
