@@ -17,7 +17,7 @@ TODO list for decompiler
 
 * SP tracking falls over if it hits a phi node: fixable or not? Might suggest alloca or other dynamic stack allocation.
 
-  - SP tracking is currently only used to provide a lower bound for "anonymous" addressable blocks, i.e. blocks whose address is taken, but which are not described in the debug info. We might be able to get away with incomplete or partial data.
+  - SP tracking is currently only used to provide a lower bound for "anonymous" addressable blocks, i.e. blocks whose address is taken, but which are not described in the debug info. We might be able to get away with incomplete or partial data. [this might not be needed any more]
 
 * Emission of types and data symbols.
 
@@ -67,4 +67,10 @@ TODO list for decompiler
 
 * Use tuple of (address, insn) for later passes.
 
-* Spread anon addressable regions less far -- i.e. only as far as they are actually reachable, according to the addressable entities in a function. Hopefully that will get rid of the outgoing arg collisions?
+* Spread anon addressable regions less far -- i.e. only as far as they are actually reachable, according to the addressable entities in a function. Hopefully that will get rid of the outgoing arg collisions? [done]
+
+* Fix dwptrtracking to use cfa_offsets instead of cfa_offset.
+
+* SSA names are not variables: map former to latter. [on hold/no?]
+
+* Tweak Locations.location type? And/or add simple way of getting stack address (at insn address) for a variable.

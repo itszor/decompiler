@@ -424,6 +424,11 @@ let decompile_sym binf sym =
 				       regions_with_liveness in
   gcinfo "after merging anon addressable";
   Dwptrtracking.dump_offsetmap_blkarr blkarr_om;
+  Log.printf 2 "--- rewrite constant stack refs ---\n";
+  let blkarr_om =
+    Ptrtracking.rewrite_stack_refs blkarr_om def_cfa_offsets
+				   cu_inf.ci_ctypes in
+  Dwptrtracking.dump_offsetmap_blkarr blkarr_om;
   (*Log.printf 2 "--- gather sp refs ---\n";
   let stack_coverage =
     Ptrtracking.find_stack_references blk_arr inforec dwarf_vars

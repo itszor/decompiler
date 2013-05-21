@@ -81,7 +81,8 @@ let find_pointer_cfa_offset_equiv defs ptr_reg offset =
 
 (* Find the offset from the canonical frame address (CFA) for a given address
    ADDR, or raise Not_constant_cfa_offset if it doesn't have one (or we can't
-   figure it out).  *)
+   figure it out).
+   FIXME: This has been superseded by cfa_offsets below.  Update callers.  *)
 
 let cfa_offset addr defs =
   match addr with
@@ -126,13 +127,24 @@ module OffsetSet = Set.Make (struct
   let compare = compare
 end)
 
+(* An anonymous variable, or part of one.  Adjacent anon_var_parts may need to
+   be joined together (possibly with reduced lifespan) in order to preserve
+   program semantics.  This is not done yet.  *)
+
+type anon_var_part =
+  {
+    range : int * int;
+    mutable live_at : BatISet.t;
+    mutable mark : bool;
+  }
+
 type stack_access_kind =
     Saved_caller_reg
   | Outgoing_arg
   | Incoming_arg
-  | Local_var
-  | Addressable_local_var
-  | Addressable_anon_var
+  | Local_var of Function.var
+  | Addressable_local_var of Function.var
+  | Addressable_anon_var of anon_var_part
   | Local_var_or_spill_slot
 
 (* "Escape_by_foo" use the CFA_OFFSET field of ADDRESSABLE_ENTITY as the stack
@@ -407,8 +419,8 @@ let cfa_offsets addr offsetmap =
     OffsetSet.fold
       (fun ofs acc ->
 	match ofs with
-	  Offset o -> o :: acc
-	| Induction (st, ind) -> st :: acc)
+	  Offset o -> fn o :: acc
+	| Induction (st, ind) -> fn st :: acc)
       (find_or_empty sreg offsetmap)
       [] in
   match addr with
@@ -702,13 +714,6 @@ let seek_higher offsetmap cfa_offset =
       find_higher succ_offset in
   find_higher (Int32.to_int cfa_offset)
 
-type cfa_range_item =
-  {
-    range : int * int;
-    mutable live_at : BatISet.t;
-    mutable mark : bool;
-  }
-
 let reachable_addresses arr sp_coverage =
   let table_idx = build_index_table arr in
   let get_node idx =
@@ -935,9 +940,9 @@ let letter_for_offset_word omap offset =
     | Outgoing_arg -> 'A'
     | Incoming_arg -> 'I'
     | Local_var_or_spill_slot -> 'V'
-    | Local_var -> 'L'
-    | Addressable_local_var -> '&'
-    | Addressable_anon_var -> '@'
+    | Local_var _ -> 'L'
+    | Addressable_local_var _ -> '&'
+    | Addressable_anon_var _ -> '@'
   with
     Not_found -> '.'
   | Mixed -> '*'
@@ -1094,7 +1099,7 @@ let merge_anon_addressable blkarr_offsetmap sp_cov addressable_tab
 			   pruned_regions =
   let atht = Hashtbl.create 5 in
   (* We need to access this data all inside out now.  Build a table from
-     sequential indices (used by "live_at" from cfa_range_item) to a block
+     sequential indices (used by "live_at" from anon_var_part) to a block
      index and addressable entity.   *)
   Array.iteri
     (fun blkidx accesslist ->
@@ -1129,7 +1134,7 @@ let merge_anon_addressable blkarr_offsetmap sp_cov addressable_tab
 				  blkarr_offsetmap.(accblk).Block.id)
 				accinf.index;
 		              record_kind_for_offset acc lo (hi - lo)
-						     Addressable_anon_var
+				(Addressable_anon_var region)
 			    end else
 			      acc)
 			  region.live_at
@@ -1142,6 +1147,96 @@ let merge_anon_addressable blkarr_offsetmap sp_cov addressable_tab
 		  stmt_offsetmap in
 	  CS.snoc newseq (insn_addr, stmt, stmt_offsetmap'), succ idx)
 	(CS.empty, 0)
+	blk.Block.code in
+      { blk with Block.code = newseq })
+    blkarr_offsetmap
+
+let stack_mapping_for_offset stmt_offsetmap offset accsz =
+  let bytesize = Irtypes.access_bytesize accsz in
+  let rec observe first idx =
+    if idx = bytesize then
+      first
+    else
+      let typ = OffsetMap.find (offset + idx) stmt_offsetmap in
+      if typ = first then
+        observe first (succ idx)
+      else
+        raise Mixed in
+  try
+    observe (OffsetMap.find offset stmt_offsetmap) 1
+  with Not_found ->
+    (* FIXME: Fill in stack map with synthesized local vars/spill slots before
+       we reach here instead.  *)
+    Local_var_or_spill_slot
+
+let stackvar_access name typ offset ctypes_for_cu =
+  if Ctype.aggregate_type ctypes_for_cu typ then
+    let aggr, _ =
+      Insn_to_ir.resolve_aggregate_access typ offset ctypes_for_cu in
+    C.Unary (Irtypes.Aggr_member (typ, aggr), C.Reg (CT.Stack_var name))
+  else
+    C.Reg (CT.Stack_var name)
+
+let rewrite_load insn_addr dst accsz addr stmt_offsetmap single node
+		 ctypes_for_cu =
+  match stack_mapping_for_offset stmt_offsetmap (Int32.to_int single) accsz with
+    Local_var lv | Addressable_local_var lv ->
+      begin match insn_addr, lv.Function.var_location with
+        Some ia, Some loc ->
+	  let cfa_base_opt = Locations.loc_cfa_offset_at_addr loc ia in
+	  begin match cfa_base_opt with
+	    Some cfa_base ->
+	      let offset_into_type = (Int32.to_int single) - cfa_base in
+	      let sv_acc = stackvar_access lv.Function.var_name
+					   lv.Function.var_type offset_into_type
+					   ctypes_for_cu in
+	      C.Set (dst, sv_acc)
+	  | None -> node
+	  end
+      | _, _ -> node
+      end
+  | _ -> node
+
+let rewrite_store insn_addr accsz addr src stmt_offsetmap single node =
+  node
+
+(* Ideally we want to get rid of all explicit references to the stack here.
+   Is that possible?  *)
+
+let rewrite_stack_refs blkarr_offsetmap def_cfa_offsets ctypes_for_cu =
+  Array.map
+    (fun blk ->
+      let newseq = CS.fold_left
+	(fun newseq (insn_addr, stmt, stmt_offsetmap) ->
+	  let stmt' = C.map
+	    (fun node ->
+	      match node with
+		C.Set (dst, C.Load (accsz, addr)) ->
+	          begin try
+		    let offsets = cfa_offsets addr def_cfa_offsets in
+		    match offsets with
+		      [] -> C.Protect node
+		    | [single] ->
+			rewrite_load insn_addr dst accsz addr stmt_offsetmap
+				     single node ctypes_for_cu
+		    | _ -> C.Protect node
+		  with Not_constant_cfa_offset -> node
+		  end
+	      | C.Store (accsz, addr, src) ->
+	          begin try
+		    let offsets = cfa_offsets addr def_cfa_offsets in
+		    match offsets with
+		      [] -> C.Protect node
+		    | [single] ->
+		        rewrite_store insn_addr accsz addr src stmt_offsetmap
+				      single node
+		    | _ -> C.Protect node
+		  with Not_constant_cfa_offset -> node
+		  end
+	      | _ -> node)
+	    stmt in
+	  CS.snoc newseq (insn_addr, stmt', stmt_offsetmap))
+	CS.empty
 	blk.Block.code in
       { blk with Block.code = newseq })
     blkarr_offsetmap

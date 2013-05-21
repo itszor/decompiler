@@ -52,3 +52,14 @@ let convert_dwarf_loclist = function
 let convert_dwarf_loclist_opt = function
     None -> []
   | Some loclist -> convert_dwarf_loclist loclist
+
+(* Find CFA offset for LOC (if it describes such an offset), returning
+   int option.  *)
+
+let loc_cfa_offset_at_addr loc addr =
+  try
+    match Dwarfreader.loc_for_addr addr loc with
+      `DW_OP_fbreg o -> Some o
+    | _ -> None
+  with Not_found ->
+    None

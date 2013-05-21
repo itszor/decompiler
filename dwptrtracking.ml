@@ -471,9 +471,9 @@ let merge_dwarf_vars blkarr_offsetmap dwarf_vars =
 			  Some (C.Reg (CT.Stack o)) ->
 			    let typ =
 			      if dwvar.Function.var_addressable then
-				Addressable_local_var
+				Addressable_local_var dwvar
 			      else
-				Local_var in
+				Local_var dwvar in
 			    om_ref := record_kind_for_offset !om_ref o
 					dwvar.Function.var_size typ
 			| _ -> ())
