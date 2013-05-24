@@ -82,7 +82,8 @@ let find_pointer_cfa_offset_equiv defs ptr_reg offset =
 (* Find the offset from the canonical frame address (CFA) for a given address
    ADDR, or raise Not_constant_cfa_offset if it doesn't have one (or we can't
    figure it out).
-   FIXME: This has been superseded by cfa_offsets below.  Update callers.  *)
+   FIXME: This has been superseded by initial_cfa_offsets below.  Update
+   callers.  *)
 
 let cfa_offset addr defs =
   match addr with
@@ -414,15 +415,7 @@ let track_all_stack_refs defs defloops =
     !offsetmap;
   !offsetmap
 
-let cfa_offsets addr offsetmap =
-  let map_offsets_from_sreg fn sreg =
-    OffsetSet.fold
-      (fun ofs acc ->
-	match ofs with
-	  Offset o -> fn o :: acc
-	| Induction (st, ind) -> fn st :: acc)
-      (find_or_empty sreg offsetmap)
-      [] in
+let cfa_offsets map_offsets_from_sreg addr =
   match addr with
     C.SSAReg sreg ->
       map_offsets_from_sreg (fun x -> x) sreg
@@ -432,6 +425,34 @@ let cfa_offsets addr offsetmap =
       map_offsets_from_sreg (fun offs -> Int32.sub offs imm) sreg
   | _ -> raise Not_constant_cfa_offset
 
+(* Find an int32 list of "initial" CFA offsets for a given address ADDR, i.e.
+   those on the first iteration through the code (this might be a rather fuzzy
+   concept...).  *)
+
+let initial_cfa_offsets addr offsetmap =
+  let map_offsets_from_sreg fn sreg =
+    OffsetSet.fold
+      (fun ofs acc ->
+	match ofs with
+	  Offset o -> fn o :: acc
+	| Induction (st, ind) -> fn st :: acc)
+      (find_or_empty sreg offsetmap)
+      [] in
+  cfa_offsets map_offsets_from_sreg addr
+
+(* Find an offset list adjusted by any addition/subtraction in ADDR.  *)
+
+let adjusted_cfa_offsets addr offsetmap =
+  let map_offsets_from_sreg fn sreg =
+    OffsetSet.fold
+      (fun ofs acc ->
+        match ofs with
+	  Offset o -> Offset (fn o) :: acc
+	| Induction (st, ind) -> Induction (fn st, ind) :: acc)
+      (find_or_empty sreg offsetmap)
+      [] in
+  cfa_offsets map_offsets_from_sreg addr
+
 (* Find a list of ADDRESSABLE_ENTITY nodes pertaining to addressability of
    stack locations.  *)
 
@@ -440,7 +461,7 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs def_cfa_offsets =
   let maybe_addressable stmt blkidx seq_no insn_addr thing code
 			offsetmap =
     try
-      let offsets = cfa_offsets code def_cfa_offsets in
+      let offsets = initial_cfa_offsets code def_cfa_offsets in
       match offsets with
         [] -> false
       | _ ->
@@ -494,7 +515,8 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs def_cfa_offsets =
 	      match node with
 	        C.Store (Irtypes.Word, addr, src) ->
 	          begin try
-		    let addr_offsets = cfa_offsets addr def_cfa_offsets in
+		    let addr_offsets =
+		      initial_cfa_offsets addr def_cfa_offsets in
 		    let stored_addr_p =
 		      maybe_addressable node idx seq_no insn_addr
 			(Escape_by_stack_store addr_offsets) src
@@ -513,7 +535,8 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs def_cfa_offsets =
 		     for doubleword stores might do).  Just note when it looks
 		     like we're storing to a stack slot.  *)
 	          begin try
-		    let addr_offsets = cfa_offsets addr def_cfa_offsets in
+		    let addr_offsets =
+		      initial_cfa_offsets addr def_cfa_offsets in
 		    create_node idx seq_no insn_addr Stack_store node
 				addr_offsets offsetmap
 		  with Not_constant_cfa_offset -> ()
@@ -521,7 +544,8 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs def_cfa_offsets =
 		  node
 	      | C.Load (accsz, addr) ->
 	          begin try
-		    let addr_offsets = cfa_offsets addr def_cfa_offsets in
+		    let addr_offsets =
+		      initial_cfa_offsets addr def_cfa_offsets in
 		    create_node idx seq_no insn_addr Stack_load node
 				addr_offsets offsetmap
 		  with Not_constant_cfa_offset -> ()
@@ -1151,6 +1175,46 @@ let merge_anon_addressable blkarr_offsetmap sp_cov addressable_tab
       { blk with Block.code = newseq })
     blkarr_offsetmap
 
+(* Any stack bytes which are still accessed but are unknown can now be scanned
+   and turned into local variables.  Some of these may genuinely have been local
+   variables, and some may have been stack spill slots: we can't tell, though
+   the latter will probably only use word-sized loads and stores.
+   Create local var/spill slots for callee-saved registers also.  *)
+
+let find_locals_or_spill_slots blkarr_offsetmap addressable_tab
+			       def_cfa_offsets =
+  let coverage = Coverage.create_coverage 0l 0xffffffffl in
+  let mark_access accsz addr =
+    let bytesize = Int32.of_int (Irtypes.access_bytesize accsz) in
+    let offsets = adjusted_cfa_offsets addr def_cfa_offsets in
+    List.iter
+      (function
+	Offset o ->
+	  Coverage.add_range coverage (Coverage.Range ((), o, bytesize))
+      | Induction (st, ind) when ind > 0l ->
+	  Coverage.add_range coverage (Coverage.Half_open ((), st))
+      | Induction (st, _) ->
+	  Coverage.add_range coverage (Coverage.Range ((), st, bytesize)))
+      offsets in
+  for i = 0 to Array.length addressable_tab - 1 do
+    Vec.iter
+      (fun access ->
+        match access.access_type with
+	  Stack_load ->
+	    begin match access.code with
+	      C.Set (_, C.Load (accsz, addr)) -> mark_access accsz addr
+	    | _ -> failwith "not load"
+	    end
+	| Stack_store ->
+	    begin match access.code with
+	      C.Store (accsz, addr, _) -> mark_access accsz addr
+	    | _ -> failwith "not store"
+	    end
+	| _ -> ())
+      addressable_tab.(i)
+  done;
+  coverage
+
 let stack_mapping_for_offset stmt_offsetmap offset accsz =
   let bytesize = Irtypes.access_bytesize accsz in
   let rec observe first idx =
@@ -1213,7 +1277,7 @@ let rewrite_stack_refs blkarr_offsetmap def_cfa_offsets ctypes_for_cu =
 	      match node with
 		C.Set (dst, C.Load (accsz, addr)) ->
 	          begin try
-		    let offsets = cfa_offsets addr def_cfa_offsets in
+		    let offsets = initial_cfa_offsets addr def_cfa_offsets in
 		    match offsets with
 		      [] -> C.Protect node
 		    | [single] ->
@@ -1224,7 +1288,7 @@ let rewrite_stack_refs blkarr_offsetmap def_cfa_offsets ctypes_for_cu =
 		  end
 	      | C.Store (accsz, addr, src) ->
 	          begin try
-		    let offsets = cfa_offsets addr def_cfa_offsets in
+		    let offsets = initial_cfa_offsets addr def_cfa_offsets in
 		    match offsets with
 		      [] -> C.Protect node
 		    | [single] ->
