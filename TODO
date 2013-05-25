@@ -74,3 +74,5 @@ TODO list for decompiler
 * SSA names are not variables: map former to latter. [on hold/no?]
 
 * Tweak Locations.location type? And/or add simple way of getting stack address (at insn address) for a variable.
+
+* Tsk, coverage.ml is broken, needs fixing. [done]

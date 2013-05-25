@@ -14,7 +14,7 @@ type 'a interval =
 
 type 'a coverage = {
   mutable intervals : 'a interval array;
-  mutable nested_in_prev : bool array;
+  mutable nested_in_prev : int option array;
   mutable raw_intervals : 'a interval list;
   mutable valid : bool;
   start : int32;
@@ -64,14 +64,27 @@ let rec interval_within second first =
           second_start >= first_start && second_end <= first_end
       end
 
+let compare_length a b =
+  match a, b with
+    (Range (_, _, first_length) | Padded_range (_, _, _, first_length)),
+    (Range (_, _, second_length) | Padded_range (_, _, _, second_length)) ->
+      compare first_length second_length
+  | (Range (_, _, _) | Padded_range (_, _, _, _)), Half_open (_, _) -> -1
+  | Half_open (_, _), (Range (_, _, _) | Padded_range (_, _, _, _)) -> 1
+  | Half_open (_, _), Half_open (_, _) -> 0
+
 (* Remove duplicates from a list of ranges.  Attempt to break ties (for a
    particular start address) by preferring closed ranges over half-open ones. 
    Otherwise, just remove identical intervals.  *)
 
 let cleanup_intervals int_list =
   let sorted =
-    List.sort (fun a b -> compare (interval_start a) (interval_start b))
-	      int_list in
+    List.sort
+      (fun a b ->
+        let starts = compare (interval_start a) (interval_start b) in
+	if starts <> 0 then starts else
+	  compare_length b a)
+      int_list in
   let rec uniq = function
     [] -> []
   | [a] -> [a]
@@ -93,16 +106,17 @@ let fix_coverage coverage =
   if not coverage.valid then begin
     let cleaned_up = cleanup_intervals coverage.raw_intervals in
     let sorted = Array.of_list cleaned_up in
-    coverage.nested_in_prev <- Array.create (Array.length sorted) false;
-    let prev = ref None in
-    for i = 0 to Array.length sorted - 1 do
-      begin match !prev with
-        Some prev ->
-	  if interval_within sorted.(i) prev then
-	    coverage.nested_in_prev.(i) <- true
-      | None -> ()
-      end;
-      prev := Some sorted.(i)
+    coverage.nested_in_prev <- Array.create (Array.length sorted) None;
+    for i = 1 to Array.length sorted - 1 do
+      let j = ref (i - 1)
+      and found_containing = ref false in
+      while !j >= 0 && not !found_containing do
+	if interval_within sorted.(i) sorted.(!j) then begin
+	  coverage.nested_in_prev.(i) <- Some !j;
+	  found_containing := true
+	end;
+	decr j
+      done
     done;
     coverage.intervals <- sorted;
     coverage.valid <- true
@@ -115,8 +129,10 @@ let add_range coverage interval =
 let rec find_innermost_matching coverage index addr =
   if interval_matches coverage.intervals.(index) addr then
     index
-  else if index > 0 && coverage.nested_in_prev.(index) then
-    find_innermost_matching coverage (pred index) addr
+  else if index > 0 then
+    match coverage.nested_in_prev.(index) with
+      None -> raise Not_found
+    | Some prev -> find_innermost_matching coverage prev addr
   else
     raise Not_found
 
@@ -137,10 +153,10 @@ let find_range_stack_idx coverage addr =
 	(* This is the winning condition.  *)
 	let win = find_innermost_matching coverage low addr in
 	let rec build_result idx =
-	  if idx == 0 || not coverage.nested_in_prev.(idx) then
-	    [idx]
-	  else
-	    idx :: build_result (pred idx) in
+	  match idx, coverage.nested_in_prev.(idx) with
+	    0, _
+	  | _, None -> [idx]
+	  | idx, Some prev -> idx :: build_result prev in
 	build_result win
       with Not_found ->
 	[]

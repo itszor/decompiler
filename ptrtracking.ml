@@ -1181,8 +1181,7 @@ let merge_anon_addressable blkarr_offsetmap sp_cov addressable_tab
    the latter will probably only use word-sized loads and stores.
    Create local var/spill slots for callee-saved registers also.  *)
 
-let find_locals_or_spill_slots blkarr_offsetmap addressable_tab
-			       def_cfa_offsets =
+let find_local_or_spill_slot_coverage addressable_tab def_cfa_offsets =
   let coverage = Coverage.create_coverage 0l 0xffffffffl in
   let mark_access accsz addr =
     let bytesize = Int32.of_int (Irtypes.access_bytesize accsz) in
@@ -1214,6 +1213,18 @@ let find_locals_or_spill_slots blkarr_offsetmap addressable_tab
       addressable_tab.(i)
   done;
   coverage
+
+(* FIXME: Finish!  Coverage needs fixing first.  *)
+
+let create_locals_or_spill_slots addressable_tab coverage =
+  for i = 0 to Array.length addressable_tab - 1 do
+    Vec.iter
+      (fun access ->
+        match access.access_type with
+	  Stack_load | Stack_store -> ()
+	| _ -> ())
+     addressable_tab.(i)
+  done
 
 let stack_mapping_for_offset stmt_offsetmap offset accsz =
   let bytesize = Irtypes.access_bytesize accsz in
