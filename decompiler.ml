@@ -365,10 +365,6 @@ let decompile_sym binf sym =
 			      cu_inf.ci_ctypes in
   gcinfo "after minipool resolution";
   dump_blockarr blk_arr;
-  (*Log.printf 1 "--- sp tracking ---\n";
-  let sp_var_set = Sptracking.sp_track blk_arr' vars cu_inf.ci_ctypes in
-  add_stackvars_to_entry_block blk_arr' 0 sp_var_set;
-  dump_blockarr blk_arr';*)
   let defs = Defs.get_defs blk_arr in
   Log.printf 2 "--- sp tracking ---\n";
   let sp_cov = Sptracking.sp_track blk_arr in
@@ -431,22 +427,6 @@ let decompile_sym binf sym =
     Ptrtracking.rewrite_stack_refs blkarr_om def_cfa_offsets
 				   cu_inf.ci_ctypes in
   Dwptrtracking.dump_offsetmap_blkarr blkarr_om;
-  (*Log.printf 2 "--- gather sp refs ---\n";
-  let stack_coverage =
-    Ptrtracking.find_stack_references blk_arr inforec dwarf_vars
-				      cu_inf.ci_ctypes in
-  Log.printf 2 "--- ptr tracking ---\n";
-  let blk_arr, sp_var_set =
-    Dwptrtracking.pointer_tracking blk_arr inforec dwarf_vars
-				   cu_inf.ci_ctypes in
-  add_stackvars_to_entry_block blk_arr 0 sp_var_set;
-  dump_blockarr blk_arr;
-  Log.printf 2 "--- rewrite sp refs ---\n";
-  let blk_arr, sp_ref_set =
-    Ptrtracking.replace_stack_references blk_arr stack_coverage dwarf_vars
-					 inforec in
-  add_stackvars_to_entry_block blk_arr 0 sp_ref_set;
-  dump_blockarr blk_arr;*)
   let blk_arr = Dwptrtracking.remove_offsetmap_from_blkarr blkarr_om in
   Log.printf 2 "--- SSA conversion (2) ---\n";
   let regset2 = IrPhiPlacement.place blk_arr in
