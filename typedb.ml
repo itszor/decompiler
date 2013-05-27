@@ -255,7 +255,7 @@ let gather_info blk_arr inforec =
 	      ()
 	  | x ->
 	      let got_something = ref false in
-	      ignore (C.map
+	      (*ignore (C.map
 	        (fun r ->
 		  match r with
 		    C.With_id (id, C.SSAReg (reg, regn)) ->
@@ -270,7 +270,7 @@ let gather_info blk_arr inforec =
 		      end;
 		      r
 		  | _ -> r)
-		x);
+		x);*)
 	      if not !got_something then
 		Log.printf 3 "gathered no info for '%s'\n"
 			      (C.string_of_code insn);

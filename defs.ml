@@ -66,7 +66,7 @@ let get_defs blk_arr =
 		} in
 		Hashtbl.add ht regid di
 	    | _ -> ())
-	  (C.strip_ids stmt);
+	  stmt;
 	  !ia_ref)
 	None
 	blk.Block.code))

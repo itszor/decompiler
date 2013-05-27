@@ -12,7 +12,7 @@ let minipool_resolve elfbits ehdr shdr_arr symbols mapping_syms strtab
       let code' = CS.map
         (fun stmt ->
 	  match stmt with
-	    C.Set ((C.SSAReg (rd, rdn) | C.With_id (_, C.SSAReg (rd, rdn))),
+	    C.Set (C.SSAReg (rd, rdn),
 		   C.Load (Irtypes.Word,
 		     C.Binary (Irtypes.Add, C.Entity (CT.PC loc),
 					    C.Immed imm))) as x ->

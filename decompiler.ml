@@ -141,7 +141,7 @@ let eabi_pre_prologue ft start_addr inforec real_entry_point ct_for_cu =
       Insn_to_ir.add_incoming_args ft cs
     else*)
     (*Insn_to_ir.add_real_incoming_args ft start_addr inforec cs*)
-    Insn_to_ir.add_real_incoming_args2 ft cs ct_for_cu in
+    Insn_to_ir.add_incoming_args ft cs ct_for_cu in
   let cs = CS.snoc cs (C.Control (C.Jump real_entry_point)) in
   Block.make_block Irtypes.Virtual_entry cs
 
@@ -269,15 +269,6 @@ let add_stackvars_to_entry_block blk_arr entry_pt_ref regset =
     code in
   blk_arr.(entry_pt_ref).Block.code <- code'
 
-let strip_ids blk_arr =
-  Array.map
-    (fun blk ->
-      let code' = CS.map
-        (fun stmt -> C.strip_ids stmt)
-	blk.Block.code in
-      { blk with Block.code = code' })
-    blk_arr
-
 let graphviz blk_arr =
   let fh = open_out "func.gv" in
   Printf.fprintf fh "digraph func {\n";
@@ -367,8 +358,6 @@ let decompile_sym binf sym =
   Log.printf 2 "--- gather info (1) ---\n";
   Typedb.gather_info blk_arr inforec;
   gcinfo "after gather info";
-  Log.printf 2 "--- strip ids ---\n";
-  let blk_arr = strip_ids blk_arr in
   Log.printf 2 "--- minipool resolution ---\n";
   let blk_arr =
     Minipool.minipool_resolve binf.elfbits binf.ehdr binf.shdr_arr binf.symbols

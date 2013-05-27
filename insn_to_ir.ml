@@ -309,46 +309,6 @@ let find_symbol symbols strtab addr =
   with Not_found ->
     CT.Absolute addr
 
-let fn_args inforec callee_addr ft_args arglocs =
-  let args_from_ctype = Array.mapi
-    (fun i typ ->
-      match arglocs.(i) with
-        Some loc ->
-	  begin match Dwarfreader.loc_for_addr callee_addr loc with
-	    `DW_OP_reg r ->
-	      let reg = CT.Hard_reg r in
-	      let id = C.create_id () in
-	      Typedb.record_reg_info_for_id inforec reg id
-	        (Typedb.Used_as_type ft_args.(i));
-	      C.With_id (id, C.Reg reg)
-	  | `DW_OP_fbreg o ->
-	      let stackreg = CT.Stack o in
-	      let id = C.create_id () in
-	      Typedb.record_reg_info_for_id inforec stackreg id
-		(Typedb.Used_as_type ft_args.(i));
-	      C.With_id (id, C.Load (Irtypes.Word,
-			       C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
-					 C.Immed (Int32.of_int o))))
-	  | `DW_OP_regx r when r >= 64 && r < 96 ->
-	      let reg = CT.VFP_sreg (r - 64) in
-	      let id = C.create_id () in
-	      Typedb.record_reg_info_for_id inforec reg id
-	        (Typedb.Used_as_type ft_args.(i));
-	      C.With_id (id, C.Reg reg)
-	  | x -> failwith "fn_args/location"
-	  end
-      | None ->
-          Log.printf 3
-	    "Warning: no loc for argument, falling back to cheap hack";
-	  begin match i with
-            (0 | 1 | 2 | 3) as r -> C.Reg (CT.Hard_reg r)
-	  | n -> C.Load (Irtypes.Word,
-			 C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
-				   C.Immed (Int32.of_int ((n - 4) * 4))))
-	  end)
-    ft_args in
-  C.Nary (Irtypes.Fnargs, Array.to_list args_from_ctype)
-
 let stackregs_to_loads c =
   C.map
     (function
@@ -375,7 +335,7 @@ let rec code_for_location loc =
       C.Concat (Array.of_list (List.rev codeparts))
   | Locations.Within_range _ -> failwith "unexpected within_range"
 
-let fn_args2 callee_addr ft ct_for_cu =
+let fn_args callee_addr ft ct_for_cu =
   let accum = Eabi.make_arg_accum () in
   let args = Array.mapi
     (fun i typ ->
@@ -384,77 +344,7 @@ let fn_args2 callee_addr ft ct_for_cu =
     ft.Function.args in
   C.Nary (Irtypes.Fnargs, Array.to_list args)
 
-(*let add_incoming_args ft code =
-  let (_, code') = Array.fold_left
-    (fun (argn, code) arg ->
-      match argn with
-        (0 | 1 | 2 | 3) -> succ argn, code
-      | n ->
-          let arg_in = C.Store (Irtypes.Word,
-	    C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
-		      C.Immed (Int32.of_int ((n - 4) * 4))),
-	    C.Nullary (Irtypes.Arg_in argn)) in
-	  succ argn, CS.snoc code arg_in)
-    (0, code)
-    ft.Function.args in
-  code'*)
-
-(* FT is a function_info record from function.ml.  INFOREC is an info record.
-   CODESEQ is a code sequence for the virtual entry block for a function.  *)
-
-let add_real_incoming_args ft start_addr inforec codeseq =
-  let known_incoming_regs = ref [] in
-  let _, added_args = Array.fold_left
-    (fun (i, codeseq') typ ->
-      let argname =
-        if Ctype.base_type_p ft.Function.args.(i) then
-	  C.Entity (CT.Arg_var ft.Function.arg_names.(i))
-	else
-          C.Nullary Irtypes.Nop in
-      match ft.Function.arg_locs.(i) with
-        Some loc ->
-	  begin match Dwarfreader.loc_for_addr start_addr loc with
-	    `DW_OP_reg r ->
-	      let reg = CT.Hard_reg r in
-	      let id = C.create_id () in
-	      known_incoming_regs := r :: !known_incoming_regs;
-	      Typedb.record_reg_info_for_id inforec reg id
-	        (Typedb.Type_known typ);
-	      let insn = C.Set (C.With_id (id, C.Reg reg), argname) in
-	      succ i, CS.snoc codeseq' insn
-	  | `DW_OP_fbreg o ->
-	      let stackreg = CT.Stack o in
-	      let id = C.create_id () in
-	      Typedb.record_reg_info_for_id inforec stackreg id
-	        (Typedb.Type_known typ);
-	      let insn = C.With_id (id, C.Store (Irtypes.Word,
-			   C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
-				     C.Immed (Int32.of_int o)), argname)) in
-	      succ i, CS.snoc codeseq' insn
-	  | `DW_OP_regx r when r >= 64 && r < 96 ->
-	      let reg = CT.VFP_sreg (r - 64) in
-	      let id = C.create_id () in
-	      known_incoming_regs := r :: !known_incoming_regs;
-	      Typedb.record_reg_info_for_id inforec reg id
-		(Typedb.Type_known typ);
-	      let insn = C.Set (C.With_id (id, C.Reg reg), argname) in
-	      succ i, CS.snoc codeseq' insn
-	  | _ -> failwith "add_real_incoming_args/location"
-	  end
-      | None -> failwith "no loc for incoming arg")
-    (0, codeseq)
-    ft.Function.args in
-  List.fold_left
-    (fun codeseq' regnum ->
-      if List.mem regnum !known_incoming_regs then
-        codeseq'
-      else
-        CS.snoc codeseq' (C.Set (C.Reg (CT.Hard_reg regnum),
-				 C.Nullary Irtypes.Undefined)))
-    added_args
-    [0; 1; 2; 3]
-
-let add_real_incoming_args2 ft codeseq ct_for_cu =
+let add_incoming_args ft codeseq ct_for_cu =
   let accum = Eabi.make_arg_accum () in
   let args = Array.mapi
     (fun i _ ->
@@ -524,7 +414,7 @@ let try_function_call binf inforec dst_addr =
 	    cu_inf.Binary_info.ci_dietab cu_inf.Binary_info.ci_ctypes
 	    ~compunit_baseaddr:cu_inf.Binary_info.ci_baseaddr in
 	let ct_sym = CT.Finf_sym (symname, fn_inf, sym) in
-	let passes = fn_args2 dst_addr fn_inf cu_inf.Binary_info.ci_ctypes
+	let passes = fn_args dst_addr fn_inf cu_inf.Binary_info.ci_ctypes
 	and returns = fn_ret fn_inf cu_inf.Binary_info.ci_ctypes in
 	CT.EABI, ct_sym, passes, returns
       with Not_found ->
@@ -548,7 +438,7 @@ let try_function_call binf inforec dst_addr =
 	let ext_ctypes, fn_inf =
 	  External.lookup_function binf.Binary_info.libs sym_name in
 	CT.Plt_call, CT.Symbol (sym_name, sym),
-	  fn_args2 dst_addr fn_inf ext_ctypes,
+	  fn_args dst_addr fn_inf ext_ctypes,
 	  fn_ret fn_inf ext_ctypes
       with Not_found ->
         CT.Plt_call, CT.Symbol (sym_name, sym), C.Nary (Irtypes.Fnargs, []),
