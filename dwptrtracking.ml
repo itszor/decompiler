@@ -270,7 +270,7 @@ let store defs accsz src offset offsetmap =
   | Some ((C.Nullary (Irtypes.Special | Irtypes.Caller_saved) as fs), _) ->
       Log.printf 4 "first src %s\n" (C.string_of_code fs);
       offsetmap := record_kind_for_offset !offsetmap (Int32.to_int offset)
-        (Irtypes.access_bytesize accsz) Saved_caller_reg
+        (Irtypes.access_bytesize accsz) Saved_caller_reg_anon
   | Some _ -> ()
 
 let incoming defs accsz offset offsetmap =
@@ -279,7 +279,7 @@ let incoming defs accsz offset offsetmap =
 
 let outgoing_arg defs accsz offset offsetmap =
   offsetmap := record_kind_for_offset !offsetmap (Int32.to_int offset)
-    (Irtypes.access_bytesize accsz) Outgoing_arg
+    (Irtypes.access_bytesize accsz) Outgoing_arg_anon
 
 let unmark_outgoing_arg defs accsz offset offsetmap_ref =
   let rec scan bytes offset offsetmap =
@@ -289,7 +289,7 @@ let unmark_outgoing_arg defs accsz offset offsetmap_ref =
 	let offsetmap' =
 	  try
 	    match OffsetMap.find offset offsetmap with
-	      Outgoing_arg -> OffsetMap.remove offset offsetmap
+	      Outgoing_arg_anon -> OffsetMap.remove offset offsetmap
 	    | _ -> offsetmap
 	  with Not_found -> offsetmap in
 	scan (pred bytes) (succ offset) offsetmap' in

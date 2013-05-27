@@ -419,10 +419,23 @@ let decompile_sym binf sym =
     Ptrtracking.filter_ranges addressable_tab regions_with_liveness in
   Ptrtracking.dump_reachable regions_with_liveness;
   gcinfo "after finding anonymous addressable regions";
+  let atht = Ptrtracking.create_access_by_seqno_htab addressable_tab in
   let blkarr_om =
-    Ptrtracking.merge_anon_addressable blkarr_om sp_cov addressable_tab
+    Ptrtracking.merge_anon_addressable blkarr_om sp_cov atht
 				       regions_with_liveness in
   gcinfo "after merging anon addressable";
+  Dwptrtracking.dump_offsetmap_blkarr blkarr_om;
+  Log.printf 2 "--- find spill slots or local vars ---\n";
+  let ss_coverage =
+    Ptrtracking.find_local_or_spill_slot_coverage addressable_tab
+						  def_cfa_offsets in
+  let slotmap =
+    Ptrtracking.create_locals_or_spill_slots addressable_tab def_cfa_offsets
+					     ss_coverage in
+  Ptrtracking.dump_slotmap slotmap;
+  Log.printf 2 "--- merge spill slots or local vars ---\n";
+  let blkarr_om =
+    Ptrtracking.merge_spill_slots_or_local_vars blkarr_om atht slotmap in
   Dwptrtracking.dump_offsetmap_blkarr blkarr_om;
   Log.printf 2 "--- rewrite constant stack refs ---\n";
   let blkarr_om =

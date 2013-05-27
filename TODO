@@ -13,7 +13,7 @@ TODO list for decompiler
 
 * Speed up symbol access/mapping symbols (add suitable indices). [partly done]
 
-* Add parallel-set support for 'S' flag support etc. (done -- no 'S' flag support yet though.)
+* Add parallel-set support for 'S' flag support etc. (done -- no 'S' flag support yet though, and IR might still be tweaked/improved.)
 
 * SP tracking falls over if it hits a phi node: fixable or not? Might suggest alloca or other dynamic stack allocation.
 
@@ -71,8 +71,12 @@ TODO list for decompiler
 
 * Fix dwptrtracking to use cfa_offsets instead of cfa_offset.
 
-* SSA names are not variables: map former to latter. [on hold/no?]
+* SSA names are not variables: map former to latter.
+
+  - machine registers and spill slots/local variables can both be treated as "registers". A kind of register allocation can then be done on those registers to assign them to variables. Coalescing of copies can be done iff types of the registers are compatible. Doing this should help to cut down the number of variables emitted in target code.
 
 * Tweak Locations.location type? And/or add simple way of getting stack address (at insn address) for a variable.
 
 * Tsk, coverage.ml is broken, needs fixing. [done]
+
+* Remove With_id for IR, replace Parallel with Parallel_set (maybe).  Use a code other than Set for non-register sets? (Only cleanups.)

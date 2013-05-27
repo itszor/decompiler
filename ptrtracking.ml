@@ -139,14 +139,25 @@ type anon_var_part =
     mutable mark : bool;
   }
 
+type stack_slot =
+  {
+    (* For each byte offset into the slot, store access type and the byte
+       offset into that type being acccessed.  *)
+    slot_accesses : (Irtypes.ir_mem * int) list array;
+    slot_size : int;
+    mutable slot_live_at : BatISet.t
+  }
+
 type stack_access_kind =
-    Saved_caller_reg
-  | Outgoing_arg
+    Saved_caller_reg_anon
+  | Saved_caller_reg of stack_slot
+  | Outgoing_arg_anon
+  | Outgoing_arg of stack_slot
   | Incoming_arg
   | Local_var of Function.var
   | Addressable_local_var of Function.var
   | Addressable_anon_var of anon_var_part
-  | Local_var_or_spill_slot
+  | Local_var_or_spill_slot of stack_slot
 
 (* "Escape_by_foo" use the CFA_OFFSET field of ADDRESSABLE_ENTITY as the stack
    location whose address may escape from the current function.
@@ -960,10 +971,12 @@ let kind_for_offset_word omap offset =
 let letter_for_offset_word omap offset =
   try
     match kind_for_offset_word omap offset with
-      Saved_caller_reg -> 'R'
-    | Outgoing_arg -> 'A'
+      Saved_caller_reg_anon -> 'r'
+    | Saved_caller_reg _ -> 'R'
+    | Outgoing_arg_anon -> 'a'
+    | Outgoing_arg _ -> 'A'
     | Incoming_arg -> 'I'
-    | Local_var_or_spill_slot -> 'V'
+    | Local_var_or_spill_slot _ -> 'V'
     | Local_var _ -> 'L'
     | Addressable_local_var _ -> '&'
     | Addressable_anon_var _ -> '@'
@@ -1024,20 +1037,25 @@ let dump_addressable_table blk_arr addressable_tab =
     addressable_tab
 
 let mix_kind offsetlo offsethi old_kind new_kind =
-  let offstr =
+  let offstr () =
     if offsetlo = offsethi then string_of_int offsetlo
     else Printf.sprintf "%d...%d" offsetlo offsethi in
   match old_kind, new_kind with
-    Saved_caller_reg, Saved_caller_reg -> Saved_caller_reg
-  | Saved_caller_reg, _
-  | _, Saved_caller_reg ->
-      Log.printf 3 "*** caller-saved reg collision, offset %s ***\n" offstr;
-      Saved_caller_reg
-  | Outgoing_arg, Outgoing_arg -> Outgoing_arg
-  | Outgoing_arg, _
-  | _, Outgoing_arg ->
-      Log.printf 3 "*** outgoing arg collision, offset %s ***\n" offstr;
-      Outgoing_arg
+    Saved_caller_reg_anon, Saved_caller_reg_anon -> Saved_caller_reg_anon
+  | Saved_caller_reg_anon, Local_var_or_spill_slot slot ->
+      Saved_caller_reg slot
+  | Saved_caller_reg_anon, _
+  | _, Saved_caller_reg_anon ->
+      Log.printf 3 "*** caller-saved reg collision, offset %s ***\n"
+        (offstr ());
+      Saved_caller_reg_anon
+  | Outgoing_arg_anon, Outgoing_arg_anon -> Outgoing_arg_anon
+  | Outgoing_arg_anon, Local_var_or_spill_slot slot ->
+      Outgoing_arg slot
+  | Outgoing_arg_anon, _
+  | _, Outgoing_arg_anon ->
+      Log.printf 3 "*** outgoing arg collision, offset %s ***\n" (offstr ());
+      Outgoing_arg_anon
   | _, replacement -> replacement
 
 let map_union a b =
@@ -1114,17 +1132,12 @@ let reattach_liveness nonoverlapped_regions reachable =
       { range = (r_lo, r_hi); mark = false; live_at = iset })
     nonoverlapped_regions
 
-(* Merge any anonymous stack blocks which have their address taken with a
-   function's stack offset map.  These must generally stay live throughout a
-   function, but we can discount any points where the stack pointer register is
-   above the block in question.  *)
+(* The merge_* functions below need to access addressable_tab inside out now.
+   Build a table from sequential indices (used by "live_at" from anon_var_part)
+   to a block index and addressable entity.   *)
 
-let merge_anon_addressable blkarr_offsetmap sp_cov addressable_tab
-			   pruned_regions =
+let create_access_by_seqno_htab addressable_tab =
   let atht = Hashtbl.create 5 in
-  (* We need to access this data all inside out now.  Build a table from
-     sequential indices (used by "live_at" from anon_var_part) to a block
-     index and addressable entity.   *)
   Array.iteri
     (fun blkidx accesslist ->
       Vec.iter
@@ -1132,6 +1145,14 @@ let merge_anon_addressable blkarr_offsetmap sp_cov addressable_tab
 	  Hashtbl.add atht access.seq_no (blkidx, access))
 	accesslist)
     addressable_tab;
+  atht
+
+(* Merge any anonymous stack blocks which have their address taken with a
+   function's stack offset map.  These must generally stay live throughout a
+   function, but we can discount any points where the stack pointer register is
+   above the block in question.  *)
+
+let merge_anon_addressable blkarr_offsetmap sp_cov atht pruned_regions =
   Array.map
     (fun blk ->
       let newseq, _ = CS.fold_left
@@ -1175,11 +1196,37 @@ let merge_anon_addressable blkarr_offsetmap sp_cov addressable_tab
       { blk with Block.code = newseq })
     blkarr_offsetmap
 
+let offsetmap_find_opt offset offsetmap =
+  try Some (OffsetMap.find offset offsetmap)
+  with Not_found -> None
+
+let stack_mapping_for_offset_opt stmt_offsetmap offset accsz =
+  let bytesize = Irtypes.access_bytesize accsz in
+  let rec observe first idx =
+    if idx = bytesize then
+      first
+    else
+      let typ = offsetmap_find_opt (offset + idx) stmt_offsetmap in
+      if typ = first then
+        observe first (succ idx)
+      else
+        raise Mixed in
+  observe (offsetmap_find_opt offset stmt_offsetmap) 1
+
+let stack_mapping_for_offset stmt_offsetmap offset accsz =
+  match stack_mapping_for_offset_opt stmt_offsetmap offset accsz with
+    Some res -> res
+  | None -> raise Not_found
+
 (* Any stack bytes which are still accessed but are unknown can now be scanned
    and turned into local variables.  Some of these may genuinely have been local
    variables, and some may have been stack spill slots: we can't tell, though
    the latter will probably only use word-sized loads and stores.
-   Create local var/spill slots for callee-saved registers also.  *)
+   Create local var/spill slots for callee-saved registers also.
+
+   First calculate a coverage data structure detailing *all* the ways a
+   particular stack slot (CFA offset) is loaded/stored throughout the
+   function.  *)
 
 let find_local_or_spill_slot_coverage addressable_tab def_cfa_offsets =
   let coverage = Coverage.create_coverage 0l 0xffffffffl in
@@ -1189,11 +1236,11 @@ let find_local_or_spill_slot_coverage addressable_tab def_cfa_offsets =
     List.iter
       (function
 	Offset o ->
-	  Coverage.add_range coverage (Coverage.Range ((), o, bytesize))
+	  Coverage.add_range coverage (Coverage.Range (accsz, o, bytesize))
       | Induction (st, ind) when ind > 0l ->
-	  Coverage.add_range coverage (Coverage.Half_open ((), st))
+	  Coverage.add_range coverage (Coverage.Half_open (accsz, st))
       | Induction (st, _) ->
-	  Coverage.add_range coverage (Coverage.Range ((), st, bytesize)))
+	  Coverage.add_range coverage (Coverage.Range (accsz, st, bytesize)))
       offsets in
   for i = 0 to Array.length addressable_tab - 1 do
     Vec.iter
@@ -1201,7 +1248,7 @@ let find_local_or_spill_slot_coverage addressable_tab def_cfa_offsets =
         match access.access_type with
 	  Stack_load ->
 	    begin match access.code with
-	      C.Set (_, C.Load (accsz, addr)) -> mark_access accsz addr
+	      C.Load (accsz, addr) -> mark_access accsz addr
 	    | _ -> failwith "not load"
 	    end
 	| Stack_store ->
@@ -1214,35 +1261,144 @@ let find_local_or_spill_slot_coverage addressable_tab def_cfa_offsets =
   done;
   coverage
 
-(* FIXME: Finish!  Coverage needs fixing first.  *)
+(* Create a slot for a set of CFA (byte) offsets.  The slot_accesses field is
+   indexed by byte number into the slot, and can be used to find all the ways
+   that byte is accessed.  *)
 
-let create_locals_or_spill_slots addressable_tab coverage =
+let create_slot coverage offset bytesize =
+  let arr = Array.create bytesize [] in
+  for i = 0 to bytesize - 1 do
+    let stack =
+      Coverage.find_range_stack coverage (Int32.add offset (Int32.of_int i)) in
+    arr.(i) <- List.map
+      (fun range ->
+        let start = Coverage.interval_start range
+	and rtype = Coverage.interval_type range in
+	rtype, Int32.to_int (Int32.sub offset start))
+      stack
+  done;
+  { slot_accesses = arr; slot_size = bytesize; slot_live_at = BatISet.empty }
+
+exception Unbounded
+
+(* Find the biggest closed range containing OFFSET in COVERAGE. Raise Unbounded
+   if it is a half-open range, or Not_found if no range contains the offset.  *)
+
+let slot_size coverage offset =
+  let stack = Coverage.find_range_stack coverage offset in
+  match stack with
+    [] -> raise Not_found
+  | _ ->
+      begin match List.nth stack (List.length stack - 1) with
+        Coverage.Range (_, sbase, sz) ->
+	  Int32.to_int sbase, Int32.to_int sz
+      | Coverage.Padded_range (_, sbase, _, sz) ->
+	  Int32.to_int sbase, Int32.to_int sz
+      | Coverage.Half_open (_, _) -> raise Unbounded
+      end
+
+(* Create a slot map (a BatIMap) from CFA byte offet ranges to the stack_slot
+   structure which should be used for that range.  *)
+
+let create_locals_or_spill_slots addressable_tab def_cfa_offsets coverage =
+  (* Note physical equality here!  Otherwise (= equality) adjacent slots will
+     get merged together, and we don't want that.  *)
+  let slotmap = ref (BatIMap.empty ~eq:(==)) in
+  let maybe_create_slot access accsz addr =
+    let offsets = adjusted_cfa_offsets addr def_cfa_offsets in
+    List.iter
+      (function
+	Offset o | Induction (o, _) ->
+	  try
+	    let mapping =
+	      stack_mapping_for_offset_opt access.offsetmap (Int32.to_int o)
+					   accsz in
+	    begin match mapping with
+	      None
+	    | Some Saved_caller_reg_anon
+	    | Some Outgoing_arg_anon ->
+		let sbase, ssize = slot_size coverage o in
+		let slot =
+		  if BatIMap.mem sbase !slotmap then
+		    BatIMap.find sbase !slotmap
+		  else begin
+		    let slot' = create_slot coverage o ssize in
+		    Log.printf 4
+		      "Creating slot, offset %ld, base %d, size %d\n" o sbase
+		      ssize;
+		    (* BatI{Set,Map} ranges are inclusive.  *)
+		    slotmap := BatIMap.add_range sbase (sbase + ssize - 1) slot'
+						 !slotmap;
+		    slot'
+		  end in
+		slot.slot_live_at <- BatISet.add access.seq_no slot.slot_live_at
+	    | _ -> ()
+	    end
+	  with Mixed -> ())
+      offsets in
   for i = 0 to Array.length addressable_tab - 1 do
     Vec.iter
       (fun access ->
         match access.access_type with
-	  Stack_load | Stack_store -> ()
+	  Stack_load ->
+	    begin match access.code with
+	      C.Load (accsz, addr) ->
+	        maybe_create_slot access accsz addr
+	    | _ -> failwith "not load"
+	    end
+	| Stack_store ->
+	    begin match access.code with
+	      C.Store (accsz, addr, _) ->
+	        maybe_create_slot access accsz addr
+	    | _ -> failwith "not store"
+	    end
 	| _ -> ())
      addressable_tab.(i)
-  done
+  done;
+  !slotmap
 
-let stack_mapping_for_offset stmt_offsetmap offset accsz =
-  let bytesize = Irtypes.access_bytesize accsz in
-  let rec observe first idx =
-    if idx = bytesize then
-      first
-    else
-      let typ = OffsetMap.find (offset + idx) stmt_offsetmap in
-      if typ = first then
-        observe first (succ idx)
-      else
-        raise Mixed in
-  try
-    observe (OffsetMap.find offset stmt_offsetmap) 1
-  with Not_found ->
-    (* FIXME: Fill in stack map with synthesized local vars/spill slots before
-       we reach here instead.  *)
-    Local_var_or_spill_slot
+let dump_slotmap slotmap =
+  Log.printf 3 "Slot map:\n";
+  BatIMap.iter_range
+    (fun lo hi slot ->
+      Log.printf 3 "[%s...%s] %d bytes\n"
+        (string_of_i32offset (Int32.of_int lo))
+	(string_of_i32offset (Int32.of_int hi)) slot.slot_size)
+    slotmap
+
+(* Merge stack slots (as calculated by find_local_or_spill_slot_coverage and
+   create_locals_or_stack_slots) with the stack offset maps for each stmt which
+   should use those slots.  Modifies outgoing args and callee-saved register
+   slots to point into the stack slot map also.  *)
+
+let merge_spill_slots_or_local_vars blkarr_offsetmap atht slotmap =
+  Array.map
+    (fun blk ->
+      let newseq, _ = CS.fold_left
+        (fun (newseq, idx) (insn_addr, stmt, stmt_offsetmap) ->
+	  let stmt_offsetmap' = BatIMap.fold_range
+	    (fun lo hi slot stmt_offsetmap_acc ->
+	      BatISet.fold
+		(fun seqno so_acc ->
+		  let accblk, accinf = Hashtbl.find atht seqno in
+		  if blk.Block.dfnum = accblk
+		     && idx = accinf.index then begin
+		    Log.printf 3
+		      "Merging spill slot/local var [%d...%d] at seqno %d\n"
+		      lo hi seqno;
+		    record_kind_for_offset so_acc lo (hi - lo + 1)
+		      (Local_var_or_spill_slot slot)
+		  end else
+		    so_acc)
+		slot.slot_live_at
+		stmt_offsetmap_acc)
+	    slotmap
+	    stmt_offsetmap in
+	  CS.snoc newseq (insn_addr, stmt, stmt_offsetmap'), succ idx)
+	(CS.empty, 0)
+	blk.Block.code in
+      { blk with Block.code = newseq })
+    blkarr_offsetmap
 
 let stackvar_access name typ offset ctypes_for_cu =
   if Ctype.aggregate_type ctypes_for_cu typ then
@@ -1254,23 +1410,30 @@ let stackvar_access name typ offset ctypes_for_cu =
 
 let rewrite_load insn_addr dst accsz addr stmt_offsetmap single node
 		 ctypes_for_cu =
-  match stack_mapping_for_offset stmt_offsetmap (Int32.to_int single) accsz with
-    Local_var lv | Addressable_local_var lv ->
-      begin match insn_addr, lv.Function.var_location with
-        Some ia, Some loc ->
-	  let cfa_base_opt = Locations.loc_cfa_offset_at_addr loc ia in
-	  begin match cfa_base_opt with
-	    Some cfa_base ->
-	      let offset_into_type = (Int32.to_int single) - cfa_base in
-	      let sv_acc = stackvar_access lv.Function.var_name
-					   lv.Function.var_type offset_into_type
-					   ctypes_for_cu in
-	      C.Set (dst, sv_acc)
-	  | None -> node
-	  end
-      | _, _ -> node
-      end
-  | _ -> node
+  try
+    let mapping =
+      stack_mapping_for_offset stmt_offsetmap (Int32.to_int single) accsz in
+    match mapping with
+      Local_var lv | Addressable_local_var lv ->
+	begin match insn_addr, lv.Function.var_location with
+          Some ia, Some loc ->
+	    let cfa_base_opt = Locations.loc_cfa_offset_at_addr loc ia in
+	    begin match cfa_base_opt with
+	      Some cfa_base ->
+		let offset_into_type = (Int32.to_int single) - cfa_base in
+		let sv_acc =
+		  stackvar_access lv.Function.var_name lv.Function.var_type
+				  offset_into_type ctypes_for_cu in
+		C.Set (dst, sv_acc)
+	    | None -> node
+	    end
+	| _, _ -> node
+	end
+    | _ -> node
+  with Not_found ->
+    Log.printf 3 "Offset %ld not found in stack map %s\n" single
+      (string_of_offsetmap stmt_offsetmap);
+    node
 
 let rewrite_store insn_addr accsz addr src stmt_offsetmap single node =
   node
