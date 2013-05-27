@@ -80,3 +80,5 @@ TODO list for decompiler
 * Tsk, coverage.ml is broken, needs fixing. [done]
 
 * Remove With_id for IR, replace Parallel with Parallel_set (maybe).  Use a code other than Set for non-register sets? (Only cleanups.)
+
+* Robustify, remove FAILs in glsl.sh run.
