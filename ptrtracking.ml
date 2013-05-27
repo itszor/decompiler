@@ -577,7 +577,7 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs def_cfa_offsets =
 		    args);
 		  create_node idx seq_no insn_addr Fncall node []
 			      offsetmap;
-		  C.Protect node
+		  node
 	      | _ -> node)
 	    stmt);
 	  succ seq_no)
@@ -1268,16 +1268,28 @@ let find_local_or_spill_slot_coverage addressable_tab def_cfa_offsets =
 let create_slot coverage offset bytesize =
   let arr = Array.create bytesize [] in
   for i = 0 to bytesize - 1 do
+    let byte_offset = Int32.add offset (Int32.of_int i) in
     let stack =
-      Coverage.find_range_stack coverage (Int32.add offset (Int32.of_int i)) in
+      Coverage.find_range_stack coverage byte_offset in
     arr.(i) <- List.map
       (fun range ->
         let start = Coverage.interval_start range
 	and rtype = Coverage.interval_type range in
-	rtype, Int32.to_int (Int32.sub offset start))
+	rtype, Int32.to_int (Int32.sub byte_offset start))
       stack
   done;
   { slot_accesses = arr; slot_size = bytesize; slot_live_at = BatISet.empty }
+
+(* FIXME: The hidden assumption here (that only word loads and stores are used
+   to access the stack) is not really true in the general case: for cases where
+   this function would return false, we need to do something more
+   sophisticated.  *)
+
+let word_accesses_only stackslot =
+  match stackslot.slot_accesses with
+    [| [Irtypes.Word, 0]; [Irtypes.Word, 1];
+       [Irtypes.Word, 2]; [Irtypes.Word, 3] |] -> true
+  | _ -> false
 
 exception Unbounded
 
@@ -1308,6 +1320,8 @@ let create_locals_or_spill_slots addressable_tab def_cfa_offsets coverage =
     let offsets = adjusted_cfa_offsets addr def_cfa_offsets in
     List.iter
       (function
+        (* FIXME: This treatment of induction vars isn't going to be
+	   sufficient.  *)
 	Offset o | Induction (o, _) ->
 	  try
 	    let mapping =
@@ -1404,12 +1418,15 @@ let stackvar_access name typ offset ctypes_for_cu =
   if Ctype.aggregate_type ctypes_for_cu typ then
     let aggr, _ =
       Insn_to_ir.resolve_aggregate_access typ offset ctypes_for_cu in
-    C.Unary (Irtypes.Aggr_member (typ, aggr), C.Reg (CT.Stack_var name))
+    C.Unary (Irtypes.Aggr_member (typ, aggr), C.Entity (CT.Stack_var name))
+  else if Ctype.type_size ctypes_for_cu typ <= 4 then
+    C.Entity (CT.Stack_var name)
   else
-    C.Reg (CT.Stack_var name)
+    (* This can be other kinds of access, e.g. into an array.  FIXME!  *)
+    C.Entity (CT.String_constant "!!BAD!!")
 
-let rewrite_load insn_addr dst accsz addr stmt_offsetmap single node
-		 ctypes_for_cu =
+let rewrite_access make_access insn_addr accsz addr stmt_offsetmap
+		   single node ctypes_for_cu =
   try
     let mapping =
       stack_mapping_for_offset stmt_offsetmap (Int32.to_int single) accsz in
@@ -1424,10 +1441,18 @@ let rewrite_load insn_addr dst accsz addr stmt_offsetmap single node
 		let sv_acc =
 		  stackvar_access lv.Function.var_name lv.Function.var_type
 				  offset_into_type ctypes_for_cu in
-		C.Set (dst, sv_acc)
+		make_access sv_acc
 	    | None -> node
 	    end
 	| _, _ -> node
+	end
+    | Saved_caller_reg slot | Outgoing_arg slot
+    | Local_var_or_spill_slot slot ->
+        if word_accesses_only slot then
+          make_access (C.Reg (CT.Stack (Int32.to_int single)))
+	else begin
+	  Log.printf 3 "Non-word access for stack slot, ignoring (FIXME)\n";
+	  node
 	end
     | _ -> node
   with Not_found ->
@@ -1435,8 +1460,15 @@ let rewrite_load insn_addr dst accsz addr stmt_offsetmap single node
       (string_of_offsetmap stmt_offsetmap);
     node
 
-let rewrite_store insn_addr accsz addr src stmt_offsetmap single node =
-  node
+let rewrite_load insn_addr accsz addr stmt_offsetmap single node
+		 ctypes_for_cu =
+  rewrite_access (fun src -> src) insn_addr accsz addr stmt_offsetmap
+		 single node ctypes_for_cu
+
+let rewrite_store insn_addr accsz addr src stmt_offsetmap single node
+		  ctypes_for_cu =
+  rewrite_access (fun dst -> C.Set (dst, src)) insn_addr accsz addr
+		 stmt_offsetmap single node ctypes_for_cu
 
 (* Ideally we want to get rid of all explicit references to the stack here.
    Is that possible?  *)
@@ -1449,13 +1481,13 @@ let rewrite_stack_refs blkarr_offsetmap def_cfa_offsets ctypes_for_cu =
 	  let stmt' = C.map
 	    (fun node ->
 	      match node with
-		C.Set (dst, C.Load (accsz, addr)) ->
+		C.Load (accsz, addr) ->
 	          begin try
 		    let offsets = initial_cfa_offsets addr def_cfa_offsets in
 		    match offsets with
 		      [] -> C.Protect node
 		    | [single] ->
-			rewrite_load insn_addr dst accsz addr stmt_offsetmap
+			rewrite_load insn_addr accsz addr stmt_offsetmap
 				     single node ctypes_for_cu
 		    | _ -> C.Protect node
 		  with Not_constant_cfa_offset -> node
@@ -1467,7 +1499,7 @@ let rewrite_stack_refs blkarr_offsetmap def_cfa_offsets ctypes_for_cu =
 		      [] -> C.Protect node
 		    | [single] ->
 		        rewrite_store insn_addr accsz addr src stmt_offsetmap
-				      single node
+				      single node ctypes_for_cu
 		    | _ -> C.Protect node
 		  with Not_constant_cfa_offset -> node
 		  end

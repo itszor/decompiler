@@ -457,7 +457,8 @@ let decompile_sym binf sym =
     Ptrtracking.replace_stack_references blk_arr stack_coverage dwarf_vars
 					 inforec in
   add_stackvars_to_entry_block blk_arr 0 sp_ref_set;
-  dump_blockarr blk_arr;
+  dump_blockarr blk_arr;*)
+  let blk_arr = Dwptrtracking.remove_offsetmap_from_blkarr blkarr_om in
   Log.printf 2 "--- SSA conversion (2) ---\n";
   let regset2 = IrPhiPlacement.place blk_arr in
   IrPhiPlacement.rename blk_arr 0 regset2;
@@ -465,7 +466,7 @@ let decompile_sym binf sym =
   Log.printf 2 "--- gather info (2) ---\n";
   Typedb.gather_info blk_arr inforec;
   Typedb.print_info inforec.Typedb.infotag;
-  Typedb.print_implied_info inforec.Typedb.implications;*)
+  Typedb.print_implied_info inforec.Typedb.implications;
   (*Log.printf 2 "--- finding & substituting incoming args ---\n";
   let ht = Args_in.find_args blk_arr 0 in
   let arg_vars = Hashtbl.create 10 in

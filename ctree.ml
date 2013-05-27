@@ -133,7 +133,7 @@ let rec convert_expr ct_for_cu vars op =
 	Cabs.VARIABLE (Printf.sprintf
 	  "(unknown var %s)" (Typedb.string_of_ssa_reg r rn))
       end
-  | C.Reg (CT.Stack_var sv) ->
+  | C.Entity (CT.Stack_var sv) ->
       Cabs.VARIABLE sv
   | C.Load (accsz, addr) ->
       let conv_addr = convert_expr ct_for_cu vars addr in

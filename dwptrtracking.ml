@@ -261,6 +261,15 @@ let add_offsetmap_to_blkarr blkarr =
       newseq)
     blkarr
 
+let remove_offsetmap_from_blkarr blkarr_om =
+  Block.map_code
+    (fun cseq ->
+      CS.fold_left
+        (fun newseq (_, stmt, _) -> CS.snoc newseq stmt)
+	CS.empty
+	cseq)
+    blkarr_om
+
 let store defs accsz src offset offsetmap =
   let first_src = Ptrtracking.first_src defs src in
   Log.printf 4 "tracking %s for offset %ld\n"

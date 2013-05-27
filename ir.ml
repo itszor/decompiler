@@ -17,7 +17,6 @@ module IrCT =
              | Stack of int
 	     | Temp of int
 	     | Status of ir_statusbits
-	     | Stack_var of string
     type mem = ir_mem
     type entity = PC of int32
 		| Symbol_addr of string * Elfreader.elf_sym
@@ -29,6 +28,7 @@ module IrCT =
 		| Frame_base_update of Dwarfreader.dwarf_op
 		| Insn_address of int32
 		| String_constant of string
+		| Stack_var of string
     type abi = Branch_exchange
 	     | Unknown_abi
 	     | Plt_call
@@ -149,7 +149,6 @@ module IrCT =
     | Stack s -> Printf.sprintf "stack%s%d" (if s < 0 then "" else "+") s
     | Temp t -> Printf.sprintf "tmp%d" t
     | Status sb -> Printf.sprintf "status(%s)" (string_of_status sb)
-    | Stack_var nm -> nm
     
     let rec string_of_mem = function
       U8 -> "u8"
@@ -174,6 +173,7 @@ module IrCT =
     | String_constant str ->
         Printf.sprintf "string_const(\"%s\")" (String.escaped str)
     | Insn_address x -> Printf.sprintf "[%.8lx]" x
+    | Stack_var nm -> Printf.sprintf "«%s»" nm
 
     let string_of_abi = function
       Branch_exchange -> "branch_exchange"

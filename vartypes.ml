@@ -14,7 +14,6 @@ let choose_name (name, idx) =
         Printf.sprintf "incoming%d_%d" s idx
   | CT.Temp t -> Printf.sprintf "tmp%d_%d" t idx
   | CT.Status _ -> Printf.sprintf "status_%d" idx (* Fixme! *)
-  | CT.Stack_var nm -> Printf.sprintf "%s_%d" nm idx
 
 type possible_type =
     Known of Ctype.ctype
