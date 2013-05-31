@@ -958,11 +958,15 @@ let dump_reachable ra =
 
 exception Mixed
 
+let offsetmap_find_opt offset offsetmap =
+  try Some (OffsetMap.find offset offsetmap)
+  with Not_found -> None
+
 let kind_for_offset_word omap offset =
-  let b1 = OffsetMap.find offset omap
-  and b2 = OffsetMap.find (offset + 1) omap
-  and b3 = OffsetMap.find (offset + 2) omap
-  and b4 = OffsetMap.find (offset + 3) omap in
+  let b1 = offsetmap_find_opt offset omap
+  and b2 = offsetmap_find_opt (offset + 1) omap
+  and b3 = offsetmap_find_opt (offset + 2) omap
+  and b4 = offsetmap_find_opt (offset + 3) omap in
   if b1 = b2 && b2 = b3 && b3 = b4 then
     b1
   else
@@ -971,18 +975,17 @@ let kind_for_offset_word omap offset =
 let letter_for_offset_word omap offset =
   try
     match kind_for_offset_word omap offset with
-      Saved_caller_reg_anon -> 'r'
-    | Saved_caller_reg _ -> 'R'
-    | Outgoing_arg_anon -> 'a'
-    | Outgoing_arg _ -> 'A'
-    | Incoming_arg -> 'I'
-    | Local_var_or_spill_slot _ -> 'V'
-    | Local_var _ -> 'L'
-    | Addressable_local_var _ -> '&'
-    | Addressable_anon_var _ -> '@'
-  with
-    Not_found -> '.'
-  | Mixed -> '*'
+      Some Saved_caller_reg_anon -> 'r'
+    | Some (Saved_caller_reg _) -> 'R'
+    | Some Outgoing_arg_anon -> 'a'
+    | Some (Outgoing_arg _) -> 'A'
+    | Some Incoming_arg -> 'I'
+    | Some (Local_var_or_spill_slot _) -> 'V'
+    | Some (Local_var _) -> 'L'
+    | Some (Addressable_local_var _) -> '&'
+    | Some (Addressable_anon_var _) -> '@'
+    | None -> '.'
+  with Mixed -> '*'
 
 let string_of_offsetmap om =
   let opt = function
@@ -1005,12 +1008,24 @@ let string_of_offsetmap om =
   let buf = Buffer.create 5 in
   begin match mini, maxi with
     Some mini, Some maxi ->
-      for i = (maxi - 3) / 4 downto mini / 4 do
+      for i = maxi asr 2 downto mini asr 2 do
 	Buffer.add_char buf (letter_for_offset_word om (i * 4))
       done
   | _ -> ()
   end;
   prefix ^ (Buffer.contents buf)
+
+let string_of_offset_entry = function
+    Some Saved_caller_reg_anon -> "anonymous saved caller reg"
+  | Some (Saved_caller_reg _) -> "saved caller reg with stack slot"
+  | Some Outgoing_arg_anon -> "anonymous outgoing arg"
+  | Some (Outgoing_arg _) -> "outgoing arg with stack slot"
+  | Some Incoming_arg -> "incoming arg"
+  | Some (Local_var _) -> "local variable"
+  | Some (Addressable_local_var _) -> "addressable local variable"
+  | Some (Addressable_anon_var _) -> "anonymous addressable local var"
+  | Some (Local_var_or_spill_slot _) -> "local var or spill slot"
+  | None -> "unknown/unmapped"
 
 let dump_addressable_table blk_arr addressable_tab =
   Log.printf 3 "Stack-access/addressable table:\n";
@@ -1196,22 +1211,33 @@ let merge_anon_addressable blkarr_offsetmap sp_cov atht pruned_regions =
       { blk with Block.code = newseq })
     blkarr_offsetmap
 
-let offsetmap_find_opt offset offsetmap =
-  try Some (OffsetMap.find offset offsetmap)
-  with Not_found -> None
-
 let stack_mapping_for_offset_opt stmt_offsetmap offset accsz =
   let bytesize = Irtypes.access_bytesize accsz in
   let rec observe first idx =
     if idx = bytesize then
       first
-    else
+    else begin
       let typ = offsetmap_find_opt (offset + idx) stmt_offsetmap in
-      if typ = first then
-        observe first (succ idx)
-      else
-        raise Mixed in
-  observe (offsetmap_find_opt offset stmt_offsetmap) 1
+      Log.printf 4 "offsetmap: %s offset: %d type: %s\n"
+        (string_of_offsetmap stmt_offsetmap) (offset + idx)
+	(string_of_offset_entry typ);
+      match typ, first with
+        Some t, Some f when t = f -> observe first (succ idx)
+      | None, Some _
+      | Some _, None
+      | None, None -> observe first (succ idx)
+      | _, _ ->
+          Log.printf 1
+	    "Mixed access at offset %d, byte size %d (first=%s, idx=%d, \
+	     this=%s)\n"
+	    offset bytesize (string_of_offset_entry first) idx
+	    (string_of_offset_entry typ);
+          raise Mixed
+    end in
+  let typ = offsetmap_find_opt offset stmt_offsetmap in
+  Log.printf 4 "First byte offset=%d, type=%s\n" offset
+	     (string_of_offset_entry typ);
+  observe typ 1
 
 let stack_mapping_for_offset stmt_offsetmap offset accsz =
   match stack_mapping_for_offset_opt stmt_offsetmap offset accsz with
@@ -1415,12 +1441,11 @@ let merge_spill_slots_or_local_vars blkarr_offsetmap atht slotmap =
     blkarr_offsetmap
 
 let stackvar_access name typ offset ctypes_for_cu =
+  let base_expr =  C.Entity (CT.Stack_var name) in
   if Ctype.aggregate_type ctypes_for_cu typ then
-    let aggr, _ =
-      Insn_to_ir.resolve_aggregate_access typ offset ctypes_for_cu in
-    C.Unary (Irtypes.Aggr_member (typ, aggr), C.Entity (CT.Stack_var name))
+    Insn_to_ir.resolve_aggregate_access typ base_expr offset ctypes_for_cu
   else if Ctype.type_size ctypes_for_cu typ <= 4 then
-    C.Entity (CT.Stack_var name)
+    base_expr
   else
     (* This can be other kinds of access, e.g. into an array.  FIXME!  *)
     C.Entity (CT.String_constant "!!BAD!!")

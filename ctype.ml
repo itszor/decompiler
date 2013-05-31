@@ -339,14 +339,26 @@ and resolve_aggregate die die_hash ctypes_for_cu =
       begin try
 	let mem_type = get_attr_deref mem_attrs DW_AT_type die_hash in
 	Log.printf 4 "got type for %s\n" mem_name;
-	let mem_size = dwarf_type_size mem_type die_hash in
-	Log.printf 4 "got size too, %d\n" mem_size;
-	let resolved_type = resolve_type mem_type die_hash ctypes_for_cu in
-	Log.printf 4 "resolved type to %s\n" (string_of_ctype resolved_type);
-	{ name = mem_name; typ = resolved_type; offset = mem_offset;
-	  size = mem_size } :: build next
+	let mem_size = try
+	  let mem_size' = dwarf_type_size mem_type die_hash in
+	  Log.printf 4 "got size too, %d\n" mem_size';
+	  mem_size'
+	with Not_found ->
+	  (* FIXME: This happens sometimes, not sure why.  *)
+	  Log.printf 4 "size missing, using 0\n";
+	  0 in
+	begin try
+	  let resolved_type = resolve_type mem_type die_hash ctypes_for_cu in
+	  Log.printf 4 "resolved type to %s\n" (string_of_ctype resolved_type);
+	  { name = mem_name; typ = resolved_type; offset = mem_offset;
+	    size = mem_size } :: build next
+	with Not_found ->
+	  (* FIXME: This happens sometimes too.  *)
+	  Log.printf 4 "Warning: can't resolve type, skipping\n";
+	  build next
+	end
       with Not_found ->
-	failwith "no"
+	failwith "resolve_aggregate"
       end
   | _ -> raise Unknown_type in
   build die

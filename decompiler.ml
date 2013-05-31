@@ -145,10 +145,10 @@ let eabi_pre_prologue ft start_addr inforec real_entry_point ct_for_cu =
   let cs = CS.snoc cs (C.Control (C.Jump real_entry_point)) in
   Block.make_block Irtypes.Virtual_entry cs
 
-let eabi_post_epilogue () =
+let eabi_post_epilogue ft =
   let insns =
-    [C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 0));
-     (*C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 1));
+    [(*C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 0));
+     C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 1));
      C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 2));
      C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 3));*)
      C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 4));
@@ -160,7 +160,14 @@ let eabi_post_epilogue () =
      C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 10));
      C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 11));
      C.Control C.Virtual_exit] in
-  let cs = CS.of_list insns in
+  let insns' =
+    (* FIXME: This needs implementing properly!  Depends on an
+       as-yet-nonexistent mechanism for holding (aggregate) values in multiple
+       registers.  *)
+    match ft.Function.return with
+      Ctype.C_void -> insns
+    | _ -> C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 0)) :: insns in
+  let cs = CS.of_list insns' in
   Block.make_block Irtypes.Virtual_exit cs
 
 let cons_and_add_to_index blk bseq ht blockref idx =
@@ -182,7 +189,7 @@ let bs_of_code_hash ft binf inforec code_hash start_addr entry_pt ct_for_cu =
     BS.empty in
   let pre_prologue_blk =
     eabi_pre_prologue ft start_addr inforec entry_pt ct_for_cu
-  and virtual_exit = eabi_post_epilogue () in
+  and virtual_exit = eabi_post_epilogue ft in
   let with_entry_pt
     = bseq_cons Irtypes.Virtual_entry pre_prologue_blk blockseq in
   let with_exit_pt
@@ -259,13 +266,14 @@ module IrDfs = Dfs.Dfs (Ir.IrCT) (Ir.IrCS) (Ir.IrBS)
 module IrDominator = Dominator.Dominator (Ir.IrBS)
 module IrPhiPlacement = Phi.PhiPlacement (Ir.IrCT) (Ir.IrCS) (Ir.IrBS)
 
-let add_stackvars_to_entry_block blk_arr entry_pt_ref regset =
+let add_stackvars_to_entry_block blk_arr entry_pt_ref slotmap =
   let code = blk_arr.(entry_pt_ref).Block.code in
-  let code' = IrPhiPlacement.R.fold
-    (fun stackvar code ->
-      CS.cons (C.Set (C.Reg stackvar,
+  let code' = BatIMap.fold_range
+    (fun lo hi slot code ->
+      (* FIXME: Create the right type of slot!  *)
+      CS.cons (C.Set (C.Reg (CT.Stack lo),
 		      C.Nullary (Irtypes.Declaration Ctype.C_int))) code)
-    regset
+    slotmap
     code in
   blk_arr.(entry_pt_ref).Block.code <- code'
 
@@ -429,7 +437,9 @@ let decompile_sym binf sym =
   Dwptrtracking.dump_offsetmap_blkarr blkarr_om;
   let blk_arr = Dwptrtracking.remove_offsetmap_from_blkarr blkarr_om in
   Log.printf 2 "--- SSA conversion (2) ---\n";
+  add_stackvars_to_entry_block blk_arr entry_point_ref slotmap;
   let regset2 = IrPhiPlacement.place blk_arr in
+  dump_blockarr blk_arr;
   IrPhiPlacement.rename blk_arr 0 regset2;
   dump_blockarr blk_arr;
   Log.printf 2 "--- gather info (2) ---\n";

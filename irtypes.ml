@@ -26,7 +26,8 @@ type ir_unop =
   | Status_vc
   | Status_vs
   | Address_of
-  | Aggr_member of Ctype.ctype * aggr_member_id
+  | Aggr_member of string
+  | Deref
   | Uxtb
   | Sxtb
   | Uxth
@@ -52,11 +53,6 @@ type ir_unop =
    Store (Word, Unop (Aggr_member (Aggr_leaf "y"), SSAReg foo), src)
 *)
 
-and aggr_member_id =
-    Aggr_leaf of string
-  | Aggr_sub of string * aggr_member_id
-  | Aggr_deref of aggr_member_id
-
 type ir_binop =
     Add
   | Sub
@@ -81,6 +77,7 @@ type ir_binop =
   | Vcmpe
   | Div
   | Aggr_return
+  | Array_element
 
 type ir_triop =
     Adc

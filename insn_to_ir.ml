@@ -814,8 +814,11 @@ let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =
 			  bseq_cons
   | Shifted (opc, shift) ->
       convert_shift binf inforec addr insn ilist opc shift blk_id bseq bseq_cons
+  | Rsc | Teq | Umaal | Mls | Umull | Umlal | Smull | Smlal | Bfc | Vmov_r2d_lo
+  | Vmov_r2d_hi | Vmov_d2r_lo | Vmov_d2r_hi | Vmsr ->
+      append (C.Nullary Irtypes.Untranslated)
   | BAD -> append (C.Nullary Irtypes.Untranslated)
-  | x -> raise (Unsupported_opcode x)
+  (*| x -> raise (Unsupported_opcode x) *)
 
 and convert_conditional binf inforec addr cond insn ilist blk_id bseq bseq_cons =
   let cond_passed = create_blkref () in
@@ -887,7 +890,7 @@ exception Non_aggregate
    want the innermost member.  If we know the type of the context (e.g. a
    function argument), we might be able to do better.  *)
 
-let rec resolve_aggregate_access typ offset ctypes_for_cu =
+let rec resolve_aggregate_access typ base_expr offset ctypes_for_cu =
   Log.printf 4 "resolve_aggregate_access, type %s, offset %d\n"
     (Ctype.string_of_ctype typ) offset;
   match typ with
@@ -903,17 +906,27 @@ let rec resolve_aggregate_access typ offset ctypes_for_cu =
 		      && offset < mem.Ctype.offset + mem.Ctype.size)
 	  agmem in
       if Ctype.base_type_p found_mem.Ctype.typ then
-        Irtypes.Aggr_leaf found_mem.Ctype.name, found_mem.Ctype.typ
+        C.Unary (Irtypes.Aggr_member found_mem.Ctype.name, base_expr)
       else
-        let sub, inner_type =
-	  resolve_aggregate_access found_mem.Ctype.typ
+        let sub =
+	  resolve_aggregate_access found_mem.Ctype.typ base_expr
 	    (offset - found_mem.Ctype.offset) ctypes_for_cu in
-	Irtypes.Aggr_sub (found_mem.Ctype.name, sub), inner_type
-  | Ctype.C_pointer ptt ->
-      let deref, inner = resolve_aggregate_access ptt offset ctypes_for_cu in
-      Irtypes.Aggr_deref deref, inner
+	C.Unary (Irtypes.Aggr_member found_mem.Ctype.name, sub)
+  | Ctype.C_pointer ptt -> base_expr
+  | Ctype.C_array (arrsz, memtype) ->
+      let memsize = Ctype.type_size ctypes_for_cu memtype in
+      if offset mod memsize == 0 then
+        let arr_offset = offset / memsize in
+	C.Binary (Irtypes.Array_element, base_expr,
+		  C.Immed (Int32.of_int arr_offset))
+      else
+        failwith "offset not at multiple of array member size"
   | Ctype.C_typedef typename ->
       let targ = Hashtbl.find ctypes_for_cu.Ctype.ct_typedefs typename in
-      resolve_aggregate_access targ offset ctypes_for_cu
+      resolve_aggregate_access targ base_expr offset ctypes_for_cu
+  | Ctype.C_typetag typename ->
+      let targ = Hashtbl.find ctypes_for_cu.Ctype.ct_typetags typename in
+      resolve_aggregate_access targ base_expr offset ctypes_for_cu
   | _ ->
+      Log.printf 2 "Unhandled type: %s\n" (Ctype.string_of_ctype typ);
       raise Non_aggregate

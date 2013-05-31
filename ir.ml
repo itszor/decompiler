@@ -52,12 +52,7 @@ module IrCT =
 	(Ctype.string_of_ctype ct)
     | Declaration ct -> Printf.sprintf "declaration(%s)"
 	(Ctype.string_of_ctype ct)
-    
-    let rec string_of_member_id = function
-      Aggr_leaf x -> x
-    | Aggr_sub (x, subid) -> x ^ "." ^ (string_of_member_id subid)
-    | Aggr_deref x -> "(*" ^ (string_of_member_id x) ^ ")"
-    
+        
     let string_of_unop = function
       Not -> "not"
     | Status_eq -> "status_eq"
@@ -90,9 +85,7 @@ module IrCT =
     | Vneg -> "vneg"
     | Vabs -> "vabs"
     | Vsqrt -> "vsqrt"
-    | Aggr_member (typ, agr) ->
-	Printf.sprintf "aggregate_member.%s (%s)" (string_of_member_id agr)
-	  (Ctype.string_of_ctype typ)
+    | Aggr_member agr -> Printf.sprintf "aggregate_member.%s" agr
     | Dreg_hipart -> "dreg_hipart"
     | Dreg_lopart -> "dreg_lopart"
 
@@ -120,6 +113,7 @@ module IrCT =
     | Vcmpe -> "vcmpe"
     | Div -> "div"
     | Aggr_return -> "aggr_return"
+    | Array_element -> "[]"
 
     let string_of_triop = function
       Adc -> "adc"
