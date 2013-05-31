@@ -43,7 +43,7 @@ TODO list for decompiler
 
 * Support holding struct values in registers -- mostly for argument passing, where we can't get away without it.
 
-* Minipool resolution and lookup of symbols for constant pointers should be split into separate passes, so constants constructed from code can be turned into symbol references.
+* Minipool resolution and lookup of symbols for constant pointers should be split into separate passes, so constants constructed from code can be turned into symbol references. Minipool resolution also might want to come after the 2nd SSA conversion pass.
 
 * Type reconstruction needs to be fixed.
 
@@ -75,10 +75,10 @@ TODO list for decompiler
 
   - machine registers and spill slots/local variables can both be treated as "registers". A kind of register allocation can then be done on those registers to assign them to variables. Coalescing of copies can be done iff types of the registers are compatible. Doing this should help to cut down the number of variables emitted in target code.
 
-* Tweak Locations.location type? And/or add simple way of getting stack address (at insn address) for a variable.
+* Tweak Locations.location type? And/or add simple way of getting stack address (at insn address) for a variable [did the latter, former still pending].
 
 * Tsk, coverage.ml is broken, needs fixing. [done]
 
-* Remove With_id for IR, replace Parallel with Parallel_set (maybe).  Use a code other than Set for non-register sets? (Only cleanups.)
+* Remove With_id for IR [done], replace Parallel with Parallel_set (maybe).  Use a code other than Set for non-register sets? (Only cleanups.)
 
-* Robustify, remove FAILs in glsl.sh run.
+* Robustify, remove FAILs in glsl.sh run. [done, probably with caveats]
