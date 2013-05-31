@@ -23,16 +23,16 @@ let track_pointer defs use =
       let dinf = Hashtbl.find defs use in
       match dinf.src with
 	C.SSAReg (d, dn) -> (dinf.src, offset) :: track (d, dn) offset
-      | C.Binary (Irtypes.Add, (C.SSAReg (d, dn) as reg), C.Immed imm) ->
+      | C.Binary (CT.Add, (C.SSAReg (d, dn) as reg), C.Immed imm) ->
           let offset' = Int32.add offset imm in
 	  (reg, offset') :: track (d, dn) offset'
-      | C.Binary (Irtypes.Sub, (C.SSAReg (d, dn) as reg), C.Immed imm) ->
+      | C.Binary (CT.Sub, (C.SSAReg (d, dn) as reg), C.Immed imm) ->
           let offset' = Int32.sub offset imm in
 	  (reg, offset') :: track (d, dn) offset'
-      | C.Nullary Irtypes.Caller_saved
-      | C.Nullary Irtypes.Special
-      | C.Nullary Irtypes.Incoming_sp
-      (*| C.Nullary (Irtypes.Arg_in _)*)
+      | C.Nullary CT.Caller_saved
+      | C.Nullary CT.Special
+      | C.Nullary CT.Incoming_sp
+      (*| C.Nullary (CT.Arg_in _)*)
       | C.Entity CT.Arg_out
       | C.Phi _
       | C.Load _
@@ -69,7 +69,7 @@ let find_pointer_cfa_offset_equiv defs ptr_reg offset =
       List.find
 	(fun (src, _) ->
 	  match src with
-	    C.Nullary Irtypes.Incoming_sp -> true
+	    C.Nullary CT.Incoming_sp -> true
 	  | _ -> false)
 	def_chain in
     let cfa_offset = Int32.add def_offset offset in
@@ -89,9 +89,9 @@ let cfa_offset addr defs =
   match addr with
     (C.SSAReg _ | C.Reg _ as ptr_reg) ->
       find_pointer_cfa_offset_equiv defs ptr_reg 0l
-  | C.Binary (Irtypes.Add, (C.SSAReg _ | C.Reg _ as base), C.Immed imm) ->
+  | C.Binary (CT.Add, (C.SSAReg _ | C.Reg _ as base), C.Immed imm) ->
       find_pointer_cfa_offset_equiv defs base imm
-  | C.Binary (Irtypes.Sub, (C.SSAReg _ | C.Reg _ as base), C.Immed imm) ->
+  | C.Binary (CT.Sub, (C.SSAReg _ | C.Reg _ as base), C.Immed imm) ->
       find_pointer_cfa_offset_equiv defs base (Int32.neg imm)
   | _ -> raise Not_constant_cfa_offset
 
@@ -143,7 +143,7 @@ type stack_slot =
   {
     (* For each byte offset into the slot, store access type and the byte
        offset into that type being acccessed.  *)
-    slot_accesses : (Irtypes.ir_mem * int) list array;
+    slot_accesses : (CT.mem * int) list array;
     slot_size : int;
     mutable slot_live_at : BatISet.t
   }
@@ -306,7 +306,7 @@ let find_def_loops defs =
     (fun def info ->
       match info.src with
         C.SSAReg sreg -> Dgraph.add_edge def sreg graph
-      | C.Binary ((Irtypes.Add | Irtypes.Sub), C.SSAReg reg, C.Immed _) ->
+      | C.Binary ((CT.Add | CT.Sub), C.SSAReg reg, C.Immed _) ->
           Dgraph.add_edge def reg graph
       | C.Phi phiargs ->
           Array.iter
@@ -367,11 +367,11 @@ let track_all_stack_refs defs defloops =
     Hashtbl.iter
       (fun def info ->
         match info.src with
-          C.Nullary Irtypes.Incoming_sp ->
+          C.Nullary CT.Incoming_sp ->
 	    mark_offset def (Offset 0l)
 	| C.SSAReg sreg ->
 	    dup_mapped_offset def (fun x -> x) sreg
-	| C.Binary (Irtypes.Add, C.SSAReg reg, C.Immed imm) ->
+	| C.Binary (CT.Add, C.SSAReg reg, C.Immed imm) ->
             dup_mapped_offset def
 	      (function
 	        Offset x ->
@@ -383,7 +383,7 @@ let track_all_stack_refs defs defloops =
 	          Induction (st, ind)
 	      (* If this fails, we'll have to think of something smarter...  *)
 	      | _ -> failwith "induction") reg
-	| C.Binary (Irtypes.Sub, C.SSAReg reg, C.Immed imm) ->
+	| C.Binary (CT.Sub, C.SSAReg reg, C.Immed imm) ->
             dup_mapped_offset def
 	      (function
 	        Offset x ->
@@ -430,9 +430,9 @@ let cfa_offsets map_offsets_from_sreg addr =
   match addr with
     C.SSAReg sreg ->
       map_offsets_from_sreg (fun x -> x) sreg
-  | C.Binary (Irtypes.Add, C.SSAReg sreg, C.Immed imm) ->
+  | C.Binary (CT.Add, C.SSAReg sreg, C.Immed imm) ->
       map_offsets_from_sreg (fun offs -> Int32.add offs imm) sreg
-  | C.Binary (Irtypes.Sub, C.SSAReg sreg, C.Immed imm) ->
+  | C.Binary (CT.Sub, C.SSAReg sreg, C.Immed imm) ->
       map_offsets_from_sreg (fun offs -> Int32.sub offs imm) sreg
   | _ -> raise Not_constant_cfa_offset
 
@@ -524,7 +524,7 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs def_cfa_offsets =
 	  ignore (C.map
 	    (fun node ->
 	      match node with
-	        C.Store (Irtypes.Word, addr, src) ->
+	        C.Store (CT.Word, addr, src) ->
 	          begin try
 		    let addr_offsets =
 		      initial_cfa_offsets addr def_cfa_offsets in
@@ -568,8 +568,8 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs def_cfa_offsets =
 		  ignore (C.map
 		    (fun node ->
 		      match node with
-		        C.Nary (Irtypes.Fnargs, _) -> node
-		      | C.Load (Irtypes.Word, addr) -> C.Protect node
+		        C.Nary (CT.Fnargs, _) -> node
+		      | C.Load (CT.Word, addr) -> C.Protect node
 		      | _ ->
 			  ignore (maybe_addressable node idx seq_no
 				    insn_addr Escape_by_fncall node offsetmap);
@@ -587,7 +587,7 @@ let find_addressable blk_arr inforec vars ctypes_for_cu defs def_cfa_offsets =
   !addressable
 
 let virtual_exit_idx blk_arr =
-  Block.find (fun blk -> blk.Block.id = Irtypes.Virtual_exit) blk_arr
+  Block.find (fun blk -> blk.Block.id = BS.Virtual_exit) blk_arr
 
 let tabulate_addressable blk_arr addressable =
   let num_blocks = Array.length blk_arr in
@@ -715,8 +715,8 @@ let build_index_table arr =
 
 let beyond_stored_byte access_base store =
   match store with
-    C.Store (accsz, _, _) -> access_base + (Irtypes.access_bytesize accsz)
-  | C.Load (accsz, _) -> access_base + (Irtypes.access_bytesize accsz)
+    C.Store (accsz, _, _) -> access_base + (CT.access_bytesize accsz)
+  | C.Load (accsz, _) -> access_base + (CT.access_bytesize accsz)
   | _ -> failwith "beyond_stored_byte"
 
 let lo_opt lo new_lo =
@@ -1212,7 +1212,7 @@ let merge_anon_addressable blkarr_offsetmap sp_cov atht pruned_regions =
     blkarr_offsetmap
 
 let stack_mapping_for_offset_opt stmt_offsetmap offset accsz =
-  let bytesize = Irtypes.access_bytesize accsz in
+  let bytesize = CT.access_bytesize accsz in
   let rec observe first idx =
     if idx = bytesize then
       first
@@ -1257,7 +1257,7 @@ let stack_mapping_for_offset stmt_offsetmap offset accsz =
 let find_local_or_spill_slot_coverage addressable_tab def_cfa_offsets =
   let coverage = Coverage.create_coverage 0l 0xffffffffl in
   let mark_access accsz addr =
-    let bytesize = Int32.of_int (Irtypes.access_bytesize accsz) in
+    let bytesize = Int32.of_int (CT.access_bytesize accsz) in
     let offsets = adjusted_cfa_offsets addr def_cfa_offsets in
     List.iter
       (function
@@ -1313,8 +1313,8 @@ let create_slot coverage offset bytesize =
 
 let word_accesses_only stackslot =
   match stackslot.slot_accesses with
-    [| [Irtypes.Word, 0]; [Irtypes.Word, 1];
-       [Irtypes.Word, 2]; [Irtypes.Word, 3] |] -> true
+    [| [CT.Word, 0]; [CT.Word, 1];
+       [CT.Word, 2]; [CT.Word, 3] |] -> true
   | _ -> false
 
 exception Unbounded

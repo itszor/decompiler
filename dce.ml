@@ -25,7 +25,7 @@ let remove_dead_code_once blk_arr =
 		      Log.printf 3 "Deleting set: %s\n"
 			(C.string_of_code node);
 		      made_change := true;
-		      C.Nullary Irtypes.Nop
+		      C.Nullary CT.Nop
 		    end
 		  with Not_found ->
 	            node
@@ -51,7 +51,7 @@ let remove_dead_code blk_arr =
       let code' = CS.fold_right
         (fun stmt acc ->
 	  match stmt with
-	    C.Nullary Irtypes.Nop -> acc
+	    C.Nullary CT.Nop -> acc
 	  | _ -> CS.cons stmt acc)
 	blk.Block.code
 	CS.empty in

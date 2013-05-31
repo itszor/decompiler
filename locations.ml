@@ -32,11 +32,11 @@ let convert_dwarf_loc = function
   | `DW_OP_fbreg o -> C.Reg (CT.Stack o)
   | `DW_OP_regx r when r >= 64 && r < 96 -> C.Reg (CT.VFP_sreg (r - 64))
   | `DW_OP_breg (r, o) ->
-      C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg r),
+      C.Binary (CT.Add, C.Reg (CT.Hard_reg r),
 		C.Immed (Big_int.int32_of_big_int o))
   | `DW_OP_addr addr ->
       (* FIXME: Dubious.  *)
-      C.Unary (Irtypes.Address_of, C.Immed (Int64.to_int32 addr))
+      C.Unary (CT.Address_of, C.Immed (Int64.to_int32 addr))
   | _ -> failwith "Unknown loc expr"
 
 let convert_dwarf_loclist = function

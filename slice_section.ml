@@ -18,7 +18,7 @@ let slice blk_arr coverage sec_base sec_name fn_name =
         (fun stmt ->
 	  C.iter
 	    (function
-	      C.Binary (Irtypes.Add, C.Entity (CT.Section nm), C.Immed imm) ->
+	      C.Binary (CT.Add, C.Entity (CT.Section nm), C.Immed imm) ->
 	        if sec_name = nm then begin
 	          let addr = Int32.add sec_base imm in
 		  let anon_name = Printf.sprintf "%s$anon%lx" fn_name addr in

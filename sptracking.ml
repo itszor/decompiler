@@ -71,21 +71,21 @@ let sp_track blk_arr =
     C.Set (C.SSAReg (r, rn), src) when sp_reg src ->
       Hashtbl.add spht (r, rn) offset
     (* Copy stack pointer to another register, with +/- offset.  *)
-  | C.Set (C.SSAReg (r, rn) as dst, C.Binary (Irtypes.Add, base, C.Immed imm))
+  | C.Set (C.SSAReg (r, rn) as dst, C.Binary (CT.Add, base, C.Immed imm))
       when sp_reg base ->
       Log.printf 3 "adding offset %d for %s\n" (offset + Int32.to_int imm)
         (C.string_of_code dst);
       Hashtbl.add spht (r, rn) (offset + Int32.to_int imm)
-  | C.Set (C.SSAReg (r, rn), C.Binary (Irtypes.Sub, base, C.Immed imm))
+  | C.Set (C.SSAReg (r, rn), C.Binary (CT.Sub, base, C.Immed imm))
       when sp_reg base ->
       Hashtbl.add spht (r, rn) (offset - Int32.to_int imm)
     (* Copy register derived from stack pointer to another register, with an
        additional offset.  *)
-  | C.Set (C.SSAReg (r, rn), C.Binary (Irtypes.Add, base, C.Immed imm))
+  | C.Set (C.SSAReg (r, rn), C.Binary (CT.Add, base, C.Immed imm))
       when sp_derived base ->
       let offset' = derived_offset base offset in
       Hashtbl.add spht (r, rn) (offset' + Int32.to_int imm)
-  | C.Set (C.SSAReg (r, rn), C.Binary (Irtypes.Sub, base, C.Immed imm))
+  | C.Set (C.SSAReg (r, rn), C.Binary (CT.Sub, base, C.Immed imm))
       when sp_derived base ->
       let offset' = derived_offset base offset in
       Hashtbl.add spht (r, rn) (offset' - Int32.to_int imm)
@@ -125,26 +125,26 @@ let sp_track blk_arr =
 	    Coverage.add_range cov (Coverage.Half_open (off, ia));
 	    off
 	  (* Add/subtract the real stack pointer. *)
-	| C.Set (dst, C.Binary (Irtypes.Add, src, C.Immed imm))
+	| C.Set (dst, C.Binary (CT.Add, src, C.Immed imm))
 	    when sp_reg dst && sp_reg src ->
 	    off + (Int32.to_int imm)
-	| C.Set (dst, C.Binary (Irtypes.Sub, src, C.Immed imm))
+	| C.Set (dst, C.Binary (CT.Sub, src, C.Immed imm))
 	    when sp_reg dst && sp_reg src ->
 	    off - (Int32.to_int imm)
-	| C.Set (dst, C.Nullary Irtypes.Special) ->
+	| C.Set (dst, C.Nullary CT.Special) ->
 	    (* Ignore this pseudo-insn.  *)
 	    off
 	  (* Copy another register to the stack pointer.  *)
 	| C.Set (dst, C.SSAReg (r, rn)) when sp_reg dst ->
 	    underive_sp insn r rn off
-	| C.Set (dst, C.Binary (Irtypes.Add, C.SSAReg (r, rn), C.Immed i))
+	| C.Set (dst, C.Binary (CT.Add, C.SSAReg (r, rn), C.Immed i))
 	    when sp_reg dst ->
 	    underive_sp insn r rn (off + Int32.to_int i)
-	| C.Set (dst, C.Binary (Irtypes.Sub, C.SSAReg (r, rn), C.Immed i))
+	| C.Set (dst, C.Binary (CT.Sub, C.SSAReg (r, rn), C.Immed i))
 	    when sp_reg dst ->
 	    underive_sp insn r rn (off - Int32.to_int i)
 	  (* Ignore set from incoming SP...  *)
-	| C.Set (_, C.Nullary Irtypes.Incoming_sp) -> off
+	| C.Set (_, C.Nullary CT.Incoming_sp) -> off
 	  (* Copy something else to the stack pointer.  *)
 	| C.Set (dst, _) when sp_reg dst ->
 	    Log.printf 3 "Unexpected write to sp in '%s'\n"

@@ -25,7 +25,7 @@ let resolve blk_arr rodata rodata_coverage =
         (fun stmt ->
 	  C.map
 	    (function
-	      C.Binary (Irtypes.Add,
+	      C.Binary (CT.Add,
 			C.Entity (CT.Section secnm), C.Immed offset) as x ->
 		begin try
 		  match secnm with

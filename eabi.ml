@@ -94,7 +94,7 @@ let eabi_return_loc ft ct_for_cu =
        do with just the size of the returned data: we need to add this to the
        stack map for the function, then resolve any accesses to the returned
        object.  *)
-    Some (In (C.Binary (Irtypes.Aggr_return, C.Reg (CT.Hard_reg 0),
+    Some (In (C.Binary (CT.Aggr_return, C.Reg (CT.Hard_reg 0),
 			C.Immed (Int32.of_int
 				  (Ctype.type_size ct_for_cu
 						   ft.Function.return)))))

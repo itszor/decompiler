@@ -13,8 +13,8 @@ let minipool_resolve elfbits ehdr shdr_arr symbols mapping_syms strtab
         (fun stmt ->
 	  match stmt with
 	    C.Set (C.SSAReg (rd, rdn),
-		   C.Load (Irtypes.Word,
-		     C.Binary (Irtypes.Add, C.Entity (CT.PC loc),
+		   C.Load (CT.Word,
+		     C.Binary (CT.Add, C.Entity (CT.PC loc),
 					    C.Immed imm))) as x ->
 	      Log.printf 3 "pc relative load: '%s'\n" (C.string_of_code x);
 	      let addr = Int32.add loc imm in
@@ -72,7 +72,7 @@ let minipool_resolve elfbits ehdr shdr_arr symbols mapping_syms strtab
 		       the code in the binary.  We can also make use of any
 		       symbols defined in the section, which helpfully also have
 		       sizes.  *)
-		    C.Binary (Irtypes.Add,
+		    C.Binary (CT.Add,
 			      C.Entity (CT.Section pointed_to_sec_name),
 			      C.Immed offset)
 		end else begin

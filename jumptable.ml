@@ -42,7 +42,7 @@ let blocklist_for_jumptable blockseq ht addr num =
   let blkrefs = ref [] in
   for i = num - 1 downto 0 do
     let addr' = Int32.add addr (Int32.of_int (i * 4)) in
-    let addr_ref = Irtypes.BlockAddr addr' in
+    let addr_ref = BS.BlockAddr addr' in
     if not (Hashtbl.mem ht addr_ref) then
       raise Unrecognized_tablejump;
     blkrefs := addr_ref :: !blkrefs

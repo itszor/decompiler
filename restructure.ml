@@ -2,6 +2,7 @@ open Locations
 
 module CS = Ir.IrCS
 module CT = Ir.IrCT
+module BS = Ir.IrBS
 module C = Ir.Ir
 
 type nesting =
@@ -64,7 +65,7 @@ let restructure blk_arr ft ct_for_cu =
   let bbs_in_func = ref [] in
   for idx = Array.length blk_arr - 1 downto 0 do
     match blk_arr.(idx).Block.id with
-      Irtypes.Virtual_entry | Irtypes.Virtual_exit -> ()
+      BS.Virtual_entry | BS.Virtual_exit -> ()
     | _ -> bbs_in_func := Block_ref idx :: !bbs_in_func
   done;
   let arg_locals = convert_args ft ct_for_cu in

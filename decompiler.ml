@@ -116,25 +116,25 @@ module C = Ir.Ir
 
 let eabi_pre_prologue ft start_addr inforec real_entry_point ct_for_cu =
   let insns =
-    [(*C.Set (C.Reg (CT.Hard_reg 0), C.Nullary Irtypes.Arg_in);
-     C.Set (C.Reg (CT.Hard_reg 1), C.Nullary Irtypes.Arg_in);
-     C.Set (C.Reg (CT.Hard_reg 2), C.Nullary Irtypes.Arg_in);
-     C.Set (C.Reg (CT.Hard_reg 3), C.Nullary Irtypes.Arg_in);*)
-     C.Set (C.Reg (CT.Hard_reg 4), C.Nullary Irtypes.Caller_saved);
-     C.Set (C.Reg (CT.Hard_reg 5), C.Nullary Irtypes.Caller_saved);
-     C.Set (C.Reg (CT.Hard_reg 6), C.Nullary Irtypes.Caller_saved);
-     C.Set (C.Reg (CT.Hard_reg 7), C.Nullary Irtypes.Caller_saved);
-     C.Set (C.Reg (CT.Hard_reg 8), C.Nullary Irtypes.Caller_saved);
-     C.Set (C.Reg (CT.Hard_reg 9), C.Nullary Irtypes.Caller_saved);
-     C.Set (C.Reg (CT.Hard_reg 10), C.Nullary Irtypes.Caller_saved);
-     C.Set (C.Reg (CT.Hard_reg 11), C.Nullary Irtypes.Caller_saved);
-     C.Set (C.Reg (CT.Hard_reg 12), C.Nullary Irtypes.Special);
-     C.Set (C.Reg (CT.Hard_reg 13), C.Nullary Irtypes.Incoming_sp);
-     C.Set (C.Reg (CT.Hard_reg 14), C.Nullary Irtypes.Special);
-     C.Set (C.Reg (CT.Hard_reg 15), C.Nullary Irtypes.Special);
-     C.Set (C.Reg (CT.Status Irtypes.CondFlags), C.Nullary Irtypes.Special);
-     C.Set (C.Reg (CT.Status Irtypes.NZFlags), C.Nullary Irtypes.Special);
-     C.Set (C.Reg (CT.Status Irtypes.Carry), C.Nullary Irtypes.Special)] in
+    [(*C.Set (C.Reg (CT.Hard_reg 0), C.Nullary CT.Arg_in);
+     C.Set (C.Reg (CT.Hard_reg 1), C.Nullary CT.Arg_in);
+     C.Set (C.Reg (CT.Hard_reg 2), C.Nullary CT.Arg_in);
+     C.Set (C.Reg (CT.Hard_reg 3), C.Nullary CT.Arg_in);*)
+     C.Set (C.Reg (CT.Hard_reg 4), C.Nullary CT.Caller_saved);
+     C.Set (C.Reg (CT.Hard_reg 5), C.Nullary CT.Caller_saved);
+     C.Set (C.Reg (CT.Hard_reg 6), C.Nullary CT.Caller_saved);
+     C.Set (C.Reg (CT.Hard_reg 7), C.Nullary CT.Caller_saved);
+     C.Set (C.Reg (CT.Hard_reg 8), C.Nullary CT.Caller_saved);
+     C.Set (C.Reg (CT.Hard_reg 9), C.Nullary CT.Caller_saved);
+     C.Set (C.Reg (CT.Hard_reg 10), C.Nullary CT.Caller_saved);
+     C.Set (C.Reg (CT.Hard_reg 11), C.Nullary CT.Caller_saved);
+     C.Set (C.Reg (CT.Hard_reg 12), C.Nullary CT.Special);
+     C.Set (C.Reg (CT.Hard_reg 13), C.Nullary CT.Incoming_sp);
+     C.Set (C.Reg (CT.Hard_reg 14), C.Nullary CT.Special);
+     C.Set (C.Reg (CT.Hard_reg 15), C.Nullary CT.Special);
+     C.Set (C.Reg (CT.Status CT.CondFlags), C.Nullary CT.Special);
+     C.Set (C.Reg (CT.Status CT.NZFlags), C.Nullary CT.Special);
+     C.Set (C.Reg (CT.Status CT.Carry), C.Nullary CT.Special)] in
   let cs = CS.of_list insns in
   let cs =
     (*if false then
@@ -143,7 +143,7 @@ let eabi_pre_prologue ft start_addr inforec real_entry_point ct_for_cu =
     (*Insn_to_ir.add_real_incoming_args ft start_addr inforec cs*)
     Insn_to_ir.add_incoming_args ft cs ct_for_cu in
   let cs = CS.snoc cs (C.Control (C.Jump real_entry_point)) in
-  Block.make_block Irtypes.Virtual_entry cs
+  Block.make_block BS.Virtual_entry cs
 
 let eabi_post_epilogue ft =
   let insns =
@@ -168,7 +168,7 @@ let eabi_post_epilogue ft =
       Ctype.C_void -> insns
     | _ -> C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 0)) :: insns in
   let cs = CS.of_list insns' in
-  Block.make_block Irtypes.Virtual_exit cs
+  Block.make_block BS.Virtual_exit cs
 
 let cons_and_add_to_index blk bseq ht blockref idx =
   Hashtbl.add ht blockref !idx;
@@ -182,7 +182,7 @@ let bs_of_code_hash ft binf inforec code_hash start_addr entry_pt ct_for_cu =
     cons_and_add_to_index blk bseq ht blk_id idx in
   let blockseq = Hashtbl.fold
     (fun addr code bseq ->
-      let block_id = Irtypes.BlockAddr addr in
+      let block_id = BS.BlockAddr addr in
       Insn_to_ir.convert_block binf inforec block_id bseq bseq_cons addr code
 			       code_hash)
     code_hash
@@ -191,9 +191,9 @@ let bs_of_code_hash ft binf inforec code_hash start_addr entry_pt ct_for_cu =
     eabi_pre_prologue ft start_addr inforec entry_pt ct_for_cu
   and virtual_exit = eabi_post_epilogue ft in
   let with_entry_pt
-    = bseq_cons Irtypes.Virtual_entry pre_prologue_blk blockseq in
+    = bseq_cons BS.Virtual_entry pre_prologue_blk blockseq in
   let with_exit_pt
-    = bseq_cons Irtypes.Virtual_exit virtual_exit with_entry_pt in
+    = bseq_cons BS.Virtual_exit virtual_exit with_entry_pt in
   BS.rev with_exit_pt, ht
 
 let code_for_named_sym binf section symbols mapping_syms strtab symname =
@@ -272,7 +272,7 @@ let add_stackvars_to_entry_block blk_arr entry_pt_ref slotmap =
     (fun lo hi slot code ->
       (* FIXME: Create the right type of slot!  *)
       CS.cons (C.Set (C.Reg (CT.Stack lo),
-		      C.Nullary (Irtypes.Declaration Ctype.C_int))) code)
+		      C.Nullary (CT.Declaration Ctype.C_int))) code)
     slotmap
     code in
   blk_arr.(entry_pt_ref).Block.code <- code'
@@ -311,7 +311,7 @@ let decompile_sym binf sym =
   gcinfo "start of decompile_sym";
   let entry_point = sym.Elfreader.st_value in
   Log.printf 3 "entry point: %lx\n" entry_point;
-  let entry_point_ba = Irtypes.BlockAddr entry_point in
+  let entry_point_ba = BS.BlockAddr entry_point in
   let code = code_for_sym binf binf.text binf.mapping_syms sym in
   gcinfo "after code_for_sym";
   let cu_offset_for_sym = cu_offset_for_address binf entry_point in
@@ -343,8 +343,8 @@ let decompile_sym binf sym =
   gcinfo "after jump table repair";
   dump_blockseq blockseq;
   Log.printf 2 "--- build DFS graph ---\n";
-  IrDfs.pred_succ ~whole_program:false blockseq ht Irtypes.Virtual_exit;
-  IrDfs.dfs blockseq ht Irtypes.Virtual_entry;
+  IrDfs.pred_succ ~whole_program:false blockseq ht BS.Virtual_exit;
+  IrDfs.dfs blockseq ht BS.Virtual_entry;
   let blockseq = IrDfs.remove_unreachable blockseq in
   let blk_arr = IrDfs.blockseq_to_dfs_array blockseq in
   gcinfo "after DFS";
@@ -521,7 +521,7 @@ type converted_cu =
     cu_name : string;
     fn_name : string;
     fn_type : Function.function_info;
-    cu_blkarr : (Irtypes.ir_blockref, C.code CS.t) Block.block array;
+    cu_blkarr : (BS.ir_blockref, C.code CS.t) Block.block array;
     cu_vars : (Vartypes.reg_or_ssareg, Vartypes.vartype_info) Hashtbl.t
   }
 

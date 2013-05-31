@@ -6,18 +6,110 @@ open Irtypes
 (* Define types representing code.  *)
 module IrCT =
   struct
-    type nulop = ir_nulop
-    type unop = ir_unop
-    type binop = ir_binop
-    type triop = ir_triop
-    type extop = ir_extop
+    type nulop = Nop
+	       | Untranslated
+	       | Caller_saved
+	       (*| Arg_in of int*)
+	       | Undefined
+	       | Special
+	       | Incoming_sp
+	       | Incoming_aggr_return of Ctype.ctype
+	       | Declaration of Ctype.ctype
+
+    type unop = Not
+	      | Status_eq
+	      | Status_ne
+	      | Status_lt
+	      | Status_le
+	      | Status_gt
+	      | Status_ge
+	      | Status_ltu
+	      | Status_leu
+	      | Status_gtu
+	      | Status_geu
+	      | Status_cc
+	      | Status_cs
+	      | Status_vc
+	      | Status_vs
+	      | Address_of
+	      | Aggr_member of string
+	      | Deref
+	      | Uxtb
+	      | Sxtb
+	      | Uxth
+	      | Sxth
+	      | Vcvt_d2f
+	      | Vcvt_f2d
+	      | Vcvt_si2f
+	      | Vcvt_ui2f
+	      | Vcvt_f2si
+	      | Vcvt_f2ui
+	      | Vcvtr_f2si
+	      | Vcvtr_f2ui
+	      | Vneg
+	      | Vabs
+	      | Vsqrt
+	      | Dreg_hipart
+	      | Dreg_lopart
+
+    type binop = Add
+	       | Sub
+	       | And
+	       | Eor
+	       | Or
+	       | Mul
+	       | Cmp
+	       | Cmn
+	       | Tst
+	       | Lsl
+	       | Lsr
+	       | Asr
+	       | Ror
+	       | Rrx
+	       | Vadd
+	       | Vsub
+	       | Vmul
+	       | Vnmul
+	       | Vdiv
+	       | Vcmp
+	       | Vcmpe
+	       | Div
+	       | Aggr_return
+	       | Array_element
+
+    type triop = Adc
+	       | Sbc
+	       | Mla
+	       | Ubfx
+	       | Sbfx
+	       | Vmla
+	       | Vmls
+	       | Vnmla
+	       | Vnmls
+
+    type extop = Fnargs
+	       | Bfi
+
+    type ir_statusbits =
+	Carry      (* Just the carry flag.  *)
+      | CondFlags  (* All the condition flags: C, V, N & Z.  *)
+      | NZFlags    (* Just the N & Z flags.  *)
+      | VFPFlags   (* VFP status flags.  *)
+  
     type reg = Hard_reg of int
 	     | VFP_sreg of int
 	     | VFP_dreg of int
              | Stack of int
 	     | Temp of int
 	     | Status of ir_statusbits
-    type mem = ir_mem
+
+    type mem = U8
+	     | S8
+	     | U16
+	     | S16
+	     | Word
+	     | Dword
+
     type entity = PC of int32
 		| Symbol_addr of string * Elfreader.elf_sym
 		| Arg_var of string
@@ -29,13 +121,16 @@ module IrCT =
 		| Insn_address of int32
 		| String_constant of string
 		| Stack_var of string
+
     type abi = Branch_exchange
 	     | Unknown_abi
 	     | Plt_call
 	     | EABI
 
     type blockref = int
+
     type immed = int32
+
     type addr = Absolute of int32
 	      | Symbol of string * Elfreader.elf_sym
 	      | Finf_sym of string * Function.function_info * Elfreader.elf_sym
@@ -182,11 +277,23 @@ module IrCT =
     | Symbol (name, _) -> Printf.sprintf "symbol(%s)" name
     | Finf_sym (name, finf, _) ->
 	Printf.sprintf "finf-sym(%s,%s)" "fninf" name
+
+    let access_bytesize = function
+      U8 | S8 -> 1
+    | U16 | S16 -> 2
+    | Word -> 4
+    | Dword -> 8
   end
 
 module IrBS =
   struct
     include Ranlist
+
+    type ir_blockref = BlockAddr of int32
+		     | BlockNum of int
+		     | Virtual_entry
+		     | Virtual_exit
+
     type blockref = ir_blockref
     type reftable = (ir_blockref, int) Hashtbl.t
     

@@ -21,7 +21,7 @@ let decode_stub binf addr =
       Decode_arm.decode_insn (Bitstring.dropbits (i * 32) stub_bits) in
     stub_insns := Deque.snoc !stub_insns decoded
   done;
-  Insn_to_ir.convert_block binf inforec (Irtypes.BlockAddr addr) BS.empty
+  Insn_to_ir.convert_block binf inforec (BS.BlockAddr addr) BS.empty
 			   (fun _ blk bseq -> BS.cons blk bseq) addr
 			   !stub_insns (Hashtbl.create 0)
 
@@ -37,11 +37,11 @@ let decode_stub binf addr =
    subsequent compjump_ext.  *)
 
 let evaluate_insn r12_val = function
-    C.Set (C.Reg (CT.Hard_reg 12), C.Binary (Irtypes.Add,
+    C.Set (C.Reg (CT.Hard_reg 12), C.Binary (CT.Add,
 					     C.Entity (CT.PC pc_val),
 					     C.Immed imm)) ->
       Int32.add pc_val imm
-  | C.Set (C.Reg (CT.Hard_reg 12), C.Binary (Irtypes.Add,
+  | C.Set (C.Reg (CT.Hard_reg 12), C.Binary (CT.Add,
 					     C.Reg (CT.Hard_reg 12),
 					     C.Immed imm)) ->
       Int32.add r12_val imm

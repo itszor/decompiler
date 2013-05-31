@@ -97,13 +97,13 @@ let record_reg_info_for_id inforec reg addr info =
   Hashtbl.replace inforec.reg_info_for_id (reg, addr) info
 
 let rec info_of_mem_type ~load = function
-    Irtypes.Word -> if load then Word_loads else Word_stores
-  | Irtypes.U8 -> if load then Byte_loads else Byte_stores
-  | Irtypes.U16 -> if load then Halfword_loads else Halfword_stores
-  | Irtypes.S8 -> if load then Signed_byte_loads else Byte_stores
-  | Irtypes.S16 -> if load then Signed_halfword_loads else Halfword_stores
-  | Irtypes.Dword -> if load then Doubleword_loads else Doubleword_stores
-  (*| Irtypes.Block { Irtypes.access_size = k } -> info_of_mem_type ~load k*)
+    CT.Word -> if load then Word_loads else Word_stores
+  | CT.U8 -> if load then Byte_loads else Byte_stores
+  | CT.U16 -> if load then Halfword_loads else Halfword_stores
+  | CT.S8 -> if load then Signed_byte_loads else Byte_stores
+  | CT.S16 -> if load then Signed_halfword_loads else Halfword_stores
+  | CT.Dword -> if load then Doubleword_loads else Doubleword_stores
+  (*| CT.Block { CT.access_size = k } -> info_of_mem_type ~load k*)
 
 let basic_type impl_ht regid =
   let datas = Hashtbl.find_all impl_ht regid in
@@ -194,14 +194,14 @@ let gather_info blk_arr inforec =
         (fun insn ->
 	  match insn with
 	    C.Set (C.SSAReg (rd, rdn), C.Load (memtype,
-		     C.Binary (Irtypes.Add, C.SSAReg (rb, rbn), C.Immed _)))
+		     C.Binary (CT.Add, C.SSAReg (rb, rbn), C.Immed _)))
 	  | C.Set (C.SSAReg (rd, rdn), C.Load (memtype,
 		     C.SSAReg (rb, rbn))) ->
 	      (* Load [reg] and load [reg+immediate].  *)
 	      record_info ht (rd, rdn) (info_of_mem_type ~load:true memtype);
 	      record_info ht (rb, rbn) (Used_as_addr memtype);
 	      record_impl impl_ht (rb, rbn) Pointer
-	  | C.Store (memtype, C.Binary (Irtypes.Add,
+	  | C.Store (memtype, C.Binary (CT.Add,
 					C.SSAReg (rb, rbn), C.Immed _),
 		     C.SSAReg (rs, rsn))
 	  | C.Store (memtype, C.SSAReg (rb, rbn), C.SSAReg (rs, rsn)) ->
@@ -215,7 +215,7 @@ let gather_info blk_arr inforec =
 	        (One_of
 		  [Unary_imp ((rs, rsn), Int, Int);
 		   Unary_imp ((rs, rsn), Pointer, Pointer)])
-	  | C.Set (C.SSAReg (rd, rdn), C.Binary (Irtypes.Add,
+	  | C.Set (C.SSAReg (rd, rdn), C.Binary (CT.Add,
 		     C.SSAReg (ra, ran), C.SSAReg (rb, rbn))) ->
 	      (* Add, rd <- ra + rb.  *)
 	      record_impl impl_ht (rd, rdn)
@@ -223,7 +223,7 @@ let gather_info blk_arr inforec =
 		  [Binary_imp ((ra, ran), Int, (rb, rbn), Int, Int);
 		   Binary_imp ((ra, ran), Pointer, (rb, rbn), Int, Pointer);
 		   Binary_imp ((ra, ran), Int, (rb, rbn), Pointer, Pointer)])
-	  | C.Set (C.SSAReg (rd, rdn), C.Binary (Irtypes.Sub,
+	  | C.Set (C.SSAReg (rd, rdn), C.Binary (CT.Sub,
 		     C.SSAReg (ra, ran), C.SSAReg (rb, rbn))) ->
 	      (* Add, rd <- ra - rb.  *)
 	      record_impl impl_ht (rd, rdn)
@@ -232,7 +232,7 @@ let gather_info blk_arr inforec =
 		   Binary_imp ((ra, ran), Pointer, (rb, rbn), Int, Pointer);
 		   Binary_imp ((ra, ran), Int, (rb, rbn), Pointer, Pointer);
 		   Binary_imp ((ra, ran), Pointer, (rb, rbn), Pointer, Int)])
-	  | C.Set (C.SSAReg (rd, rdn), C.Binary ((Irtypes.Add | Irtypes.Sub),
+	  | C.Set (C.SSAReg (rd, rdn), C.Binary ((CT.Add | CT.Sub),
 		    C.SSAReg (ra, ran), C.Immed _)) ->
 	      (* Add or sub immediate, rd <- ra [+-] imm.  *)
 	      record_impl impl_ht (rd, rdn)
@@ -240,8 +240,8 @@ let gather_info blk_arr inforec =
 		  [Unary_imp ((ra, ran), Int, Int);
 		   Unary_imp ((ra, ran), Pointer, Pointer)])
 	  | C.Set (C.SSAReg (rd, rdn),
-		   C.Binary ((Irtypes.Mul | Irtypes.And | Irtypes.Eor
-			      | Irtypes.Or),
+		   C.Binary ((CT.Mul | CT.And | CT.Eor
+			      | CT.Or),
 			     C.SSAReg (ra, ran), C.SSAReg (rb, rbn))) ->
 	      (* If we're doing multiplies/logic ops, none of the operands
 	         involved is likely to be a pointer, but it's not impossible! 

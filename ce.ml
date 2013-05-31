@@ -2,6 +2,7 @@ open Defs
 
 module CS = Ir.IrCS
 module CT = Ir.IrCT
+module BS = Ir.IrBS
 module C = Ir.Ir
 
 exception Unsafe_for_deletion
@@ -13,8 +14,8 @@ let rec def_chain defs x =
       raise Unsafe_for_deletion
     else match dinf.src with
       C.SSAReg (d, dn) -> x :: def_chain defs (d, dn)
-    | C.Nullary Irtypes.Caller_saved
-    | C.Nullary Irtypes.Special -> [x]
+    | C.Nullary CT.Caller_saved
+    | C.Nullary CT.Special -> [x]
     | _ -> raise Unsafe_for_deletion
   with Not_found ->
     raise Unsafe_for_deletion
@@ -22,7 +23,7 @@ let rec def_chain defs x =
 let find_return_reg blk_arr ret_blk regno =
   List.fold_right
     (fun blk found ->
-      if blk.Block.id = Irtypes.Virtual_exit then
+      if blk.Block.id = BS.Virtual_exit then
 	CS.fold_right
           (fun stmt found' ->
 	    match stmt with
@@ -39,7 +40,7 @@ let find_return_reg blk_arr ret_blk regno =
 
 let fn_ret_out blk_arr returntype ret_blk =
   match returntype with
-    Ctype.C_void -> C.Nullary Irtypes.Nop
+    Ctype.C_void -> C.Nullary CT.Nop
   | _ ->
     begin match find_return_reg blk_arr ret_blk (CT.Hard_reg 0) with
       Some ssareg -> ssareg
@@ -95,7 +96,7 @@ let remove_prologue_and_epilogue blk_arr functype =
 		Log.printf 3 "Original src for possible return: %s\n"
 		  (C.string_of_code orig_src.src);
 		match orig_src.src with
-		  C.Nullary Irtypes.Special ->
+		  C.Nullary CT.Special ->
 		    let rval =
 		      fn_ret_out blk_arr functype.Function.return blk in
 		    let ret = C.Control (C.Return rval) in

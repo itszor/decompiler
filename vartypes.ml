@@ -47,22 +47,22 @@ let choose_type ct_for_cu ssaname inforec =
 	  match info with
 	    Typedb.Used_as_addr access ->
 	      begin match access with
-	        Irtypes.U8 ->
+	        CT.U8 ->
 		  Weak (Ctype.C_pointer Ctype.C_char) :: ptypes
-	      | Irtypes.S8 ->
+	      | CT.S8 ->
 		  Weak (Ctype.C_pointer (Ctype.C_signed Ctype.C_char))
 		    :: ptypes
-	      | Irtypes.U16 ->
+	      | CT.U16 ->
 	          Weak (Ctype.C_pointer (Ctype.C_unsigned Ctype.C_short))
 		    :: ptypes
-	      | Irtypes.S16 ->
+	      | CT.S16 ->
 		  Weak (Ctype.C_pointer Ctype.C_short) :: ptypes
-	      | Irtypes.Word ->
+	      | CT.Word ->
 	          Weak (Ctype.C_pointer Ctype.C_int)
 		    :: Weak (Ctype.C_pointer (Ctype.C_unsigned Ctype.C_int))
 		    :: Weak (Ctype.C_pointer (Ctype.C_pointer Ctype.C_void))
 		    :: ptypes
-	      | Irtypes.Dword ->
+	      | CT.Dword ->
 	          Weak (Ctype.C_pointer Ctype.C_longlong)
 		    :: Weak (Ctype.C_pointer
 			      (Ctype.C_unsigned Ctype.C_longlong))

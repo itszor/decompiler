@@ -57,19 +57,19 @@ module IrPhiPlacement = Phi.PhiPlacement (Ir.IrCT) (Ir.IrCS) (Ir.IrBS)
 let try_rewrite_access var_reg var_type aggr_access rewrite_as =
   match rewrite_as with
     `load (_, dst) -> (* FIXME: Verify access size!  *)
-      C.Set (dst, C.Unary (Irtypes.Aggr_member (var_type, aggr_access),
+      C.Set (dst, C.Unary (CT.Aggr_member (var_type, aggr_access),
 			   var_reg))
   | `store (_, src) -> (* FIXME: Verify access size!  *)
-      C.Set (C.Unary (Irtypes.Aggr_member (var_type, aggr_access),
+      C.Set (C.Unary (CT.Aggr_member (var_type, aggr_access),
 		      var_reg), src)
   | `ssa_reg ->
-      C.Unary (Irtypes.Address_of,
-	       C.Unary (Irtypes.Aggr_member (var_type, aggr_access), var_reg))
+      C.Unary (CT.Address_of,
+	       C.Unary (CT.Aggr_member (var_type, aggr_access), var_reg))
 
 let try_rewrite_var vars base offset stack_vars vartype_hash insn rewrite_as
 		    ctypes_for_cu =
   match base, vartype_hash with
-    C.Nullary Irtypes.Incoming_sp, _ ->
+    C.Nullary CT.Incoming_sp, _ ->
       begin try
 	let kvar, var_ofs = known_var vars offset in
 	Log.printf 3 "Offset %d looks like variable %s (+%d)\n"
@@ -80,9 +80,9 @@ let try_rewrite_var vars base offset stack_vars vartype_hash insn rewrite_as
 	  Insn_to_ir.resolve_aggregate_access kvar.Function.var_type var_ofs
 					      ctypes_for_cu in
 	(*let blk = {
-	  Irtypes.ctype = kvar.Function.var_type;
+	  CT.ctype = kvar.Function.var_type;
 	  block_size = kvar.Function.var_size;
-	  access_size = Irtypes.Word
+	  access_size = CT.Word
 	} in*)
       try_rewrite_access (C.Reg sv) kvar.Function.var_type aggr_access
 			 rewrite_as
@@ -134,7 +134,7 @@ let pointer_tracking blk_arr inforec dwarf_vars ?vartype_hash ctypes_for_cu =
 	      begin try
 		let offset = Ptrtracking.cfa_offset addr defs in
 		let new_stmt =
-		  try_rewrite_var dwarf_vars (C.Nullary Irtypes.Incoming_sp)
+		  try_rewrite_var dwarf_vars (C.Nullary CT.Incoming_sp)
 				  (Int32.to_int offset)
 				  stack_vars vartype_hash stmt
 				  (`load (accsz, dst)) ctypes_for_cu in
@@ -146,7 +146,7 @@ let pointer_tracking blk_arr inforec dwarf_vars ?vartype_hash ctypes_for_cu =
 	      begin try
 		let offset = Ptrtracking.cfa_offset addr defs in
 		let new_stmt =
-		  try_rewrite_var dwarf_vars (C.Nullary Irtypes.Incoming_sp)
+		  try_rewrite_var dwarf_vars (C.Nullary CT.Incoming_sp)
 				  (Int32.to_int offset)
 				  stack_vars vartype_hash stmt
 				  (`store (accsz, src)) ctypes_for_cu in
@@ -159,9 +159,9 @@ let pointer_tracking blk_arr inforec dwarf_vars ?vartype_hash ctypes_for_cu =
 	        (fun addr ->
 		  match addr with
 		    (C.SSAReg _ | C.Reg _ as base)
-		  | C.Binary (Irtypes.Add, (C.SSAReg _ | C.Reg _ as base),
+		  | C.Binary (CT.Add, (C.SSAReg _ | C.Reg _ as base),
 			      C.Immed _)
-		  | C.Binary (Irtypes.Sub, (C.SSAReg _ | C.Reg _ as base),
+		  | C.Binary (CT.Sub, (C.SSAReg _ | C.Reg _ as base),
 			      C.Immed _)
 		      when reg_or_ssareg_probably_pointer base ctypes_for_cu
 			     inforec vartype_hash ->
@@ -169,7 +169,7 @@ let pointer_tracking blk_arr inforec dwarf_vars ?vartype_hash ctypes_for_cu =
 			let offset = Ptrtracking.cfa_offset addr defs in
 			let new_var =
 			  try_rewrite_var dwarf_vars
-					  (C.Nullary Irtypes.Incoming_sp)
+					  (C.Nullary CT.Incoming_sp)
 					  (Int32.to_int offset) stack_vars
 					  vartype_hash addr `ssa_reg
 					  ctypes_for_cu in
@@ -276,19 +276,19 @@ let store defs accsz src offset offsetmap =
     (Typedb.string_of_ssa_reg (fst src) (snd src)) offset;
   match first_src with
     None -> ()
-  | Some ((C.Nullary (Irtypes.Special | Irtypes.Caller_saved) as fs), _) ->
+  | Some ((C.Nullary (CT.Special | CT.Caller_saved) as fs), _) ->
       Log.printf 4 "first src %s\n" (C.string_of_code fs);
       offsetmap := record_kind_for_offset !offsetmap (Int32.to_int offset)
-        (Irtypes.access_bytesize accsz) Saved_caller_reg_anon
+        (CT.access_bytesize accsz) Saved_caller_reg_anon
   | Some _ -> ()
 
 let incoming defs accsz offset offsetmap =
   offsetmap := record_kind_for_offset !offsetmap (Int32.to_int offset)
-    (Irtypes.access_bytesize accsz) Incoming_arg
+    (CT.access_bytesize accsz) Incoming_arg
 
 let outgoing_arg defs accsz offset offsetmap =
   offsetmap := record_kind_for_offset !offsetmap (Int32.to_int offset)
-    (Irtypes.access_bytesize accsz) Outgoing_arg_anon
+    (CT.access_bytesize accsz) Outgoing_arg_anon
 
 let unmark_outgoing_arg defs accsz offset offsetmap_ref =
   let rec scan bytes offset offsetmap =
@@ -302,7 +302,7 @@ let unmark_outgoing_arg defs accsz offset offsetmap_ref =
 	    | _ -> offsetmap
 	  with Not_found -> offsetmap in
 	scan (pred bytes) (succ offset) offsetmap' in
-  offsetmap_ref := scan (Irtypes.access_bytesize accsz) (Int32.to_int offset)
+  offsetmap_ref := scan (CT.access_bytesize accsz) (Int32.to_int offset)
 			!offsetmap_ref
 
 (*let mark_addressable addressable_ent offsetmap =

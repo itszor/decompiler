@@ -4,6 +4,7 @@ open Insn
 
 module CS = Ir.IrCS
 module CT = Ir.IrCT
+module BS = Ir.IrBS
 module C = Ir.Ir
 
 let pseudo_num = ref 0
@@ -19,7 +20,7 @@ let create_pseudo () =
 let blk_num = ref 0
 
 let create_blkref () =
-  let blk = Irtypes.BlockNum !blk_num in
+  let blk = BS.BlockNum !blk_num in
   incr blk_num;
   blk
 
@@ -29,7 +30,7 @@ let convert_operand addr op =
   | Hard_reg r -> C.Reg (CT.Hard_reg r)
   | VFP_sreg r -> C.Reg (CT.VFP_sreg r)
   | VFP_dreg r -> C.Reg (CT.VFP_dreg r)
-  | FPSCR -> C.Reg (CT.Status Irtypes.VFPFlags)
+  | FPSCR -> C.Reg (CT.Status CT.VFPFlags)
   | Immediate i -> C.Immed i
   | Converted already -> already
   | _ -> failwith "convert_operand"
@@ -47,15 +48,15 @@ let convert_mov addr insn =
     and op1 = convert_operand insn.read_operands.(0) in
     C.Set (dst, op1)
   end else
-    C.Nullary (Irtypes.Untranslated)
+    C.Nullary (CT.Untranslated)
 
 let convert_mvn addr insn =
   if insn.write_flags = [] && insn.read_flags = [] then begin
     let dst = convert_operand addr insn.write_operands.(0)
     and op1 = convert_operand addr insn.read_operands.(0) in
-    C.Set (dst, C.Unary (Irtypes.Not, op1))
+    C.Set (dst, C.Unary (CT.Not, op1))
   end else
-    C.Nullary (Irtypes.Untranslated)
+    C.Nullary (CT.Untranslated)
 
 let convert_binop addr opcode insn ilist =
   if insn.write_flags = [] && insn.read_flags = [] then begin
@@ -68,16 +69,16 @@ let convert_binop addr opcode insn ilist =
     else
       CS.snoc ilist (C.Set (dst, C.Binary (opcode, op1, op2)))
   end else
-    CS.snoc ilist (C.Nullary (Irtypes.Untranslated))
+    CS.snoc ilist (C.Nullary (CT.Untranslated))
 
 let convert_bic addr insn ilist =
   if insn.write_flags = [] && insn.read_flags = [] then begin
     let op2 = convert_operand addr insn.read_operands.(1) in
     let new_reads = Array.copy insn.read_operands in
-    new_reads.(1) <- Converted (C.Unary (Irtypes.Not, op2));
-    convert_binop addr Irtypes.And { insn with read_operands = new_reads } ilist
+    new_reads.(1) <- Converted (C.Unary (CT.Not, op2));
+    convert_binop addr CT.And { insn with read_operands = new_reads } ilist
   end else
-    CS.snoc ilist (C.Nullary (Irtypes.Untranslated))
+    CS.snoc ilist (C.Nullary (CT.Untranslated))
 
 let convert_rsb addr insn =
   let convert_operand = convert_operand addr in
@@ -85,9 +86,9 @@ let convert_rsb addr insn =
     let dst = convert_operand insn.write_operands.(0)
     and op1 = convert_operand insn.read_operands.(0)
     and op2 = convert_operand insn.read_operands.(1) in
-    C.Set (dst, C.Binary (Irtypes.Sub, op2, op1))
+    C.Set (dst, C.Binary (CT.Sub, op2, op1))
   end else
-    C.Nullary (Irtypes.Untranslated)
+    C.Nullary (CT.Untranslated)
 
 let convert_mla addr insn =
   if insn.write_flags = [] && insn.read_flags = [] then begin
@@ -95,9 +96,9 @@ let convert_mla addr insn =
     and op1 = convert_operand addr insn.read_operands.(0)
     and op2 = convert_operand addr insn.read_operands.(1)
     and op3 = convert_operand addr insn.read_operands.(2) in
-    C.Set (dst, C.Trinary (Irtypes.Mla, op1, op2, op3))
+    C.Set (dst, C.Trinary (CT.Mla, op1, op2, op3))
   end else
-    C.Nullary (Irtypes.Untranslated)
+    C.Nullary (CT.Untranslated)
 
 let convert_carry_in_op addr opcode insn =
   let convert_operand = convert_operand addr in
@@ -106,40 +107,40 @@ let convert_carry_in_op addr opcode insn =
     and op1 = convert_operand insn.read_operands.(0)
     and op2 = convert_operand insn.read_operands.(1) in
     C.Set (dst, C.Trinary (opcode, op1, op2,
-	   C.Reg (CT.Status Irtypes.Carry)))
+	   C.Reg (CT.Status CT.Carry)))
   end else
-    C.Nullary (Irtypes.Untranslated)
+    C.Nullary (CT.Untranslated)
 
 let make_shifted_operand shift operand amount =
   let op =
     match shift with
       Lsl ->
-	C.Binary (Irtypes.Lsl, operand, amount)
+	C.Binary (CT.Lsl, operand, amount)
     | Lsr ->
-	C.Binary (Irtypes.Lsr, operand, amount)
+	C.Binary (CT.Lsr, operand, amount)
     | Asr ->
-	C.Binary (Irtypes.Asr, operand, amount)
+	C.Binary (CT.Asr, operand, amount)
     | Ror ->
-	C.Binary (Irtypes.Ror, operand, amount)
+	C.Binary (CT.Ror, operand, amount)
     | Rrx ->
-	C.Binary (Irtypes.Rrx, operand, amount) in
+	C.Binary (CT.Rrx, operand, amount) in
   Converted op
 
 let convert_address addr ainf insn base index =
   match ainf.addr_mode with
     Base_plus_imm
-  | Base_plus_reg -> C.Binary (Irtypes.Add, base, index)
-  | Base_minus_reg -> C.Binary (Irtypes.Sub, base, index)
+  | Base_plus_reg -> C.Binary (CT.Add, base, index)
+  | Base_minus_reg -> C.Binary (CT.Sub, base, index)
   | Base_plus_shifted_reg shift ->
       let num_reads = Array.length insn.read_operands in
       let shift_amt = convert_operand addr insn.read_operands.(num_reads - 1) in
       let shifted_index = make_shifted_operand shift index shift_amt in
-      C.Binary (Irtypes.Add, base, convert_operand addr shifted_index)
+      C.Binary (CT.Add, base, convert_operand addr shifted_index)
   | Base_minus_shifted_reg shift ->
       let num_reads = Array.length insn.read_operands in
       let shift_amt = convert_operand addr insn.read_operands.(num_reads - 1) in
       let shifted_index = make_shifted_operand shift index shift_amt in
-      C.Binary (Irtypes.Sub, base, convert_operand addr shifted_index)
+      C.Binary (CT.Sub, base, convert_operand addr shifted_index)
 
 let convert_load addr ainf insn access ilist =
   let base = convert_operand addr insn.read_operands.(0)
@@ -200,10 +201,10 @@ let convert_ldm addr minf insn ilist =
   let jump_to_tmp = ref None in
   let reglist_start = if minf.mm_writeback then 1 else 0 in
   for i = reglist_start to Array.length insn.write_operands - 1 do
-    let addr' = C.Binary (Irtypes.Add, base_reg,
+    let addr' = C.Binary (CT.Add, base_reg,
 			  C.Immed (Int32.of_int !offset)) in
     let reg, loads_pc = convert_maybe_pc_operand insn.write_operands.(i) in
-    let load = C.Set (reg, C.Load (Irtypes.Word, addr')) in
+    let load = C.Set (reg, C.Load (CT.Word, addr')) in
     ilist_r := CS.snoc !ilist_r load;
     if minf.increment then
       offset := !offset + 4
@@ -216,7 +217,7 @@ let convert_ldm addr minf insn ilist =
     let loaded_regs = Array.length insn.write_operands - reglist_start in
     let offset = if minf.increment then loaded_regs * 4 else -loaded_regs * 4 in
     let writeback = C.Set (base_reg,
-			   C.Binary (Irtypes.Add, base_reg,
+			   C.Binary (CT.Add, base_reg,
 				     C.Immed (Int32.of_int offset))) in
     ilist_r := CS.snoc !ilist_r writeback
   end;
@@ -243,9 +244,9 @@ let convert_stm addr minf insn ilist =
   let base_reg = convert_operand addr insn.read_operands.(0) in
   let ilist_r = ref ilist in
   for i = 1 to Array.length insn.read_operands - 1 do
-    let addr' = C.Binary (Irtypes.Add, base_reg,
+    let addr' = C.Binary (CT.Add, base_reg,
 			  C.Immed (Int32.of_int !offset)) in
-    let store = C.Store (Irtypes.Word, addr',
+    let store = C.Store (CT.Word, addr',
 			 convert_operand addr insn.read_operands.(i)) in
     ilist_r := CS.snoc !ilist_r store;
     if minf.increment then
@@ -257,7 +258,7 @@ let convert_stm addr minf insn ilist =
     let stored_regs = Array.length insn.read_operands - 1 in
     let offset = if minf.increment then stored_regs * 4 else -stored_regs * 4 in
     let writeback = C.Set (base_reg,
-			   C.Binary (Irtypes.Add, base_reg,
+			   C.Binary (CT.Add, base_reg,
 				     C.Immed (Int32.of_int offset))) in
     ilist_r := CS.snoc !ilist_r writeback
   end;
@@ -273,21 +274,21 @@ let convert_bx addr insn =
 let convert_condition cond =
   let code =
     match cond with
-      Ne -> Irtypes.Status_ne
-    | Eq -> Irtypes.Status_eq
-    | Lt -> Irtypes.Status_lt
-    | Le -> Irtypes.Status_le
-    | Gt -> Irtypes.Status_gt
-    | Ge -> Irtypes.Status_ge
-    | Mi -> Irtypes.Status_ltu
-    | Pl -> Irtypes.Status_geu
-    | Hi -> Irtypes.Status_gtu
-    | Ls -> Irtypes.Status_leu
-    | Cc -> Irtypes.Status_cc
-    | Cs -> Irtypes.Status_cs
-    | Vc -> Irtypes.Status_vc
-    | Vs -> Irtypes.Status_vs in
-  C.Unary (code, C.Reg (CT.Status Irtypes.CondFlags))
+      Ne -> CT.Status_ne
+    | Eq -> CT.Status_eq
+    | Lt -> CT.Status_lt
+    | Le -> CT.Status_le
+    | Gt -> CT.Status_gt
+    | Ge -> CT.Status_ge
+    | Mi -> CT.Status_ltu
+    | Pl -> CT.Status_geu
+    | Hi -> CT.Status_gtu
+    | Ls -> CT.Status_leu
+    | Cc -> CT.Status_cc
+    | Cs -> CT.Status_cs
+    | Vc -> CT.Status_vc
+    | Vs -> CT.Status_vs in
+  C.Unary (code, C.Reg (CT.Status CT.CondFlags))
 
 (* This is entirely wrong!  *)
 
@@ -297,8 +298,8 @@ let convert_cond_bx cond addr insn =
     Hard_reg r ->
       let falseblock = Int32.add addr 4l in
       C.Control (C.Branch (convert_condition cond,
-			   Irtypes.BlockAddr falseblock,
-			   Irtypes.BlockAddr falseblock))
+			   BS.BlockAddr falseblock,
+			   BS.BlockAddr falseblock))
   | _ -> failwith "unexpected bx operand"
 
 let find_symbol symbols strtab addr =
@@ -313,8 +314,8 @@ let stackregs_to_loads c =
   C.map
     (function
 	C.Reg (CT.Stack x) ->
-	  C.Protect (C.Load (Irtypes.Word,
-			     C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
+	  C.Protect (C.Load (CT.Word,
+			     C.Binary (CT.Add, C.Reg (CT.Hard_reg 13),
 				       C.Immed (Int32.of_int x))))
       | x -> x)
     c
@@ -342,7 +343,7 @@ let fn_args callee_addr ft ct_for_cu =
       let aloc = Eabi.eabi_arg_loc ft i accum ct_for_cu in
       stackregs_to_loads (code_for_location aloc))
     ft.Function.args in
-  C.Nary (Irtypes.Fnargs, Array.to_list args)
+  C.Nary (CT.Fnargs, Array.to_list args)
 
 let add_incoming_args ft codeseq ct_for_cu =
   let accum = Eabi.make_arg_accum () in
@@ -355,11 +356,11 @@ let add_incoming_args ft codeseq ct_for_cu =
     (fun (cseq, argnum) argloc ->
       let insn =
         match argloc with
-	  (* FIXME: Irtypes.Word might not always be right. 
+	  (* FIXME: CT.Word might not always be right. 
 	     Bigger-than-word-sized arguments are not handled properly.  *)
 	  C.Reg (CT.Stack x) ->
-	    C.Store (Irtypes.Word,
-		     C.Binary (Irtypes.Add, C.Reg (CT.Hard_reg 13),
+	    C.Store (CT.Word,
+		     C.Binary (CT.Add, C.Reg (CT.Hard_reg 13),
 			       C.Immed (Int32.of_int x)),
 		     C.Entity (CT.Arg_var ft.Function.arg_names.(argnum)))
 	| _ -> C.Set (argloc,
@@ -370,7 +371,7 @@ let add_incoming_args ft codeseq ct_for_cu =
   if Eabi.hidden_struct_return ft ct_for_cu then
     CS.snoc cseq' (C.Set (C.Reg (CT.Hard_reg 0),
 			  C.Nullary
-			    (Irtypes.Incoming_aggr_return ft.Function.return)))
+			    (CT.Incoming_aggr_return ft.Function.return)))
   else
     cseq'
 
@@ -423,7 +424,7 @@ let try_function_call binf inforec dst_addr =
 	  ~filter:(fun sym -> not (Mapping.is_mapping_symbol sym))
 	  binf.Binary_info.symbols dst_addr in
 	let symname = Symbols.symbol_name sym binf.Binary_info.strtab in
-	CT.EABI, CT.Symbol (symname, sym), C.Nary (Irtypes.Fnargs, []), None
+	CT.EABI, CT.Symbol (symname, sym), C.Nary (CT.Fnargs, []), None
       end
   | ".plt" ->
       let sym, sym_name =
@@ -441,7 +442,7 @@ let try_function_call binf inforec dst_addr =
 	  fn_args dst_addr fn_inf ext_ctypes,
 	  fn_ret fn_inf ext_ctypes
       with Not_found ->
-        CT.Plt_call, CT.Symbol (sym_name, sym), C.Nary (Irtypes.Fnargs, []),
+        CT.Plt_call, CT.Symbol (sym_name, sym), C.Nary (CT.Fnargs, []),
 	None
       end
   | x -> raise (Calling x)
@@ -450,7 +451,7 @@ let convert_bl binf inforec addr insn =
   let dest = insn.read_operands.(0) in
   match dest with
     PC_relative i ->
-      let ret_addr = Irtypes.BlockAddr (Int32.add addr 4l) in
+      let ret_addr = BS.BlockAddr (Int32.add addr 4l) in
       let call_addr = Int32.add addr i in
       let abi, call_code, passes, returns =
         try_function_call binf inforec call_addr in
@@ -464,20 +465,20 @@ let convert_cmp cmptype addr insn =
   if insn.read_flags = [] && flags_match insn.write_flags [C;V;N;Z] then begin
     let op1 = convert_operand addr insn.read_operands.(0)
     and op2 = convert_operand addr insn.read_operands.(1) in
-    C.Set (C.Reg (CT.Status Irtypes.CondFlags),
+    C.Set (C.Reg (CT.Status CT.CondFlags),
 	   C.Binary (cmptype, op1, op2))
   end else
-    C.Nullary (Irtypes.Untranslated)
+    C.Nullary (CT.Untranslated)
 
 let convert_tst addr insn =
   let convert_operand = convert_operand addr in
   if insn.read_flags = [] && flags_match insn.write_flags [N;Z] then begin
     let op1 = convert_operand insn.read_operands.(0)
     and op2 = convert_operand insn.read_operands.(1) in
-    C.Set (C.Reg (CT.Status Irtypes.CondFlags),
-	   C.Binary (Irtypes.Tst, op1, op2))
+    C.Set (C.Reg (CT.Status CT.CondFlags),
+	   C.Binary (CT.Tst, op1, op2))
   end else
-    C.Nullary (Irtypes.Untranslated)
+    C.Nullary (CT.Untranslated)
 
 let convert_bfx xtype addr insn =
   let op1 = convert_operand addr insn.read_operands.(0)
@@ -492,7 +493,7 @@ let convert_bfi addr insn =
   and op3 = convert_operand addr insn.read_operands.(2)
   and op4 = convert_operand addr insn.read_operands.(3)
   and dst = convert_operand addr insn.write_operands.(0) in
-  C.Set (dst, C.Nary (Irtypes.Bfi, [op1; op2; op3; op4]))
+  C.Set (dst, C.Nary (CT.Bfi, [op1; op2; op3; op4]))
 
 (* FIXME: No rotates yet!  *)
 
@@ -516,7 +517,7 @@ let convert_rr2f addr insn ilist =
 			 convert_operand addr insn.read_operands.(1)) in
       let ilist' = CS.snoc ilist insn1 in
       CS.snoc ilist insn2
-  | _ -> CS.snoc ilist (C.Nullary Irtypes.Untranslated)
+  | _ -> CS.snoc ilist (C.Nullary CT.Untranslated)
 
 let convert_f2rr addr insn ilist =
   match insn.read_operands with
@@ -527,10 +528,10 @@ let convert_f2rr addr insn ilist =
 	   FIXME: Allow concat on the LHS instead?  *)
         C.Parallel
           [| C.Set (convert_operand addr insn.write_operands.(0),
-		    C.Unary (Irtypes.Dreg_lopart,
+		    C.Unary (CT.Dreg_lopart,
 			     convert_operand addr insn.read_operands.(0)));
 	     C.Set (convert_operand addr insn.write_operands.(1),
-		    C.Unary (Irtypes.Dreg_hipart,
+		    C.Unary (CT.Dreg_hipart,
 			     convert_operand addr insn.read_operands.(0))) |] in
       CS.snoc ilist insn
   | [| VFP_sreg rm1; VFP_sreg rm2 |] ->
@@ -540,7 +541,7 @@ let convert_f2rr addr insn ilist =
 			 convert_operand addr insn.read_operands.(1)) in
       let ilist' = CS.snoc ilist insn1 in
       CS.snoc ilist' insn2
-  | _ -> CS.snoc ilist (C.Nullary Irtypes.Untranslated)
+  | _ -> CS.snoc ilist (C.Nullary CT.Untranslated)
 
 let vfp_reg_size = function
     VFP_sreg _ -> 4
@@ -548,8 +549,8 @@ let vfp_reg_size = function
   | _ -> failwith "vfp_reg_size"
 
 let vfp_reg_xfer = function
-    VFP_sreg _ -> Irtypes.Word
-  | VFP_dreg _ -> Irtypes.Dword
+    VFP_sreg _ -> CT.Word
+  | VFP_dreg _ -> CT.Dword
   | _ -> failwith "vfp_reg_xfer"
 
 let convert_vstm addr minf insn ilist =
@@ -564,7 +565,7 @@ let convert_vstm addr minf insn ilist =
   let base_reg = convert_operand addr insn.read_operands.(0) in
   let ilist_r = ref ilist in
   for i = 1 to Array.length insn.read_operands - 1 do
-    let addr' = C.Binary (Irtypes.Add, base_reg,
+    let addr' = C.Binary (CT.Add, base_reg,
 			  C.Immed (Int32.of_int !offset)) in
     let store = C.Store (xfer, addr',
 			 convert_operand addr insn.read_operands.(i)) in
@@ -579,7 +580,7 @@ let convert_vstm addr minf insn ilist =
     let offset = if minf.increment then stored_regs * rsize
 		 else -stored_regs * rsize in
     let writeback = C.Set (base_reg,
-			   C.Binary (Irtypes.Add, base_reg,
+			   C.Binary (CT.Add, base_reg,
 				     C.Immed (Int32.of_int offset))) in
     ilist_r := CS.snoc !ilist_r writeback
   end;
@@ -598,7 +599,7 @@ let convert_vldm addr minf insn ilist =
   let base_reg = convert_operand addr insn.read_operands.(0) in
   let ilist_r = ref ilist in
   for i = reglist_start to Array.length insn.write_operands - 1 do
-    let addr' = C.Binary (Irtypes.Add, base_reg,
+    let addr' = C.Binary (CT.Add, base_reg,
 			  C.Immed (Int32.of_int !offset)) in
     let reg = convert_operand addr insn.write_operands.(i) in
     let load = C.Set (reg, C.Load (xfer, addr')) in
@@ -613,7 +614,7 @@ let convert_vldm addr minf insn ilist =
     let offset = if minf.increment then loaded_regs * rsize
 		 else -loaded_regs * rsize in
     let writeback = C.Set (base_reg,
-			   C.Binary (Irtypes.Add, base_reg,
+			   C.Binary (CT.Add, base_reg,
 				     C.Immed (Int32.of_int offset))) in
     ilist_r := CS.snoc !ilist_r writeback
   end;
@@ -624,14 +625,14 @@ let convert_vstr addr insn =
   and offset = convert_operand addr insn.read_operands.(2)
   and stored_reg = convert_operand addr insn.read_operands.(0) in
   let store_type = vfp_reg_xfer insn.read_operands.(0) in
-  C.Store (store_type, C.Binary (Irtypes.Add, base, offset), stored_reg)
+  C.Store (store_type, C.Binary (CT.Add, base, offset), stored_reg)
 
 let convert_vldr addr insn =
   let base = convert_operand addr insn.read_operands.(0)
   and offset = convert_operand addr insn.read_operands.(1)
   and loaded_reg = convert_operand addr insn.write_operands.(0) in
   let load_type = vfp_reg_xfer insn.write_operands.(0) in
-  C.Set (loaded_reg, C.Load (load_type, C.Binary (Irtypes.Add, base, offset)))
+  C.Set (loaded_reg, C.Load (load_type, C.Binary (CT.Add, base, offset)))
 
 let convert_vcvt ctype addr insn =
   let op = convert_operand addr insn.read_operands.(0)
@@ -647,7 +648,7 @@ let convert_vcmp ctype addr insn =
 let convert_vmrs addr insn =
   let op1 = convert_operand addr insn.read_operands.(0) in
   if flags_match insn.write_flags [C;V;N;Z] then
-    C.Set (C.Reg (CT.Status Irtypes.CondFlags), op1)
+    C.Set (C.Reg (CT.Status CT.CondFlags), op1)
   else
     let dst = convert_operand addr insn.write_operands.(0) in
     C.Set (dst, op1)
@@ -674,8 +675,8 @@ let convert_cbranch cond addr insn =
   let dest = insn.read_operands.(0) in
   match dest with
     PC_relative i ->
-      let trueblock = Irtypes.BlockAddr (Int32.add addr i)
-      and falseblock = Irtypes.BlockAddr (Int32.add addr 4l) in
+      let trueblock = BS.BlockAddr (Int32.add addr i)
+      and falseblock = BS.BlockAddr (Int32.add addr 4l) in
       C.Control (C.Branch (convert_condition cond, trueblock, falseblock))
   | _ -> failwith "unexpected b<cond> operand"
 
@@ -684,23 +685,23 @@ let convert_branch binf inforec addr insn =
   match dest with
     PC_relative i ->
       let dst_addr = Int32.add addr i in
-      let no_arg = C.Nullary Irtypes.Nop in
+      let no_arg = C.Nullary CT.Nop in
       begin try
         let abi, call_code, passes, _ =
           try_function_call binf inforec dst_addr in
 	C.Control (C.TailCall_ext (abi, call_code, passes))
       with Dest_not_function ->
-	C.Control (C.Jump (Irtypes.BlockAddr (Int32.add addr i)))
+	C.Control (C.Jump (BS.BlockAddr (Int32.add addr i)))
       end
   | _ -> failwith "unexpected b operand"
 
 exception Unsupported_opcode of Insn.opcode
 
 let name_for_block_id = function
-    Irtypes.BlockAddr addr -> Printf.sprintf "block_for_addr_0x%lx" addr
-  | Irtypes.BlockNum n -> Printf.sprintf "block_num_%d" n
-  | Irtypes.Virtual_entry -> "virtual_entry"
-  | Irtypes.Virtual_exit -> "virtual_exit"
+    BS.BlockAddr addr -> Printf.sprintf "block_for_addr_0x%lx" addr
+  | BS.BlockNum n -> Printf.sprintf "block_num_%d" n
+  | BS.Virtual_entry -> "virtual_entry"
+  | BS.Virtual_exit -> "virtual_exit"
 
 (* Start a new block, adding the insns for the previous block to the block
    sequence and adding it to the block index hashtbl.  If the insn list
@@ -739,39 +740,39 @@ let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =
   match insn.opcode with
     Mov -> append (convert_mov addr insn)
   | Mvn -> append (convert_mvn addr insn)
-  | Add -> same_blk (convert_binop addr Irtypes.Add insn ilist)
-  | Sub -> same_blk (convert_binop addr Irtypes.Sub insn ilist)
-  | And -> same_blk (convert_binop addr Irtypes.And insn ilist)
-  | Eor -> same_blk (convert_binop addr Irtypes.Eor insn ilist)
-  | Orr -> same_blk (convert_binop addr Irtypes.Or insn ilist)
+  | Add -> same_blk (convert_binop addr CT.Add insn ilist)
+  | Sub -> same_blk (convert_binop addr CT.Sub insn ilist)
+  | And -> same_blk (convert_binop addr CT.And insn ilist)
+  | Eor -> same_blk (convert_binop addr CT.Eor insn ilist)
+  | Orr -> same_blk (convert_binop addr CT.Or insn ilist)
   | Bic -> same_blk (convert_bic addr insn ilist)
-  | Mul -> same_blk (convert_binop addr Irtypes.Mul insn ilist)
+  | Mul -> same_blk (convert_binop addr CT.Mul insn ilist)
   | Mla -> append (convert_mla addr insn)
   | Rsb -> append (convert_rsb addr insn)
-  | Adc -> append (convert_carry_in_op addr Irtypes.Adc insn)
-  | Sbc -> append (convert_carry_in_op addr Irtypes.Sbc insn)
-  | Cmp -> append (convert_cmp Irtypes.Cmp addr insn)
-  | Cmn -> append (convert_cmp Irtypes.Cmn addr insn)
+  | Adc -> append (convert_carry_in_op addr CT.Adc insn)
+  | Sbc -> append (convert_carry_in_op addr CT.Sbc insn)
+  | Cmp -> append (convert_cmp CT.Cmp addr insn)
+  | Cmn -> append (convert_cmp CT.Cmn addr insn)
   | Tst -> append (convert_tst addr insn)
-  | Ldr ainf -> same_blk (convert_load addr ainf insn Irtypes.Word ilist)
-  | Ldrb ainf -> same_blk (convert_load addr ainf insn Irtypes.U8 ilist)
-  | Str ainf -> same_blk (convert_store addr ainf insn Irtypes.Word ilist)
-  | Strb ainf -> same_blk (convert_store addr ainf insn Irtypes.U8 ilist)
-  | Ldrh ainf -> same_blk (convert_load addr ainf insn Irtypes.U16 ilist)
-  | Strh ainf -> same_blk (convert_store addr ainf insn Irtypes.U16 ilist)
-  | Ldrsh ainf -> same_blk (convert_load addr ainf insn Irtypes.S16 ilist)
-  | Ldrsb ainf -> same_blk (convert_load addr ainf insn Irtypes.S8 ilist)
-  | Strd ainf -> same_blk (convert_store addr ainf insn Irtypes.Dword ilist)
-  | Ldrd ainf -> same_blk (convert_load addr ainf insn Irtypes.Dword ilist)
+  | Ldr ainf -> same_blk (convert_load addr ainf insn CT.Word ilist)
+  | Ldrb ainf -> same_blk (convert_load addr ainf insn CT.U8 ilist)
+  | Str ainf -> same_blk (convert_store addr ainf insn CT.Word ilist)
+  | Strb ainf -> same_blk (convert_store addr ainf insn CT.U8 ilist)
+  | Ldrh ainf -> same_blk (convert_load addr ainf insn CT.U16 ilist)
+  | Strh ainf -> same_blk (convert_store addr ainf insn CT.U16 ilist)
+  | Ldrsh ainf -> same_blk (convert_load addr ainf insn CT.S16 ilist)
+  | Ldrsb ainf -> same_blk (convert_load addr ainf insn CT.S8 ilist)
+  | Strd ainf -> same_blk (convert_store addr ainf insn CT.Dword ilist)
+  | Ldrd ainf -> same_blk (convert_load addr ainf insn CT.Dword ilist)
   | Ldm minf -> same_blk (convert_ldm addr minf insn ilist)
   | Stm minf -> same_blk (convert_stm addr minf insn ilist)
-  | Ubfx -> append (convert_bfx Irtypes.Ubfx addr insn)
-  | Sbfx -> append (convert_bfx Irtypes.Sbfx addr insn)
+  | Ubfx -> append (convert_bfx CT.Ubfx addr insn)
+  | Sbfx -> append (convert_bfx CT.Sbfx addr insn)
   | Bfi -> append (convert_bfi addr insn)
-  | Uxtb -> append (convert_xt Irtypes.Uxtb addr insn)
-  | Sxtb -> append (convert_xt Irtypes.Sxtb addr insn)
-  | Uxth -> append (convert_xt Irtypes.Uxth addr insn)
-  | Sxth -> append (convert_xt Irtypes.Sxth addr insn)
+  | Uxtb -> append (convert_xt CT.Uxtb addr insn)
+  | Sxtb -> append (convert_xt CT.Sxtb addr insn)
+  | Uxth -> append (convert_xt CT.Uxth addr insn)
+  | Sxth -> append (convert_xt CT.Sxth addr insn)
   | Vmov_rr2f -> same_blk (convert_rr2f addr insn ilist)
   | Vmov_f2rr -> same_blk (convert_f2rr addr insn ilist)
   | Vmov_f2r -> append (convert_mov addr insn)
@@ -782,29 +783,29 @@ let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =
   | Vstm minf -> same_blk (convert_vstm addr minf insn ilist)
   | Vldr -> append (convert_vldr addr insn)
   | Vstr -> append (convert_vstr addr insn)
-  | Vcvt_d2f -> append (convert_vcvt Irtypes.Vcvt_d2f addr insn)
-  | Vcvt_f2d -> append (convert_vcvt Irtypes.Vcvt_f2d addr insn)
-  | Vcvt_f2si -> append (convert_vcvt Irtypes.Vcvt_f2si addr insn)
-  | Vcvt_f2ui -> append (convert_vcvt Irtypes.Vcvt_f2ui addr insn)
-  | Vcvtr_f2si -> append (convert_vcvt Irtypes.Vcvtr_f2si addr insn)
-  | Vcvtr_f2ui -> append (convert_vcvt Irtypes.Vcvtr_f2ui addr insn)
-  | Vcvt_si2f -> append (convert_vcvt Irtypes.Vcvt_si2f addr insn)
-  | Vcvt_ui2f -> append (convert_vcvt Irtypes.Vcvt_ui2f addr insn)
-  | Vcmp -> append (convert_vcmp Irtypes.Vcmp addr insn)
-  | Vcmpe -> append (convert_vcmp Irtypes.Vcmpe addr insn)
+  | Vcvt_d2f -> append (convert_vcvt CT.Vcvt_d2f addr insn)
+  | Vcvt_f2d -> append (convert_vcvt CT.Vcvt_f2d addr insn)
+  | Vcvt_f2si -> append (convert_vcvt CT.Vcvt_f2si addr insn)
+  | Vcvt_f2ui -> append (convert_vcvt CT.Vcvt_f2ui addr insn)
+  | Vcvtr_f2si -> append (convert_vcvt CT.Vcvtr_f2si addr insn)
+  | Vcvtr_f2ui -> append (convert_vcvt CT.Vcvtr_f2ui addr insn)
+  | Vcvt_si2f -> append (convert_vcvt CT.Vcvt_si2f addr insn)
+  | Vcvt_ui2f -> append (convert_vcvt CT.Vcvt_ui2f addr insn)
+  | Vcmp -> append (convert_vcmp CT.Vcmp addr insn)
+  | Vcmpe -> append (convert_vcmp CT.Vcmpe addr insn)
   | Vmrs -> append (convert_vmrs addr insn)
-  | Vneg -> append (convert_vfp_unop Irtypes.Vneg addr insn)
-  | Vabs -> append (convert_vfp_unop Irtypes.Vabs addr insn)
-  | Vsqrt -> append (convert_vfp_unop Irtypes.Vsqrt addr insn)
-  | Vadd -> append (convert_vfp_binop Irtypes.Vadd addr insn)
-  | Vsub -> append (convert_vfp_binop Irtypes.Vsub addr insn)
-  | Vmul -> append (convert_vfp_binop Irtypes.Vmul addr insn)
-  | Vnmul -> append (convert_vfp_binop Irtypes.Vnmul addr insn)
-  | Vdiv -> append (convert_vfp_binop Irtypes.Vdiv addr insn)
-  | Vmla -> append (convert_vfp_triop Irtypes.Vmla addr insn)
-  | Vmls -> append (convert_vfp_triop Irtypes.Vmls addr insn)
-  | Vnmla -> append (convert_vfp_triop Irtypes.Vnmla addr insn)
-  | Vnmls -> append (convert_vfp_triop Irtypes.Vnmls addr insn)
+  | Vneg -> append (convert_vfp_unop CT.Vneg addr insn)
+  | Vabs -> append (convert_vfp_unop CT.Vabs addr insn)
+  | Vsqrt -> append (convert_vfp_unop CT.Vsqrt addr insn)
+  | Vadd -> append (convert_vfp_binop CT.Vadd addr insn)
+  | Vsub -> append (convert_vfp_binop CT.Vsub addr insn)
+  | Vmul -> append (convert_vfp_binop CT.Vmul addr insn)
+  | Vnmul -> append (convert_vfp_binop CT.Vnmul addr insn)
+  | Vdiv -> append (convert_vfp_binop CT.Vdiv addr insn)
+  | Vmla -> append (convert_vfp_triop CT.Vmla addr insn)
+  | Vmls -> append (convert_vfp_triop CT.Vmls addr insn)
+  | Vnmla -> append (convert_vfp_triop CT.Vnmla addr insn)
+  | Vnmls -> append (convert_vfp_triop CT.Vnmls addr insn)
   | Bx -> append (convert_bx addr insn)
   | Bl -> append (convert_bl binf inforec addr insn)
   | B -> append (convert_branch binf inforec addr insn)
@@ -816,8 +817,8 @@ let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =
       convert_shift binf inforec addr insn ilist opc shift blk_id bseq bseq_cons
   | Rsc | Teq | Umaal | Mls | Umull | Umlal | Smull | Smlal | Bfc | Vmov_r2d_lo
   | Vmov_r2d_hi | Vmov_d2r_lo | Vmov_d2r_hi | Vmsr ->
-      append (C.Nullary Irtypes.Untranslated)
-  | BAD -> append (C.Nullary Irtypes.Untranslated)
+      append (C.Nullary CT.Untranslated)
+  | BAD -> append (C.Nullary CT.Untranslated)
   (*| x -> raise (Unsupported_opcode x) *)
 
 and convert_conditional binf inforec addr cond insn ilist blk_id bseq bseq_cons =
@@ -853,7 +854,7 @@ and convert_shift binf inforec addr insn ilist opc shift blk_id bseq bseq_cons =
     convert_insn binf inforec addr { insn with opcode = opc;
       read_operands = new_reads } ilist blk_id bseq bseq_cons
   end else
-    CS.snoc ilist (C.Nullary (Irtypes.Untranslated)), blk_id, bseq
+    CS.snoc ilist (C.Nullary (CT.Untranslated)), blk_id, bseq
 
 
 let convert_block binf inforec block_id bseq bseq_cons addr insn_list
@@ -870,7 +871,7 @@ let convert_block binf inforec block_id bseq bseq_cons addr insn_list
     insn_list in
   let next_addr = Int32.add addr last_offset in
   if Hashtbl.mem code_hash next_addr then
-    finish_block blk_id' ~chain:(Irtypes.BlockAddr next_addr) code_deque
+    finish_block blk_id' ~chain:(BS.BlockAddr next_addr) code_deque
 		 bseq' bseq_cons
   else begin
     if C.finishes_with_control code_deque then
@@ -906,18 +907,18 @@ let rec resolve_aggregate_access typ base_expr offset ctypes_for_cu =
 		      && offset < mem.Ctype.offset + mem.Ctype.size)
 	  agmem in
       if Ctype.base_type_p found_mem.Ctype.typ then
-        C.Unary (Irtypes.Aggr_member found_mem.Ctype.name, base_expr)
+        C.Unary (CT.Aggr_member found_mem.Ctype.name, base_expr)
       else
         let sub =
 	  resolve_aggregate_access found_mem.Ctype.typ base_expr
 	    (offset - found_mem.Ctype.offset) ctypes_for_cu in
-	C.Unary (Irtypes.Aggr_member found_mem.Ctype.name, sub)
+	C.Unary (CT.Aggr_member found_mem.Ctype.name, sub)
   | Ctype.C_pointer ptt -> base_expr
   | Ctype.C_array (arrsz, memtype) ->
       let memsize = Ctype.type_size ctypes_for_cu memtype in
       if offset mod memsize == 0 then
         let arr_offset = offset / memsize in
-	C.Binary (Irtypes.Array_element, base_expr,
+	C.Binary (CT.Array_element, base_expr,
 		  C.Immed (Int32.of_int arr_offset))
       else
         failwith "offset not at multiple of array member size"

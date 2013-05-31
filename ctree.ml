@@ -4,6 +4,7 @@ open Cabs
 
 module CS = Ir.IrCS
 module CT = Ir.IrCT
+module BS = Ir.IrBS
 module C = Ir.Ir
 
 let convert_basetype ctyp =
@@ -112,7 +113,7 @@ let typesize_scale typesize op =
         C.Immed imm
       end
   | C.SSAReg regid ->
-      C.Binary (Irtypes.Div, op, C.Immed (Int32.of_int typesize))
+      C.Binary (CT.Div, op, C.Immed (Int32.of_int typesize))
   | _ ->
       Log.printf 1 "typesize_scale: unsupported: %s\n" (C.string_of_code op);
       failwith "unsupported"
@@ -146,7 +147,7 @@ let rec convert_expr ct_for_cu vars op =
       Cabs.UNARY (Cabs.ADDROF, Cabs.VARIABLE nm)
   | C.Call_ext (_, callee, args) ->
       convert_extcall ct_for_cu vars callee args
-  | C.Nullary Irtypes.Nop ->
+  | C.Nullary CT.Nop ->
       Cabs.NOTHING
   | _ ->
       Log.printf 1 "convert_expr: unsupported: %s\n" (C.string_of_code op);
@@ -160,30 +161,30 @@ and convert_binop ct_for_cu vars binop op1 op2 =
   let op1' = convert_expr ct_for_cu vars op1
   and op2' = convert_expr ct_for_cu vars op2 in
   match binop, tk1, tk2 with
-    Irtypes.Add, (`signed|`unsigned), (`signed|`unsigned) ->
+    CT.Add, (`signed|`unsigned), (`signed|`unsigned) ->
       Cabs.BINARY (Cabs.ADD, op1', op2')
-  | Irtypes.Add, `ptr, (`signed|`unsigned) ->
+  | CT.Add, `ptr, (`signed|`unsigned) ->
       let ptt = Ctype.pointed_to_type ct_for_cu ot1 in
       let typesize = Ctype.type_size ct_for_cu ptt in
       let mod_op2 = convert_expr ct_for_cu vars (typesize_scale typesize op2) in
       Cabs.BINARY (Cabs.ADD, op1', mod_op2)
-  | Irtypes.Add, (`signed|`unsigned), `ptr ->
+  | CT.Add, (`signed|`unsigned), `ptr ->
       Cabs.BINARY (Cabs.ADD, op1', op2')
-  | Irtypes.Sub, (`signed|`unsigned), (`signed|`unsigned) ->
+  | CT.Sub, (`signed|`unsigned), (`signed|`unsigned) ->
       Cabs.BINARY (Cabs.SUB, op1', op2')
-  | Irtypes.Sub, `ptr, (`signed|`unsigned) ->
+  | CT.Sub, `ptr, (`signed|`unsigned) ->
       let ptt = Ctype.pointed_to_type ct_for_cu ot1 in
       let typesize = Ctype.type_size ct_for_cu ptt in
       let mod_op2 = convert_expr ct_for_cu vars (typesize_scale typesize op2) in
       Cabs.BINARY (Cabs.SUB, op1', mod_op2)
-  | Irtypes.Sub, `ptr, `ptr ->
+  | CT.Sub, `ptr, `ptr ->
       Cabs.BINARY (Cabs.SUB, op1', op2')
-  | Irtypes.Lsl, (`signed|`unsigned), (`signed|`unsigned) ->
+  | CT.Lsl, (`signed|`unsigned), (`signed|`unsigned) ->
       Cabs.BINARY (Cabs.SHL, op1', op2')
-  | Irtypes.Lsr, (`signed|`unsigned), (`signed|`unsigned) ->
+  | CT.Lsr, (`signed|`unsigned), (`signed|`unsigned) ->
       let op1'' = Cabs.CAST (Cabs.INT (Cabs.NO_SIZE, Cabs.UNSIGNED), op1') in
       Cabs.BINARY (Cabs.SHR, op1'', op2')
-  | Irtypes.Asr, (`signed|`unsigned), (`signed|`unsigned) ->
+  | CT.Asr, (`signed|`unsigned), (`signed|`unsigned) ->
       let op1'' = Cabs.CAST (Cabs.INT (Cabs.NO_SIZE, Cabs.SIGNED), op1') in
       Cabs.BINARY (Cabs.SHR, op1'', op2')
   | _ ->
@@ -197,8 +198,8 @@ and convert_unop ct_for_cu vars unop op1 =
   let tk1 = Ctype.type_kind ct_for_cu ot1 in
   let op1' = convert_expr ct_for_cu vars op1 in
   match unop, tk1 with
-    Irtypes.Aggr_member ag, _ ->
-      Cabs.MEMBEROFPTR (op1', ag)
+    CT.Aggr_member ag, _ ->
+      Cabs.MEMBEROF (op1', ag)
   | _ ->
       Log.printf 1 "unsupported unop: %s (%s)\n"
 	(CT.string_of_unop unop) (Ctype.string_of_ctype ot1);
@@ -212,9 +213,9 @@ and convert_move ct_for_cu vars dst conv_rhs acc =
       
 and convert_args ct_for_cu vars args =
   match args with
-    C.Nary (Irtypes.Fnargs, arglist) ->
+    C.Nary (CT.Fnargs, arglist) ->
       List.map (fun arg -> convert_expr ct_for_cu vars arg) arglist
-  | C.Nullary Irtypes.Nop -> []
+  | C.Nullary CT.Nop -> []
   | _ -> failwith "unexpected"
 
 and convert_extcall ct_for_cu vars callee args =
@@ -321,8 +322,8 @@ let convert_blocks blk_arr ct_for_cu vars =
 	  else
 	    None in
 	match blk.Block.id with
-          Irtypes.Virtual_entry
-	| Irtypes.Virtual_exit -> succ idx, seq
+          BS.Virtual_entry
+	| BS.Virtual_exit -> succ idx, seq
 	| _ ->
 	    let seq' = convert_block blk fallthru ct_for_cu vars seq in
 	    succ idx, seq')
