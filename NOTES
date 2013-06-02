@@ -108,7 +108,7 @@ So, if a variable is used in both, it's probably going to be an integer. The inf
 
   i. We can check the ELF sections to make sure that the load comes from a read-only section. (This wouldn't be possible for completely unstructured input code!).
 
-  ii. Use the type database to see if the loaded value is used as a pointer. If it's only used as a scalar, turn the load into an immediate-move.
+  ii. Use the type database to see if the loaded value is used as a pointer. If it's only used as a scalar (caveat: locally), turn the load into an immediate-move.
   
   iii. If the loaded value is used as a pointer, scan the symbol table to see if we can find a symbol corresponding to the loaded address. If we can, replace the PC-relative load with a move from that symbol's address.
   

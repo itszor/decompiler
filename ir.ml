@@ -86,6 +86,7 @@ module IrCT =
 	       | Vmls
 	       | Vnmla
 	       | Vnmls
+	       | Var_slice
 
     type extop = Fnargs
 	       | Bfi
@@ -120,7 +121,6 @@ module IrCT =
 		| Frame_base_update of Dwarfreader.dwarf_op
 		| Insn_address of int32
 		| String_constant of string
-		| Stack_var of string
 
     type abi = Branch_exchange
 	     | Unknown_abi
@@ -220,6 +220,7 @@ module IrCT =
     | Vmls -> "vmls"
     | Vnmla -> "vnmla"
     | Vnmls -> "vnmls"
+    | Var_slice -> "var_slice"
     
     let string_of_extop = function
       Fnargs -> "fnargs"
@@ -262,7 +263,6 @@ module IrCT =
     | String_constant str ->
         Printf.sprintf "string_const(\"%s\")" (String.escaped str)
     | Insn_address x -> Printf.sprintf "[%.8lx]" x
-    | Stack_var nm -> Printf.sprintf "«%s»" nm
 
     let string_of_abi = function
       Branch_exchange -> "branch_exchange"
