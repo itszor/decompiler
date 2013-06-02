@@ -1441,7 +1441,7 @@ let merge_spill_slots_or_local_vars blkarr_offsetmap atht slotmap =
     blkarr_offsetmap
 
 let stackvar_access name typ offset ctypes_for_cu =
-  let base_expr =  C.Entity (CT.Local_var name) in
+  let base_expr = C.Entity (CT.Local_var name) in
   if Ctype.aggregate_type ctypes_for_cu typ then
     Insn_to_ir.resolve_aggregate_access typ base_expr offset ctypes_for_cu
   else if Ctype.base_type_p typ then

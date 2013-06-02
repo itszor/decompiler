@@ -344,6 +344,10 @@ let fn_args callee_addr ft ct_for_cu =
     ft.Function.args in
   C.Nary (CT.Fnargs, Array.to_list args)
 
+(* Add incoming register arguments to virtual entry block.  Use the "Var_slice"
+   ternary operator to carve out sections of multi-word aggregates passed by
+   value in registers.  *)
+
 let add_incoming_args ft codeseq ct_for_cu =
   let accum = Eabi.make_arg_accum () in
   let args = Array.mapi
@@ -353,18 +357,29 @@ let add_incoming_args ft codeseq ct_for_cu =
     ft.Function.args in
   let cseq', _ = Array.fold_left
     (fun (cseq, argnum) argloc ->
-      let insn =
+      let arg_var = C.Entity (CT.Arg_var ft.Function.arg_names.(argnum)) in
+      let cseq' =
         match argloc with
-	  (* FIXME: CT.Word might not always be right. 
-	     Bigger-than-word-sized arguments are not handled properly.  *)
-	  C.Reg (CT.Stack x) ->
-	    C.Store (CT.Word,
-		     C.Binary (CT.Add, C.Reg (CT.Hard_reg 13),
-			       C.Immed (Int32.of_int x)),
-		     C.Entity (CT.Arg_var ft.Function.arg_names.(argnum)))
-	| _ -> C.Set (argloc,
-		      C.Entity (CT.Arg_var ft.Function.arg_names.(argnum))) in
-      CS.snoc cseq insn, succ argnum)
+	  C.Reg (CT.Stack x) -> cseq
+	| C.Concat parts ->
+	    let cseq', _ = Array.fold_right
+	      (fun part (cseq'', word) ->
+	        begin match part with
+		  C.Reg (CT.Stack x) -> cseq''
+		| _ ->
+		    let set =
+		      C.Set (part, C.Ternary (CT.Var_slice, arg_var,
+			       C.Immed (Int32.of_int word), C.Immed 4l)) in
+		    CS.snoc cseq'' set
+		end, word + 4)
+	      parts
+	      (cseq, 0) in
+	    cseq'
+	| _ ->
+	    (* Maybe this can't/shouldn't happen?  *)
+	    let set = C.Set (argloc, arg_var) in
+	    CS.snoc cseq set in
+      cseq', succ argnum)
     (codeseq, 0)
     args in
   if Eabi.hidden_struct_return ft ct_for_cu then
