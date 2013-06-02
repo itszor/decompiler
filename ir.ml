@@ -1,5 +1,3 @@
-open Irtypes
-
 (* An intermediate representation, in the form required by the generified
    "code" modules.  *)
 
