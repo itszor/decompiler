@@ -30,7 +30,7 @@ and local_var =
     var_type : Ctype.ctype;
     var_initialiser : C.code option;
     var_origin : origin;
-    var_location : location list
+    var_location : pieces
   }
 
 and origin =
@@ -52,11 +52,10 @@ let convert_args ft ct_for_cu =
 	  var_type = typ;
 	  var_initialiser = None;
 	  var_origin = Incoming_arg;
-	  var_location = [Eabi.eabi_arg_loc ft i accum ct_for_cu]
+	  var_location = Eabi.eabi_arg_loc ft i accum ct_for_cu
 	} in
 	Log.printf 3 "arg %s, loc %s\n" local.var_name
-	  (String.concat " && "
-	    (List.map string_of_location local.var_location));
+	  (string_of_pieces local.var_location);
 	locals := local :: !locals
   done;
   !locals

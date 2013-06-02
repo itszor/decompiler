@@ -96,7 +96,7 @@ let convert_mla addr insn =
     and op1 = convert_operand addr insn.read_operands.(0)
     and op2 = convert_operand addr insn.read_operands.(1)
     and op3 = convert_operand addr insn.read_operands.(2) in
-    C.Set (dst, C.Trinary (CT.Mla, op1, op2, op3))
+    C.Set (dst, C.Ternary (CT.Mla, op1, op2, op3))
   end else
     C.Nullary (CT.Untranslated)
 
@@ -106,7 +106,7 @@ let convert_carry_in_op addr opcode insn =
     let dst = convert_operand insn.write_operands.(0)
     and op1 = convert_operand insn.read_operands.(0)
     and op2 = convert_operand insn.read_operands.(1) in
-    C.Set (dst, C.Trinary (opcode, op1, op2,
+    C.Set (dst, C.Ternary (opcode, op1, op2,
 	   C.Reg (CT.Status CT.Carry)))
   end else
     C.Nullary (CT.Untranslated)
@@ -325,16 +325,15 @@ let rec code_for_location loc =
     Locations.In x -> x
   | Locations.Parts partlist ->
       let sorted_parts =
-        List.sort (fun (a, _, _) (b, _, _) -> compare a b) partlist in
+        List.sort (fun (_, a, _) (_, b, _) -> compare a b) partlist in
       let rec build cursor parts =
         match parts with
 	  [] -> []
-	| (lo, size, code) :: remain ->
+	| (code, lo, size) :: remain ->
 	    assert (lo == cursor);
-	    (code_for_location code) :: build (lo + size) remain in
+	    code :: build (lo + size) remain in
       let codeparts = build 0 sorted_parts in
       C.Concat (Array.of_list (List.rev codeparts))
-  | Locations.Within_range _ -> failwith "unexpected within_range"
 
 let fn_args callee_addr ft ct_for_cu =
   let accum = Eabi.make_arg_accum () in
@@ -485,7 +484,7 @@ let convert_bfx xtype addr insn =
   and op2 = convert_operand addr insn.read_operands.(1)
   and op3 = convert_operand addr insn.read_operands.(2)
   and dst = convert_operand addr insn.write_operands.(0) in
-  C.Set (dst, C.Trinary (xtype, op1, op2, op3))
+  C.Set (dst, C.Ternary (xtype, op1, op2, op3))
 
 let convert_bfi addr insn =
   let op1 = convert_operand addr insn.read_operands.(0)
@@ -522,17 +521,17 @@ let convert_rr2f addr insn ilist =
 let convert_f2rr addr insn ilist =
   match insn.read_operands with
     [| VFP_dreg rm |] ->
+      let conv_dreg = convert_operand addr insn.read_operands.(0) in
       let insn =
         (* Leave this as a single instruction because we don't really want it
-	   to be split -- it most likely represents a single transfer.
-	   FIXME: Allow concat on the LHS instead?  *)
+	   to be split -- it most likely represents a single transfer.  *)
         C.Parallel
           [| C.Set (convert_operand addr insn.write_operands.(0),
-		    C.Unary (CT.Dreg_lopart,
-			     convert_operand addr insn.read_operands.(0)));
+		    C.Ternary (CT.Var_slice, conv_dreg, C.Immed 0l,
+			       C.Immed 4l));
 	     C.Set (convert_operand addr insn.write_operands.(1),
-		    C.Unary (CT.Dreg_hipart,
-			     convert_operand addr insn.read_operands.(0))) |] in
+		    C.Ternary (CT.Var_slice, conv_dreg, C.Immed 4l,
+			       C.Immed 4l)) |] in
       CS.snoc ilist insn
   | [| VFP_sreg rm1; VFP_sreg rm2 |] ->
       let insn1 = C.Set (convert_operand addr insn.write_operands.(0),
@@ -669,7 +668,7 @@ let convert_vfp_triop code addr insn =
   and op2 = convert_operand addr insn.read_operands.(1)
   and op3 = convert_operand addr insn.read_operands.(2)
   and dst = convert_operand addr insn.write_operands.(0) in
-  C.Set (dst, C.Trinary (code, op1, op2, op3))
+  C.Set (dst, C.Ternary (code, op1, op2, op3))
 
 let convert_cbranch cond addr insn =
   let dest = insn.read_operands.(0) in

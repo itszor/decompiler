@@ -91,7 +91,7 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
       | Store of CT.mem * code * code
       | Immed of CT.immed
       | Nary of CT.extop * code list
-      | Trinary of CT.triop * code * code * code
+      | Ternary of CT.triop * code * code * code
       | Binary of CT.binop * code * code
       | Unary of CT.unop * code
       | Nullary of CT.nulop
@@ -164,7 +164,7 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
     | Nary (eo, cl) ->
         str "%s (%s)" (CT.string_of_extop eo)
 	  (String.concat ", " (List.map string_of_code cl))
-    | Trinary (triop, a, b, c) ->
+    | Ternary (triop, a, b, c) ->
         str "%s (%s, %s, %s)" (CT.string_of_triop triop) (string_of_code a)
 	  (string_of_code b) (string_of_code c)
     | Binary (binop, a, b) ->
@@ -241,7 +241,7 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
 	    acc'
 	| Nary (_, clist) ->
 	    List.fold_right scan clist acc'
-	| Trinary (_, a, b, c) ->
+	| Ternary (_, a, b, c) ->
             let acc'' = scan c acc' in
 	    let acc''' = scan b acc'' in
 	    scan a acc'''
@@ -295,8 +295,8 @@ module Code (CT : CODETYPES) (CS : CODESEQ) (BS : BLOCKSEQ) =
 	    Store (mem, scan code, scan v)
 	| Nary (op, clist) ->
 	    Nary (op, List.map scan clist)
-	| Trinary (op, a, b, c) ->
-	    Trinary (op, scan a, scan b, scan c)
+	| Ternary (op, a, b, c) ->
+	    Ternary (op, scan a, scan b, scan c)
 	| Binary (op, a, b) ->
 	    Binary (op, scan a, scan b)
 	| Unary (op, a) ->

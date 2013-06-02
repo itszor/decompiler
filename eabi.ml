@@ -16,7 +16,7 @@ let in_hard_registers lo num =
   else begin
     let parts = ref [] in
     for i = 0 to num - 1 do
-      parts := ((i * 4), 4, In (C.Reg (CT.Hard_reg (lo + i)))) :: !parts
+      parts := (C.Reg (CT.Hard_reg (lo + i)), (i * 4), 4) :: !parts
     done;
     Parts (List.rev !parts)
   end
@@ -27,8 +27,8 @@ let on_stack bytes_in_regs offset num_words =
   else begin
     let parts = ref [] in
     for i = 0 to num_words - 1 do
-      parts := (bytes_in_regs + (i * 4), 4,
-		In (C.Reg (CT.Stack (offset + i * 4)))) :: !parts
+      parts := (C.Reg (CT.Stack (offset + i * 4)), bytes_in_regs + (i * 4), 4)
+	       :: !parts
     done;
     Parts (List.rev !parts)
   end
@@ -39,9 +39,9 @@ let partly_in_registers lo offset num_words =
   let reg_part = in_hard_registers lo in_regs
   and mem_part = on_stack (4 * in_regs) offset in_mem in
   match reg_part, mem_part with
-    In _, In _ -> Parts [(0, 4, reg_part); (4, 4, mem_part)]
-  | In _, Parts px -> Parts ((0, 4, reg_part) :: px)
-  | Parts px, In _ -> Parts (px @ [(4 * in_regs, 4, mem_part)])
+    In rp, In mp -> Parts [(rp, 0, 4); (mp, 4, 4)]
+  | In rp, Parts px -> Parts ((rp, 0, 4) :: px)
+  | Parts px, In mp -> Parts (px @ [mp, 4 * in_regs, 4])
   | Parts pr, Parts pm -> Parts (pr @ pm)
   | _ -> failwith "partly_in_registers"
 

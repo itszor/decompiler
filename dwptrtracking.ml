@@ -187,31 +187,23 @@ let pointer_tracking blk_arr inforec dwarf_vars ?vartype_hash ctypes_for_cu =
     blk_arr in
   blk_arr', !stack_vars *)
 
-let rec stack_address_within_var location_list insn_addr sp_offset var_size =
-  match insn_addr with
-    Some insn_addr' ->
-      List.fold_right
-        (fun location found ->
-	  match location with
-            Locations.Within_range (lo, hi, loc)
-	      when insn_addr' >= lo && insn_addr' < hi ->
-	      found || stack_address_within_var [loc] insn_addr sp_offset
-						var_size
-	  | Locations.Within_range (lo, hi, loc) ->
-	      (*Log.printf 3 "Offset %ld not in %s, %lx not in range %lx-%lx\n" 
-	        sp_offset (Location.string_of_location loc) insn_addr' lo hi;*)
-	      found
-	  | Locations.Parts _ -> failwith "unimplemented"
-	  | Locations.In code ->
-              begin match code with
-		C.Reg (CT.Stack o) ->
-		  found || (sp_offset >= Int32.of_int o
-			    && sp_offset < Int32.of_int (o + var_size))
-	      | _ -> found
-	      end)
-	location_list
-	false
-  | None -> false
+let rec stack_address_within_var location insn_addr sp_offset var_size =
+  match insn_addr, location with
+    Some insn_addr', Locations.Within_range ranges ->
+      List.exists
+	(fun (lo, hi, pieces) ->
+	  insn_addr' >= lo && insn_addr' < hi
+	  && stack_address_within_var (Locations.Everywhere pieces)
+				      insn_addr sp_offset var_size)
+	ranges
+  | _, Locations.Everywhere pieces ->
+      begin match pieces with
+	Locations.In (C.Reg (CT.Stack o)) ->
+	  sp_offset >= Int32.of_int o
+	  && sp_offset < Int32.of_int (o + var_size)
+      | _ -> false
+      end
+  | _, _ -> false
 
 let mark_addressable_vars blk_arr dwarf_vars addressable =
   List.iter
@@ -462,33 +454,35 @@ let merge_dwarf_vars blkarr_offsetmap dwarf_vars =
       Log.printf 3 "Merging dwarf var %s\n" dwvar.Function.var_name;
       let liveness = dwvar.Function.var_liveness in
       log_liveness liveness;
-      let locs =
+      let loc_opt =
         Locations.convert_dwarf_loclist_opt dwvar.Function.var_location in
+      begin match loc_opt with
+        Some loc ->
+	  Log.printf 3 "Location: %s\n" (Locations.string_of_location loc)
+      | None -> ()
+      end;
       Array.map
 	(fun blk ->
 	  let codeseq' = CS.fold_left
 	    (fun newseq (insn_addr, stmt, stmt_offsetmap) ->
 	      let om_ref = ref stmt_offsetmap in
-	      begin match insn_addr with
-		Some insn_addr ->
+	      begin match insn_addr, loc_opt with
+		Some insn_addr, Some loc ->
 		  if live_at_addr liveness insn_addr then begin
-		    List.iter
-		      (fun loc ->
-			let code_opt =
-			  Locations.valid_at_address insn_addr loc in
-			match code_opt with
-			  Some (C.Reg (CT.Stack o)) ->
-			    let typ =
-			      if dwvar.Function.var_addressable then
-				Addressable_local_var dwvar
-			      else
-				Local_var dwvar in
-			    om_ref := record_kind_for_offset !om_ref o
-					dwvar.Function.var_size typ
-			| _ -> ())
-		      locs
+		    let here_loc_opt =
+		      Locations.valid_at_address insn_addr loc in
+		    match here_loc_opt with
+		      Some (Locations.In (C.Reg (CT.Stack o))) ->
+			let typ =
+			  if dwvar.Function.var_addressable then
+			    Addressable_local_var dwvar
+			  else
+			    Local_var dwvar in
+			om_ref := record_kind_for_offset !om_ref o
+				    dwvar.Function.var_size typ
+		    | _ -> ()
 		  end
-	      | None -> ()
+	      | _, _ -> ()
 	      end;
 	      CS.snoc newseq (insn_addr, stmt, !om_ref))
 	    CS.empty

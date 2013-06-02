@@ -47,8 +47,6 @@ module IrCT =
 	      | Vneg
 	      | Vabs
 	      | Vsqrt
-	      | Dreg_hipart
-	      | Dreg_lopart
 
     type binop = Add
 	       | Sub
@@ -179,8 +177,6 @@ module IrCT =
     | Vabs -> "vabs"
     | Vsqrt -> "vsqrt"
     | Aggr_member agr -> Printf.sprintf "aggregate_member.%s" agr
-    | Dreg_hipart -> "dreg_hipart"
-    | Dreg_lopart -> "dreg_lopart"
 
     let string_of_binop = function
       Add -> "add"
