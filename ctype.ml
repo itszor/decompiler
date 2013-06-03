@@ -105,6 +105,19 @@ let rec aggregate_type ct_for_cu ctyp =
       aggregate_type ct_for_cu (Hashtbl.find ct_for_cu.ct_typetags tt)
   | _ -> false
 
+let rec aggregate_member_by_name ct_for_cu ctyp name =
+  match ctyp with
+    C_struct (_, aglist)
+  | C_union (_, aglist) ->
+      List.find (fun agmem -> agmem.name = name) aglist
+  | C_typedef td ->
+      aggregate_member_by_name ct_for_cu
+			       (Hashtbl.find ct_for_cu.ct_typedefs td) name
+  | C_typetag tt ->
+      aggregate_member_by_name ct_for_cu
+			       (Hashtbl.find ct_for_cu.ct_typetags tt) name
+  | _ -> raise Not_found
+
 let rec type_size ct_for_cu ctyp =
   match ctyp with
     C_void -> 1

@@ -450,6 +450,9 @@ let decompile_sym binf sym =
   let ht = Args_in.find_args blk_arr 0 in
   let arg_vars = Hashtbl.create 10 in
   let blk_arr = Args_in.substitute_args blk_arr ht ft arg_vars in*)
+  Log.printf 2 "--- substitute args & locals ---\n";
+  let blk_arr = Subst_locals.subst_locals blk_arr ft cu_inf.ci_ctypes in
+  dump_blockarr blk_arr;
   Log.printf 2 "--- slicing rodata ---\n";
   let rodata_sec = get_section_number binf.elfbits binf.ehdr binf.shdr_arr
 				      ".rodata" in
