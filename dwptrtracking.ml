@@ -274,9 +274,9 @@ let store defs accsz src offset offsetmap =
         (CT.access_bytesize accsz) Saved_caller_reg_anon
   | Some _ -> ()
 
-let incoming defs accsz offset offsetmap =
-  offsetmap := record_kind_for_offset !offsetmap (Int32.to_int offset)
-    (CT.access_bytesize accsz) Incoming_arg
+let incoming defs bytesz offset argvar offsetmap =
+  offsetmap := record_kind_for_offset !offsetmap offset bytesz
+				      (Incoming_arg argvar)
 
 let outgoing_arg defs accsz offset offsetmap =
   offsetmap := record_kind_for_offset !offsetmap (Int32.to_int offset)
@@ -316,7 +316,7 @@ let merge_offsetmap oldmap newmap =
   else
     mergedmap, true
 
-let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
+let scan_stack_accesses blkarr dwarf_vars entrypoint defs ftype ct_for_cu =
   let num_blks = Array.length blkarr in
   let offsetmap_at_start = Array.make num_blks (OffsetMap.empty (=))
   and offsetmap_at_end = Array.make num_blks (OffsetMap.empty (=)) in
@@ -329,6 +329,29 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
     offsetmap_at_start.(at) <- nom;
     made_change := !made_change || chg;
     blkarr_offsetmap.(at).Block.visited <- true;
+    (* Merge incoming stack args (like stores).  *)
+    let cur_offsetmap =
+      match blkarr.(at).Block.id with
+	BS.Virtual_entry ->
+	  let om_ref = ref cur_offsetmap in
+	  let arg_accum = Eabi.make_arg_accum () in
+	  for i = 0 to Array.length ftype.Function.arg_names - 1 do
+	    let loc = Eabi.eabi_arg_loc ftype i arg_accum ct_for_cu in
+	    match loc with
+	      Locations.In (C.Reg (CT.Stack offset)) ->
+	        incoming defs 4 offset ftype.Function.arg_names.(i) om_ref
+	    | Locations.Parts partlist ->
+	        List.iter
+		  (function
+		    C.Reg (CT.Stack offset), _, sz ->
+		      incoming defs sz offset ftype.Function.arg_names.(i)
+			       om_ref
+		  | _ -> ())
+		  partlist
+	    | _ -> ()
+	  done;
+	  !om_ref
+      | _ -> cur_offsetmap in
     let new_cs, final_offsetmap = CS.fold_left
       (fun (new_cs, offsetmap_acc) (insn_addr, stmt, stmt_offsetmap) ->
 	let om_ref = ref offsetmap_acc in
@@ -339,10 +362,6 @@ let scan_stack_accesses blkarr dwarf_vars entrypoint defs =
 	        C.Store (accsz, addr, C.SSAReg src) ->
 		  let offset = Ptrtracking.cfa_offset addr defs in
 		  store defs accsz src offset om_ref;
-		  C.Protect node
-	      | C.Store (accsz, addr, C.Entity (CT.Arg_var _)) ->
-		  let offset = Ptrtracking.cfa_offset addr defs in
-	          incoming defs accsz offset om_ref;
 		  C.Protect node
 	      | _ -> node
 	    with Ptrtracking.Not_constant_cfa_offset ->

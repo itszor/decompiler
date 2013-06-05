@@ -88,6 +88,27 @@ let eabi_arg_loc ft argno arg_accum ct_for_cu =
     on_stack 0 aligned_offset regs_required
   end
 
+(* For a location on the stack or partly on the stack, return a base address
+   or a "virtual" base address where the described object would be if it were
+   fully on the stack.  Raise Not_found if the location doesn't have any parts
+   on the stack.  *)
+
+let stack_base_equiv = function
+    In (C.Reg (CT.Stack offset)) -> offset
+  | Parts partlist ->
+      let stackparts =
+        List.filter (function (C.Reg (CT.Stack _), _, _) -> true | _ -> false)
+	partlist in
+      let sorted =
+        List.sort (fun (_, base1, _) (_, base2, _) -> compare base1 base2)
+		  stackparts in
+      begin match sorted with
+        (C.Reg (CT.Stack offset), offset_in_obj, _) :: _ ->
+	  offset - offset_in_obj
+      | _ -> raise Not_found
+      end
+  | _ -> raise Not_found
+
 let eabi_return_loc ft ct_for_cu =
   if hidden_struct_return ft ct_for_cu then
     (* This is kind of a weird representation.  At this point, we can probably

@@ -153,7 +153,7 @@ type stack_access_kind =
   | Saved_caller_reg of stack_slot
   | Outgoing_arg_anon
   | Outgoing_arg of stack_slot
-  | Incoming_arg
+  | Incoming_arg of string
   | Local_var of Function.var
   | Addressable_local_var of Function.var
   | Addressable_anon_var of anon_var_part
@@ -979,7 +979,7 @@ let letter_for_offset_word omap offset =
     | Some (Saved_caller_reg _) -> 'R'
     | Some Outgoing_arg_anon -> 'a'
     | Some (Outgoing_arg _) -> 'A'
-    | Some Incoming_arg -> 'I'
+    | Some (Incoming_arg _) -> 'I'
     | Some (Local_var_or_spill_slot _) -> 'V'
     | Some (Local_var _) -> 'L'
     | Some (Addressable_local_var _) -> '&'
@@ -1020,7 +1020,7 @@ let string_of_offset_entry = function
   | Some (Saved_caller_reg _) -> "saved caller reg with stack slot"
   | Some Outgoing_arg_anon -> "anonymous outgoing arg"
   | Some (Outgoing_arg _) -> "outgoing arg with stack slot"
-  | Some Incoming_arg -> "incoming arg"
+  | Some (Incoming_arg x) -> "incoming arg '" ^ x ^ "'"
   | Some (Local_var _) -> "local variable"
   | Some (Addressable_local_var _) -> "addressable local variable"
   | Some (Addressable_anon_var _) -> "anonymous addressable local var"
@@ -1071,7 +1071,12 @@ let mix_kind offsetlo offsethi old_kind new_kind =
   | _, Outgoing_arg_anon ->
       Log.printf 3 "*** outgoing arg collision, offset %s ***\n" (offstr ());
       Outgoing_arg_anon
-  | _, replacement -> replacement
+  | Incoming_arg a, Local_var_or_spill_slot x ->
+      (* Don't replace incoming args.  *)
+      Incoming_arg a
+  | _, replacement ->
+      Log.printf 3 "*** replacing stack mapping, offset %s ***\n" (offstr ());
+      replacement
 
 let map_union a b =
   OffsetMap.merge ~eq:(=)
@@ -1440,8 +1445,7 @@ let merge_spill_slots_or_local_vars blkarr_offsetmap atht slotmap =
       { blk with Block.code = newseq })
     blkarr_offsetmap
 
-let stackvar_access name typ offset ctypes_for_cu =
-  let base_expr = C.Entity (CT.Local_var name) in
+let stackvar_access base_expr typ offset ctypes_for_cu =
   if Ctype.aggregate_type ctypes_for_cu typ then
     Insn_to_ir.resolve_aggregate_access typ base_expr offset ctypes_for_cu
   else if Ctype.base_type_p typ then
@@ -1451,7 +1455,7 @@ let stackvar_access name typ offset ctypes_for_cu =
     C.Entity (CT.String_constant "!!BAD!!")
 
 let rewrite_access make_access insn_addr accsz addr stmt_offsetmap
-		   single node ctypes_for_cu =
+		   single node ftype ctypes_for_cu =
   try
     let mapping =
       stack_mapping_for_offset stmt_offsetmap (Int32.to_int single) accsz in
@@ -1464,8 +1468,9 @@ let rewrite_access make_access insn_addr accsz addr stmt_offsetmap
 	      Some cfa_base ->
 		let offset_into_type = (Int32.to_int single) - cfa_base in
 		let sv_acc =
-		  stackvar_access lv.Function.var_name lv.Function.var_type
-				  offset_into_type ctypes_for_cu in
+		  stackvar_access (C.Entity (CT.Local_var lv.Function.var_name))
+				  lv.Function.var_type offset_into_type
+				  ctypes_for_cu in
 		make_access sv_acc
 	    | None -> node
 	    end
@@ -1479,6 +1484,28 @@ let rewrite_access make_access insn_addr accsz addr stmt_offsetmap
 	  Log.printf 3 "Non-word access for stack slot, ignoring (FIXME)\n";
 	  node
 	end
+    | Incoming_arg argname ->
+	let argnum = Function.arg_num_by_name ftype argname in
+	let arg_accum = Eabi.make_arg_accum () in
+	let loc = ref None in
+	for arg = 0 to argnum do
+	  loc := Some (Eabi.eabi_arg_loc ftype arg arg_accum ctypes_for_cu)
+	done;
+	begin try
+	  match !loc with
+	    Some loc ->
+	      let sbe = Eabi.stack_base_equiv loc in
+	      let sv_acc =
+	        stackvar_access (C.Entity (CT.Arg_var argname))
+		  ftype.Function.args.(argnum) (Int32.to_int single - sbe)
+		  ctypes_for_cu in
+	      make_access sv_acc
+	  | None -> failwith "no location?"
+	with Not_found ->
+	  Log.printf 3 "Couldn't find stack base equiv for arg %d (%s)\n"
+	    argnum argname;
+	  node
+	end
     | _ -> node
   with Not_found ->
     Log.printf 3 "Offset %ld not found in stack map %s\n" single
@@ -1486,19 +1513,19 @@ let rewrite_access make_access insn_addr accsz addr stmt_offsetmap
     node
 
 let rewrite_load insn_addr accsz addr stmt_offsetmap single node
-		 ctypes_for_cu =
+		 ftype ctypes_for_cu =
   rewrite_access (fun src -> src) insn_addr accsz addr stmt_offsetmap
-		 single node ctypes_for_cu
+		 single node ftype ctypes_for_cu
 
 let rewrite_store insn_addr accsz addr src stmt_offsetmap single node
-		  ctypes_for_cu =
+		  ftype ctypes_for_cu =
   rewrite_access (fun dst -> C.Set (dst, src)) insn_addr accsz addr
-		 stmt_offsetmap single node ctypes_for_cu
+		 stmt_offsetmap single node ftype ctypes_for_cu
 
 (* Ideally we want to get rid of all explicit references to the stack here.
    Is that possible?  *)
 
-let rewrite_stack_refs blkarr_offsetmap def_cfa_offsets ctypes_for_cu =
+let rewrite_stack_refs blkarr_offsetmap def_cfa_offsets ftype ctypes_for_cu =
   Array.map
     (fun blk ->
       let newseq = CS.fold_left
@@ -1513,7 +1540,7 @@ let rewrite_stack_refs blkarr_offsetmap def_cfa_offsets ctypes_for_cu =
 		      [] -> C.Protect node
 		    | [single] ->
 			rewrite_load insn_addr accsz addr stmt_offsetmap
-				     single node ctypes_for_cu
+				     single node ftype ctypes_for_cu
 		    | _ -> C.Protect node
 		  with Not_constant_cfa_offset -> node
 		  end
@@ -1524,7 +1551,7 @@ let rewrite_stack_refs blkarr_offsetmap def_cfa_offsets ctypes_for_cu =
 		      [] -> C.Protect node
 		    | [single] ->
 		        rewrite_store insn_addr accsz addr src stmt_offsetmap
-				      single node ctypes_for_cu
+				      single node ftype ctypes_for_cu
 		    | _ -> C.Protect node
 		  with Not_constant_cfa_offset -> node
 		  end

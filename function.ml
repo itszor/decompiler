@@ -99,15 +99,18 @@ let function_type debug_loc name die die_hash ctypes_for_cu ~compunit_baseaddr =
 	prototyped = prototyped }
   | _ -> raise Unknown_type
 
-let arg_type_by_name ft name =
+let arg_num_by_name ft name =
   let found = ref None in
   for i = 0 to Array.length ft.arg_names - 1 do
     if ft.arg_names.(i) = name then
-      found := Some ft.args.(i)
+      found := Some i
   done;
   match !found with
-    Some typ -> typ
+    Some num -> num
   | None -> raise Not_found
+
+let arg_type_by_name ft name =
+  ft.args.(arg_num_by_name ft name)
 
 type liveness =
     Everywhere

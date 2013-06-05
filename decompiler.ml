@@ -378,7 +378,9 @@ let decompile_sym binf sym =
   let sp_cov = Sptracking.sp_track blk_arr in
   gcinfo "after sp tracking";
   Log.printf 2 "--- propagating stack references ---\n";
-  let blkarr_om = Dwptrtracking.scan_stack_accesses blk_arr dwarf_vars 0 defs in
+  let blkarr_om =
+    Dwptrtracking.scan_stack_accesses blk_arr dwarf_vars 0 defs ft
+				      cu_inf.ci_ctypes in
   gcinfo "after propagation";
   Log.printf 2 "--- gathering stack-relative offsets ---\n";
   let defloops = Ptrtracking.find_def_loops defs in
@@ -433,7 +435,7 @@ let decompile_sym binf sym =
   Log.printf 2 "--- rewrite constant stack refs ---\n";
   let blkarr_om =
     Ptrtracking.rewrite_stack_refs blkarr_om def_cfa_offsets
-				   cu_inf.ci_ctypes in
+				   ft cu_inf.ci_ctypes in
   Dwptrtracking.dump_offsetmap_blkarr blkarr_om;
   let blk_arr = Dwptrtracking.remove_offsetmap_from_blkarr blkarr_om in
   Log.printf 2 "--- SSA conversion (2) ---\n";
