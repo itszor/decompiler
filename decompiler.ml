@@ -439,7 +439,7 @@ let decompile_sym binf sym =
   Dwptrtracking.dump_offsetmap_blkarr blkarr_om;
   let blk_arr = Dwptrtracking.remove_offsetmap_from_blkarr blkarr_om in
   Log.printf 2 "--- SSA conversion (2) ---\n";
-  add_stackvars_to_entry_block blk_arr entry_point_ref slotmap;
+  add_stackvars_to_entry_block blk_arr 0 slotmap;
   let regset2 = IrPhiPlacement.place blk_arr in
   dump_blockarr blk_arr;
   IrPhiPlacement.rename blk_arr 0 regset2;

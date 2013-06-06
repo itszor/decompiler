@@ -82,3 +82,5 @@ TODO list for decompiler
 * Remove With_id for IR [done], replace Parallel with Parallel_set (maybe).  Use a code other than Set for non-register sets? (Only cleanups.)
 
 * Robustify, remove FAILs in glsl.sh run. [done, probably with caveats]
+
+* Set non-argument registers to magic "undefined" code? glsl.sh fails at present without.
