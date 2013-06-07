@@ -6,7 +6,7 @@ module IrCT =
   struct
     type nulop = Nop
 	       | Untranslated
-	       | Caller_saved
+	       | Callee_saved
 	       (*| Arg_in of int*)
 	       | Undefined
 	       | Special
@@ -113,7 +113,7 @@ module IrCT =
 		| Local_var of string
 		| Section of string
 		| Arg_out
-		| Caller_restored
+		| Callee_restored
 		| Frame_base_update of Dwarfreader.dwarf_op
 		| Insn_address of int32
 		| String_constant of string
@@ -135,7 +135,7 @@ module IrCT =
       Nop -> "nop"
     | Untranslated -> "**UNTRANSLATED**"
     (*| Arg_in n -> Printf.sprintf "arg_in(%d)" n*)
-    | Caller_saved -> "caller_saved"
+    | Callee_saved -> "callee_saved"
     | Special -> "special"
     | Undefined -> "undefined"
     | Incoming_sp -> "incoming_sp"
@@ -252,7 +252,7 @@ module IrCT =
     | Local_var name -> Printf.sprintf "local(%s)" name
     | Section name -> Printf.sprintf "section(%s)" name
     | Arg_out -> "arg_out"
-    | Caller_restored -> "caller_restored"
+    | Callee_restored -> "callee_restored"
     | Frame_base_update _ -> "frame_base_update"
     | String_constant str ->
         Printf.sprintf "string_const(\"%s\")" (String.escaped str)
@@ -277,6 +277,27 @@ module IrCT =
     | U16 | S16 -> 2
     | Word -> 4
     | Dword -> 8
+    
+    (* Return list of other regs which overlap the argument reg (e.g. writing
+       to the argument will affect the value of the returned registers).  *)
+    let reg_overlaps = function
+      Hard_reg _
+    | Stack _
+    | Temp _ -> []
+    | VFP_sreg x -> [VFP_dreg (x / 2)]
+    | VFP_dreg x -> [VFP_sreg (x * 2); VFP_sreg (x * 2 + 1)]
+    | Status CondFlags -> [Status Carry; Status NZFlags]
+    | Status Carry -> [Status CondFlags]
+    | Status NZFlags -> [Status CondFlags]
+    | Status VFPFlags -> []
+    
+    (* True if SR is a subset of R.  *)
+    let reg_subset sr r =
+      match sr, r with
+        Status Carry, Status CondFlags -> true
+      | Status NZFlags, Status CondFlags -> true
+      | VFP_sreg x, VFP_dreg y -> let y2 = y * 2 in x >= y2 && x < y2 + 2
+      | _, _ -> false
   end
 
 module IrBS =

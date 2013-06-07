@@ -268,7 +268,7 @@ let store defs accsz src offset offsetmap =
     (Typedb.string_of_ssa_reg (fst src) (snd src)) offset;
   match first_src with
     None -> ()
-  | Some ((C.Nullary (CT.Special | CT.Caller_saved) as fs), _) ->
+  | Some ((C.Nullary (CT.Special | CT.Callee_saved) as fs), _) ->
       Log.printf 4 "first src %s\n" (C.string_of_code fs);
       offsetmap := record_kind_for_offset !offsetmap (Int32.to_int offset)
         (CT.access_bytesize accsz) Saved_caller_reg_anon

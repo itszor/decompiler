@@ -116,49 +116,113 @@ module C = Ir.Ir
 
 let eabi_pre_prologue ft start_addr inforec real_entry_point ct_for_cu =
   let insns =
-    [(*C.Set (C.Reg (CT.Hard_reg 0), C.Nullary CT.Arg_in);
-     C.Set (C.Reg (CT.Hard_reg 1), C.Nullary CT.Arg_in);
-     C.Set (C.Reg (CT.Hard_reg 2), C.Nullary CT.Arg_in);
-     C.Set (C.Reg (CT.Hard_reg 3), C.Nullary CT.Arg_in);*)
-     C.Set (C.Reg (CT.Hard_reg 4), C.Nullary CT.Caller_saved);
-     C.Set (C.Reg (CT.Hard_reg 5), C.Nullary CT.Caller_saved);
-     C.Set (C.Reg (CT.Hard_reg 6), C.Nullary CT.Caller_saved);
-     C.Set (C.Reg (CT.Hard_reg 7), C.Nullary CT.Caller_saved);
-     C.Set (C.Reg (CT.Hard_reg 8), C.Nullary CT.Caller_saved);
-     C.Set (C.Reg (CT.Hard_reg 9), C.Nullary CT.Caller_saved);
-     C.Set (C.Reg (CT.Hard_reg 10), C.Nullary CT.Caller_saved);
-     C.Set (C.Reg (CT.Hard_reg 11), C.Nullary CT.Caller_saved);
+    [C.Set (C.Reg (CT.Hard_reg 0), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.Hard_reg 1), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.Hard_reg 2), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.Hard_reg 3), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.Hard_reg 4), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.Hard_reg 5), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.Hard_reg 6), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.Hard_reg 7), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.Hard_reg 8), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.Hard_reg 9), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.Hard_reg 10), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.Hard_reg 11), C.Nullary CT.Callee_saved);
      C.Set (C.Reg (CT.Hard_reg 12), C.Nullary CT.Special);
      C.Set (C.Reg (CT.Hard_reg 13), C.Nullary CT.Incoming_sp);
      C.Set (C.Reg (CT.Hard_reg 14), C.Nullary CT.Special);
      C.Set (C.Reg (CT.Hard_reg 15), C.Nullary CT.Special);
      C.Set (C.Reg (CT.Status CT.CondFlags), C.Nullary CT.Special);
      C.Set (C.Reg (CT.Status CT.NZFlags), C.Nullary CT.Special);
-     C.Set (C.Reg (CT.Status CT.Carry), C.Nullary CT.Special)] in
+     C.Set (C.Reg (CT.Status CT.Carry), C.Nullary CT.Special);
+     C.Set (C.Reg (CT.Status CT.VFPFlags), C.Nullary CT.Special);
+     C.Set (C.Reg (CT.VFP_dreg 0), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 1), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 2), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 3), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 4), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 5), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 6), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 7), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 8), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_dreg 9), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_dreg 10), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_dreg 11), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_dreg 12), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_dreg 13), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_dreg 14), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_dreg 15), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_dreg 16), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 17), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 18), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 19), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 20), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 21), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 22), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 23), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 24), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 25), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 26), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 27), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 28), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 29), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 30), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_dreg 31), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_sreg 0), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_sreg 1), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_sreg 2), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_sreg 3), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_sreg 4), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_sreg 5), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_sreg 6), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_sreg 7), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_sreg 8), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_sreg 9), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_sreg 10), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_sreg 11), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_sreg 12), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_sreg 13), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_sreg 14), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_sreg 15), C.Nullary CT.Undefined);
+     C.Set (C.Reg (CT.VFP_sreg 16), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_sreg 17), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_sreg 18), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_sreg 19), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_sreg 20), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_sreg 21), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_sreg 22), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_sreg 23), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_sreg 24), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_sreg 25), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_sreg 26), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_sreg 27), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_sreg 28), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_sreg 29), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_sreg 30), C.Nullary CT.Callee_saved);
+     C.Set (C.Reg (CT.VFP_sreg 31), C.Nullary CT.Callee_saved)] in
   let cs = CS.of_list insns in
-  let cs =
-    (*if false then
-      Insn_to_ir.add_incoming_args ft cs
-    else*)
-    (*Insn_to_ir.add_real_incoming_args ft start_addr inforec cs*)
-    Insn_to_ir.add_incoming_args ft cs ct_for_cu in
+  let cs = Insn_to_ir.add_incoming_args ft cs ct_for_cu in
   let cs = CS.snoc cs (C.Control (C.Jump real_entry_point)) in
   Block.make_block BS.Virtual_entry cs
 
 let eabi_post_epilogue ft =
   let insns =
-    [(*C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 0));
-     C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 1));
-     C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 2));
-     C.Set (C.Entity CT.Arg_out, C.Reg (CT.Hard_reg 3));*)
-     C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 4));
-     C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 5));
-     C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 6));
-     C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 7));
-     C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 8));
-     C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 9));
-     C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 10));
-     C.Set (C.Entity CT.Caller_restored, C.Reg (CT.Hard_reg 11));
+    [C.Set (C.Entity CT.Callee_restored, C.Reg (CT.Hard_reg 4));
+     C.Set (C.Entity CT.Callee_restored, C.Reg (CT.Hard_reg 5));
+     C.Set (C.Entity CT.Callee_restored, C.Reg (CT.Hard_reg 6));
+     C.Set (C.Entity CT.Callee_restored, C.Reg (CT.Hard_reg 7));
+     C.Set (C.Entity CT.Callee_restored, C.Reg (CT.Hard_reg 8));
+     C.Set (C.Entity CT.Callee_restored, C.Reg (CT.Hard_reg 9));
+     C.Set (C.Entity CT.Callee_restored, C.Reg (CT.Hard_reg 10));
+     C.Set (C.Entity CT.Callee_restored, C.Reg (CT.Hard_reg 11));
+     C.Set (C.Entity CT.Callee_restored, C.Reg (CT.VFP_dreg 8));
+     C.Set (C.Entity CT.Callee_restored, C.Reg (CT.VFP_dreg 9));
+     C.Set (C.Entity CT.Callee_restored, C.Reg (CT.VFP_dreg 10));
+     C.Set (C.Entity CT.Callee_restored, C.Reg (CT.VFP_dreg 11));
+     C.Set (C.Entity CT.Callee_restored, C.Reg (CT.VFP_dreg 12));
+     C.Set (C.Entity CT.Callee_restored, C.Reg (CT.VFP_dreg 13));
+     C.Set (C.Entity CT.Callee_restored, C.Reg (CT.VFP_dreg 14));
+     C.Set (C.Entity CT.Callee_restored, C.Reg (CT.VFP_dreg 15));
      C.Control C.Virtual_exit] in
   let insns' =
     (* FIXME: This needs implementing properly!  Depends on an

@@ -29,7 +29,7 @@ let track_pointer defs use =
       | C.Binary (CT.Sub, (C.SSAReg (d, dn) as reg), C.Immed imm) ->
           let offset' = Int32.sub offset imm in
 	  (reg, offset') :: track (d, dn) offset'
-      | C.Nullary CT.Caller_saved
+      | C.Nullary CT.Callee_saved
       | C.Nullary CT.Special
       | C.Nullary CT.Incoming_sp
       (*| C.Nullary (CT.Arg_in _)*)

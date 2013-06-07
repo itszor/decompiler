@@ -2,15 +2,10 @@ module CS = Ir.IrCS
 module CT = Ir.IrCT
 module C = Ir.Ir
 
-type classification =
-    Constant
-  | Variable
-
 type def_info = {
   src : C.code;
   src_insn_addr : int32 option;
   mutable num_uses : int;
-  mutable classification : classification;
   mutable ctype : Ctype.ctype option;
   mutable orig_name : string option
 }
@@ -52,14 +47,9 @@ let get_defs blk_arr =
 	    (function
 	      C.Entity (CT.Insn_address ia) -> ia_ref := Some ia
 	    | C.Set (C.SSAReg regid, src) ->
-		let classify =
-		  match src with
-		    C.Immed imm -> Constant
-		  | _ -> Variable in
 		let di = {
 		  src = src;
 		  src_insn_addr = !ia_ref;
-		  classification = classify;
 		  ctype = None;
 		  orig_name = None;
 		  num_uses = 0

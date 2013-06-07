@@ -25,6 +25,10 @@ module type CODETYPES =
     val string_of_addr : addr -> string
     val string_of_abi : abi -> string
     val string_of_entity : entity -> string
+    
+    (* Properties of registers.  So far unused!  *)
+    val reg_overlaps : reg -> reg list
+    val reg_subset : reg -> reg -> bool
   end
 
 (* We have an abstract block reference type, but we also need to impose an

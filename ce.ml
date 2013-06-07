@@ -14,7 +14,7 @@ let rec def_chain defs x =
       raise Unsafe_for_deletion
     else match dinf.src with
       C.SSAReg (d, dn) -> x :: def_chain defs (d, dn)
-    | C.Nullary CT.Caller_saved
+    | C.Nullary CT.Callee_saved
     | C.Nullary CT.Special -> [x]
     | _ -> raise Unsafe_for_deletion
   with Not_found ->
@@ -54,7 +54,7 @@ let remove_prologue_and_epilogue blk_arr functype =
     (fun blk ->
       CS.iter
         (function
-	  C.Set (C.Entity CT.Caller_restored, C.SSAReg (r, rn))
+	  C.Set (C.Entity CT.Callee_restored, C.SSAReg (r, rn))
 	| C.Control (C.CompJump_ext (CT.Branch_exchange, C.SSAReg (r, rn))) ->
 	    begin try
 	      let chain = def_chain defs (r, rn) in
@@ -79,7 +79,7 @@ let remove_prologue_and_epilogue blk_arr functype =
       let code' = CS.fold_right
         (fun stmt acc ->
 	  match stmt with
-	    C.Set (C.Entity CT.Caller_restored, C.SSAReg (r, rn)) ->
+	    C.Set (C.Entity CT.Callee_restored, C.SSAReg (r, rn)) ->
 	      if Hashtbl.mem defs_for_deletion (r, rn) then
 	        acc
 	      else
