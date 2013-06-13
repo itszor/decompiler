@@ -3,17 +3,6 @@ open Dwarfreader
 open Dwarfprint
 open Binary_info
 
-(*
-let code_for_sym symname =
-  let sym = Symbols.find_named_symbol symbols strtab symname in
-  let start_offset = Int32.sub sym.st_value
-			       shdr_arr.(sym.st_shndx).sh_addr in
-  let insns, _ = Decode_arm.decode_insns
-		   (Bitstring.dropbits (8 * (Int32.to_int start_offset)) text)
-		   ((Int32.to_int sym.st_size) / 4) in
-  insns
-*)
-
 let strip_condition = function
     Insn.Conditional (_, opcode) -> opcode
   | opcode -> opcode
@@ -254,31 +243,15 @@ let bs_of_code_hash ft binf inforec code_hash start_addr entry_pt ct_for_cu =
   let pre_prologue_blk =
     eabi_pre_prologue ft start_addr inforec entry_pt ct_for_cu
   and virtual_exit = eabi_post_epilogue ft in
-  let with_entry_pt
-    = bseq_cons BS.Virtual_entry pre_prologue_blk blockseq in
-  let with_exit_pt
-    = bseq_cons BS.Virtual_exit virtual_exit with_entry_pt in
+  let with_entry_pt =
+    bseq_cons BS.Virtual_entry pre_prologue_blk blockseq in
+  let with_exit_pt =
+    bseq_cons BS.Virtual_exit virtual_exit with_entry_pt in
   BS.rev with_exit_pt, ht
 
 let code_for_named_sym binf section symbols mapping_syms strtab symname =
   let sym = Symbols.find_named_symbol symbols strtab symname in
   code_for_sym binf section mapping_syms sym
-
-(*let debug_info_ptr = ref remaining_debug_info
-
-let fetch_die () =
-  let die_tree, die_hash, next_die = parse_die_for_cu !debug_info_ptr
-				     ~length:debug_info_len
-				     ~abbrevs ~addr_size:cu_header.address_size
-				     ~string_sec:debug_str_sec in
-  debug_info_ptr := next_die;
-  die_tree, die_hash *)
-
-(*let _ =
-  let x, h = fetch_die () in
-  print_all_dies x h*)
-
-(* Next, we need to decode .debug_line!  *)
 
 let print_blockseq_dfsinfo bseq =
   for i = 0 to Array.length bseq - 1 do
@@ -323,9 +296,6 @@ let dump_blockarr bs =
       Log.printf 3 "%s\n" (Ir.Ir.string_of_codeseq block.Block.code))
     bs
 
-(*let mapping_syms = Mapping.get_mapping_symbols elfbits ehdr shdr_arr strtab
-					       symbols ".text"*)
-
 module IrDfs = Dfs.Dfs (Ir.IrCT) (Ir.IrCS) (Ir.IrBS)
 module IrDominator = Dominator.Dominator (Ir.IrBS)
 module IrPhiPlacement = Phi.PhiPlacement (Ir.IrCT) (Ir.IrCS) (Ir.IrBS)
@@ -359,15 +329,6 @@ let graphviz blk_arr =
   done;
   Printf.fprintf fh "}\n";
   close_out fh
-
-(*let binf = open_file "libGLESv2.so"*)
-(*let binf = open_file "foo"*)
-(*let binf = open_file "libglslcompiler.so"*)
-(*let binf = open_file "tests/hello"*)
-(*let binf = open_file "tests/rodata"*)
-(*let binf = open_file "tests/fnargs"*)
-(*let binf = open_file "tests/structs"*)
-(*let binf = open_file "tests/add"*)
 
 let decompile_sym binf sym =
   let symname = Symbols.symbol_name sym binf.strtab in
@@ -554,47 +515,22 @@ let decompile_sym binf sym =
   (*stack_coverage*)
   ft, vars, blk_arr
 
-(*let go symname =
-  let sym = Symbols.find_named_symbol binf.symbols binf.strtab symname in
-  decompile_sym binf sym*)
-
-(*let really_go () =
-  Log.loglevel := 4;
-  (*go "InitAccumUSECodeBlocks"*)
-  (*;go "AddComparisonToUFCode"*)
-  (*go "ProcessICInstIFNOT"*)
-  let _, _, blk_arr1 = go "main" in
-  (*let blk_arr2 = go "main2" in*)
-  let rodata_sec = get_section_number binf.elfbits binf.ehdr binf.shdr_arr
-				      ".rodata" in
-  Slice_section.symbols binf.rodata_sliced binf.symbols binf.strtab rodata_sec;
-  Log.loglevel := 4;
-  let blk_arr1' =
-    Resolve_section.resolve blk_arr1 binf.rodata binf.rodata_sliced in
-  dump_blockarr blk_arr1'
-  (*let blk_arr2' =
-    Resolve_section.resolve blk_arr2 binf.rodata binf.rodata_sliced in
-  dump_blockarr blk_arr2'*) *)
-
-(*let _ = really_go ()*)
-
-(*let x =
-  go "ProcessICInstIFNOT"*)
-  (*go "main2"*)
-
 let continue_after_error = ref false
 
-type converted_cu =
+type converted_fn =
   {
     cu_info : cu_info;
     cu_name : string;
     fn_name : string;
+    fn_fileidx : int;
+    fn_line : int option;
     fn_type : Function.function_info;
-    cu_blkarr : (BS.ir_blockref, C.code CS.t) Block.block array;
-    cu_vars : (Vartypes.reg_or_ssareg, Vartypes.vartype_info) Hashtbl.t
+    fn_blkarr : (BS.ir_blockref, C.code CS.t) Block.block array;
+    fn_vars : (Vartypes.reg_or_ssareg, Vartypes.vartype_info) Hashtbl.t
   }
 
-let find_sym_and_try_decompile binf cu_inf cu_name sym_addr fun_select =
+let find_sym_and_try_decompile binf cu_inf cu_name sym_addr fileidx lineno
+			       fun_select =
   let sym = try
     Symbols.find_symbol_by_addr
       ~filter:(fun sym -> Symbols.symbol_type sym = Symbols.STT_FUNC)
@@ -610,12 +546,14 @@ let find_sym_and_try_decompile binf cu_inf cu_name sym_addr fun_select =
       (*let cvt = Ctree.convert_function name ftype vars blk_arr in
       Cprint.print stdout [cvt];*)
       Log.printf 1 "PASS\n";
-      { cu_info = cu_inf; cu_name = cu_name; fn_name = name; fn_type = ftype;
-	cu_blkarr = blk_arr; cu_vars = vars }
+      { cu_info = cu_inf; cu_name = cu_name; fn_fileidx = fileidx;
+	fn_name = name; fn_line = lineno; fn_type = ftype; fn_blkarr = blk_arr;
+	fn_vars = vars }
     end else
-      { cu_info = cu_inf; cu_name = cu_name; fn_name = "<skipped>";
-	fn_type = Function.dummy_fn_info; cu_blkarr = [| |];
-	cu_vars = Hashtbl.create 1 }
+      { cu_info = cu_inf; cu_name = cu_name; fn_fileidx = fileidx;
+	fn_name = "<skipped>"; fn_line = lineno;
+	fn_type = Function.dummy_fn_info; fn_blkarr = [| |];
+	fn_vars = Hashtbl.create 1 }
   with x ->
     if not !continue_after_error then
       match x with
@@ -625,32 +563,87 @@ let find_sym_and_try_decompile binf cu_inf cu_name sym_addr fun_select =
       | _ -> raise x
     else begin
       Log.printf 1 "FAIL\n";
-      { cu_info = cu_inf; cu_name = cu_name; fn_name ="<decompilation failed>";
-	fn_type = Function.dummy_fn_info; cu_blkarr = [| |];
-	cu_vars = Hashtbl.create 1 }
+      { cu_info = cu_inf; cu_name = cu_name; fn_fileidx = fileidx;
+	fn_name ="<decompilation failed>"; fn_line = lineno;
+	fn_type = Function.dummy_fn_info; fn_blkarr = [| |];
+	fn_vars = Hashtbl.create 1 }
     end
 
-let try_emit_decl binf cu_inf dwcode ?children attrs =
+type definition =
+  {
+    definition : Cabs.definition;
+    line_number : int option;
+    mutable emitted : bool
+  }
+
+(* We want to find a canonical location for each file we will create in the
+   output file hierarchy: this is the best we can do in the absence of knowledge
+   about symlinks.  *)
+
+let canonical_pathname dir filename =
+  let module P = BatPathGen.OfString in
+  let dir' = P.of_string dir
+  and filename' = P.of_string filename in
+  P.to_string (P.normalize_in_tree (P.concat dir' filename'))
+
+let add_definition deftable dir filename defname lineno def =
+  let cpath = canonical_pathname dir filename in
+  if not (Hashtbl.mem deftable cpath) then
+    Hashtbl.add deftable cpath (Hashtbl.create 5);
+  let defs_for_cu = Hashtbl.find deftable cpath in
+  if Hashtbl.mem defs_for_cu defname then
+    Log.printf 3 "Definition already exists for %s in %s\n" defname cpath;
+  Hashtbl.replace defs_for_cu defname
+    { definition = def; line_number = lineno; emitted = false }
+
+(* From a "file index" for a particular CU, return the include directory and
+   the filename for that index.  BUILD_DIR (from the toplevel CU DIE) is used
+   to resolve relative pathnames.  *)
+
+let dir_and_filename build_dir lineprghdr file_idx =
+  let module P = BatPathGen.OfString in
+  let filename_rec = lineprghdr.Line.file_names.(file_idx - 1) in
+  let dir_idx = filename_rec.Line.directory_index
+  and filename = filename_rec.Line.filename in
+  let dir =
+    if dir_idx = 0 then
+      P.of_string build_dir
+    else begin
+      let dir = lineprghdr.Line.include_directories.(dir_idx - 1) in
+      let dir' = P.of_string dir in
+      if P.is_relative dir' then
+	let build_dir' = P.of_string build_dir in
+	P.concat build_dir' dir'
+      else
+	dir'
+    end in
+  P.to_string dir, filename
+
+let try_emit_decl binf cu_inf defs dwcode ?children attrs =
   try
     let name = get_attr_string attrs DW_AT_name
     and file = get_attr_int attrs DW_AT_decl_file in
-    let filename =
-      cu_inf.Binary_info.ci_lines.Line.file_names.(file - 1).Line.filename in
+    let lineno =
+      try Some (get_attr_int attrs DW_AT_decl_line)
+      with Not_found -> None in
+    let dir, filename =
+      dir_and_filename cu_inf.ci_directory cu_inf.Binary_info.ci_lines file in
     Log.printf 1 "file: '%s', decl: '%s'\n"
       filename name;
-    begin match dwcode with
+    match dwcode with
       DW_TAG_typedef ->
         let typ = get_attr_deref attrs DW_AT_type cu_inf.ci_dietab in
 	let ctyp = Ctype.resolve_type typ cu_inf.ci_dietab cu_inf.ci_ctypes in
         let typedef = Ctree.convert_typedef name ctyp in
-	Cprint.print stdout [typedef]
+	add_definition defs dir filename name lineno typedef
+	(*Cprint.print stdout [typedef]*)
     | _ -> ()
-    end
-  with Not_found -> ()
+  with
+    Not_found -> ()
 
-(* Scan the toplevel DIEs defined in a CU.  *)
+(* Scan the toplevel DIEs defined in a CU.  Return a list of converted_fn.  *)
 
-let scan_dietab_cu binf cu_inf cu_name die fun_select prog =
+let scan_dietab_cu binf cu_inf defs cu_name die fun_select prog =
   let rec scan die prog' =
     match die with
       Die_tree ((DW_TAG_subprogram, attrs), _, sibl)
@@ -659,9 +652,14 @@ let scan_dietab_cu binf cu_inf cu_name die fun_select prog =
 	if not is_declaration then begin
 	  try
 	    let lowpc = get_attr_address attrs DW_AT_low_pc in
-            let conv_cu =
-	      find_sym_and_try_decompile binf cu_inf cu_name lowpc fun_select in
-	    scan sibl (conv_cu :: prog')
+	    let lineno =
+	      try Some (get_attr_int attrs DW_AT_decl_line)
+	      with Not_found -> None in
+	    let fileidx = get_attr_int attrs DW_AT_decl_file in
+            let conv_fn =
+	      find_sym_and_try_decompile binf cu_inf cu_name lowpc
+					 fileidx lineno fun_select in
+	    scan sibl (conv_fn :: prog')
 	  with Not_found ->
 	    let inlined =
 	      try
@@ -677,21 +675,21 @@ let scan_dietab_cu binf cu_inf cu_name die fun_select prog =
 	end else
 	  scan sibl prog'
     | Die_tree ((dwcode, attrs), children, sibl) ->
-        try_emit_decl binf cu_inf dwcode ~children attrs;
+        try_emit_decl binf cu_inf defs dwcode ~children attrs;
 	scan sibl prog'
     | Die_node ((dwcode, attrs), sibl) ->
-        try_emit_decl binf cu_inf dwcode attrs;
+        try_emit_decl binf cu_inf defs dwcode attrs;
 	scan sibl prog'
     | Die_empty -> prog' in
   scan die prog
 
-let scan_dietab binf cu_inf cu_select fun_select prog =
+let scan_dietab binf cu_inf defs cu_select fun_select prog =
   match cu_inf.ci_dies with
     Die_node ((DW_TAG_compile_unit, attrs), children) ->
       let name = get_attr_string attrs DW_AT_name in
       if cu_select name then begin
 	Log.printf 1 "Compilation unit '%s'\n" name;
-	scan_dietab_cu binf cu_inf name children fun_select prog
+	scan_dietab_cu binf cu_inf defs name children fun_select prog
       end else
         prog
   | _ -> failwith "scan_dietab"
@@ -703,50 +701,65 @@ let get_cu_name cu_inf =
   | _ -> raise Not_found
 
 let scan_compunits ?(cu_select = fun _ -> true) ?(fun_select = fun _ -> true)
-		   binf =
-  let converted_compunits =
+		   binf defs =
+  let converted_functions =
     Hashtbl.fold
       (fun cu_offset cu_inf prog ->
-	scan_dietab binf cu_inf cu_select fun_select prog)
+	scan_dietab binf cu_inf defs cu_select fun_select prog)
       binf.cu_hash
       [] in
   let rodata_sec = get_section_number binf.elfbits binf.ehdr binf.shdr_arr
 		     ".rodata" in
   Log.printf 1 "*** slice rodata section by symbols ***\n";
   Slice_section.symbols binf.rodata_sliced binf.symbols binf.strtab rodata_sec;
-  Log.printf 1 "*** resolving rodata section references ***\n";
-  let converted_compunits = List.map
-    (fun conv_cu ->
-      Log.printf 2 "--- resolving %s:%s ---\n" conv_cu.cu_name conv_cu.fn_name;
-      let blk_arr' =
-        Resolve_section.resolve conv_cu.cu_blkarr binf.rodata
-				binf.rodata_sliced in
-      { conv_cu with cu_blkarr = blk_arr' })
-    converted_compunits in
-  List.iter
-    (fun conv_cu ->
-      let cvt = Ctree.convert_function conv_cu.fn_name conv_cu.fn_type
-				       conv_cu.cu_vars conv_cu.cu_info.ci_ctypes
-				       conv_cu.cu_blkarr in
-      Cprint.print stdout [cvt])
-    (List.rev converted_compunits)
+  converted_functions
 
-(*let decompile_something () =
-  scan_compunits ~cu_select:((=) "glsl/glslfns.c")
-    ~fun_select:((=) "EmulateBuiltInFunction") binf*)
+let converted_funs_to_c_defs binf defs converted_functions =
+  Log.printf 2 "*** resolving rodata section references ***\n";
+  let converted_functions = List.map
+    (fun conv_fn ->
+      Log.printf 3 "--- resolving %s:%s ---\n" conv_fn.cu_name conv_fn.fn_name;
+      let blk_arr' =
+        Resolve_section.resolve conv_fn.fn_blkarr binf.rodata
+				binf.rodata_sliced in
+      { conv_fn with fn_blkarr = blk_arr' })
+    converted_functions in
+  List.iter
+    (fun conv_fn ->
+      let cvt = Ctree.convert_function conv_fn.fn_name conv_fn.fn_type
+				       conv_fn.fn_vars conv_fn.cu_info.ci_ctypes
+				       conv_fn.fn_blkarr in
+      let dir, filename =
+	dir_and_filename conv_fn.cu_info.Binary_info.ci_directory
+			 conv_fn.cu_info.Binary_info.ci_lines
+			 conv_fn.fn_fileidx in
+      add_definition defs dir filename conv_fn.fn_name conv_fn.fn_line cvt
+      (*Cprint.print stdout [cvt]*))
+    converted_functions
+
+let use_cache executable cachefile =
+  let open Unix in
+  if cachefile = "" then
+    false
+  else
+    try
+      access executable [F_OK; X_OK];
+      let estat = stat executable
+      and cstat = stat cachefile in
+      cstat.st_mtime > estat.st_mtime
+    with Unix_error _ -> false
 
 let _ =
-  let do_all = ref false
-  and list_compunits = ref false
+  let list_compunits = ref false
   and selected_compunits = ref []
   and selected_funs = ref []
   and liblist = ref []
   and gc_alarms = ref false
+  and funcache = ref ""
+  and libcache = ref ""
   and infile = ref "" in
   let argspec =
-    ["-a", Arg.Set do_all,
-       "Decompile all functions from all compilation units";
-     "-i", Arg.Set_string infile, "Input file (ARM binary w/ debug info)";
+    ["-i", Arg.Set_string infile, "Input file (ARM binary w/ debug info)";
      "-l", Arg.Set list_compunits, "List compilation units";
      "-L", Arg.String
 	     (fun lib -> liblist := lib :: !liblist),
@@ -759,7 +772,10 @@ let _ =
 	     (fun sel -> selected_funs := sel :: !selected_funs),
 	     "Add function to selection to decompile (default: all)";
      "-e", Arg.Set continue_after_error, "Continue after errors";
+     "-c", Arg.Set_string funcache, "Cache converted functions";
+     "-lc", Arg.Set_string libcache, "Cache loaded libraries";
      "-m", Arg.Set gc_alarms, "Show major GC cycles" ] in
+  let exe = Sys.argv.(0) in
   Arg.parse argspec (fun _ -> ()) "Usage: decompile [options]";
   if not !Sys.interactive then begin
     if !infile = "" then begin
@@ -780,7 +796,23 @@ let _ =
     end;
     (* Stick in a reference to the libraries we're using to look external
        stuff up in.  *)
-    binf.libs <- List.map External.load_lib (List.rev !liblist);
+    (* Don't do anything with the library cache if we're using the function
+       cache...  *)
+    if not (use_cache exe !funcache) then begin
+      if use_cache exe !libcache then begin
+        Log.printf 1 "Using library cache\n";
+        let chan = open_in !libcache in
+	binf.libs <- Marshal.from_channel chan;
+	close_in chan
+      end else begin
+        binf.libs <- List.map External.load_lib (List.rev !liblist);
+	if !libcache <> "" then begin
+	  let chan = open_out !libcache in
+	  Marshal.to_channel chan binf.libs [Marshal.Closures];
+	  close_out chan
+	end
+      end
+    end;
     let select_cu =
       if !selected_compunits = [] then
 	(fun _ -> true)
@@ -791,12 +823,40 @@ let _ =
         (fun _ -> true)
       else
         (fun name -> List.mem name !selected_funs) in
-    if !do_all then
-      scan_compunits ~cu_select:select_cu ~fun_select:select_fn binf
+    (* For debugging C output, cache everything we've calculated so far.  *)
+    let conv_fun_list, defs =
+      if use_cache exe !funcache then begin
+        (* We've done all this stuff already!  Just reload the marshalled
+	   data.  *)
+        Log.printf 1 "Using function cache\n";
+        let chan = open_in !funcache in
+	let cfunlist', defs' = Marshal.from_channel chan in
+	close_in chan;
+	cfunlist', defs'
+      end else begin
+        let defs' = Hashtbl.create 5 in
+	let cfunlist' =
+	  scan_compunits ~cu_select:select_cu ~fun_select:select_fn binf
+			 defs' in
+	if !funcache <> "" then begin
+	  let chan = open_out !funcache in
+	  Marshal.to_channel chan (cfunlist', defs') [];
+	  close_out chan
+	end;
+	cfunlist', defs'
+      end in
+    converted_funs_to_c_defs binf defs conv_fun_list;
+    Hashtbl.iter
+      (fun cu_name definitions ->
+        Hashtbl.iter
+	  (fun def_name def ->
+	    Log.printf 3 "emit %s:%s:%s\n" cu_name def_name
+	      (match def.line_number with
+	        Some ln -> string_of_int ln
+	      | None -> "?"))
+	  definitions)
+      defs
   end
-  (*decompile_something*)
-  (*Log.loglevel := 2; 
-  scan_compunits binf*)
 
 let parse_string str =
   let fname, chan =

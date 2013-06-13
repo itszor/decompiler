@@ -2,6 +2,8 @@ open Elfreader
 open Dwarfreader
 
 type cu_info = {
+  (* The directory the CU was built in.  *)
+  mutable ci_directory : string;
   (* Base address of this compilation unit in the binary.  *)
   ci_baseaddr : int32;
   (* Address size for CU.  *)
@@ -62,10 +64,14 @@ and binary_info = {
   mutable libs : lib_info list
 }
 
-let index_dies_by_low_pc dieaddr_ht dies =
+let index_dies_by_low_pc cu_inf dies =
+  let dieaddr_ht = cu_inf.ci_dieaddr in
   (*Log.printf 3 "index_dies_by_low_pc\n";*)
   let rec scan = function
     Die_node ((DW_TAG_compile_unit, attrs), children) ->
+      let dir =
+        try get_attr_string attrs DW_AT_comp_dir with Not_found -> "" in
+      cu_inf.ci_directory <- dir;
       scan children
   | Die_tree ((DW_TAG_subprogram, sp_attrs), children, sibl) as die ->
       begin try
@@ -135,6 +141,7 @@ let index_debug_data binf parsed_data =
 	    Line.parse_lines (offset_section binf.debug_line
 				(debug_lines_for_comp_unit cu_dies)) in
 	  let cu_inf = {
+	    ci_directory = ""; (* Set properly in index_dies_by_low_pc.  *)
 	    ci_baseaddr = base_addr_for_comp_unit cu_dies;
 	    ci_addrsize = cu_header.address_size;
 	    ci_dietab = die_hash;
@@ -160,7 +167,7 @@ let index_debug_data binf parsed_data =
 		  | _ -> ())
 		syms)
 	    ranges;
-	  index_dies_by_low_pc cu_inf.ci_dieaddr cu_dies;
+	  index_dies_by_low_pc cu_inf cu_dies;
 	  Hashtbl.add binf.cu_hash ar_hdr.ar_debug_info_offset cu_inf)
     parsed_data
 

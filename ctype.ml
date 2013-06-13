@@ -140,22 +140,21 @@ let rec type_size ct_for_cu ctyp =
   | C_typetag name ->
       type_size ct_for_cu (Hashtbl.find ct_for_cu.ct_typetags name)
 
-let type_kind ct_for_cu typ =
+let rec type_kind ct_for_cu typ =
   if pointer_type ct_for_cu typ then
     `ptr
   else
-    let deref = match typ with
+    match typ with
       C_typedef name ->
-        Hashtbl.find ct_for_cu.ct_typedefs name
+        type_kind ct_for_cu (Hashtbl.find ct_for_cu.ct_typedefs name)
     | C_typetag name ->
-        Hashtbl.find ct_for_cu.ct_typetags name
-    | x -> x in
-    match deref with
-      C_float -> `float
+        type_kind ct_for_cu (Hashtbl.find ct_for_cu.ct_typetags name)
+    | C_float -> `float
     | C_double -> `double
     | C_void -> `void
     | C_enum _ -> `unsigned
     | C_struct _ | C_union _ -> `aggregate
+    | C_const x | C_volatile x -> type_kind ct_for_cu x
     | x ->
         if unsigned_int_type x then
 	  `unsigned
@@ -332,7 +331,8 @@ let rec resolve_type die die_hash ctypes_for_cu =
 	  C_array (upper_bound + 1, typ)
       | _ -> raise (Unresolved_type die')
       end
-  | Die_tree ((DW_TAG_subroutine_type, _), _, _) ->
+  | Die_tree ((DW_TAG_subroutine_type, _), _, _)
+  | Die_node ((DW_TAG_subroutine_type, _), _) ->
       C_void (* unimplemented! *)
   | die' -> raise (Unresolved_type die') in
   build die
