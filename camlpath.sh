@@ -7,3 +7,4 @@ else
 fi
 export PATH
 eval `opam config -env`
+alias ocamlbrowser='ocamlbrowser -I ~/.opam/4.00.1/lib/batteries'

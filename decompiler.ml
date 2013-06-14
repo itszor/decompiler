@@ -737,6 +737,36 @@ let converted_funs_to_c_defs binf defs converted_functions =
       (*Cprint.print stdout [cvt]*))
     converted_functions
 
+let output_defs defs projpath_str outpath_str =
+  let module P = BatPathGen.OfString in
+  let projpath = P.of_string projpath_str
+  and outpath = P.of_string outpath_str in
+  Hashtbl.iter
+    (fun cu_name definitions ->
+      let cu_name_path = P.of_string cu_name in
+      if P.belongs projpath cu_name_path then
+        let cu_relpath = P.relative_to_parent projpath cu_name_path in
+	let deflist = Hashtbl.fold
+	  (fun def_name def deflist ->
+	    (*Log.printf 3 "emit %s:%s:%s\n" (P.to_string cu_relpath) def_name
+	      (match def.line_number with
+		Some ln -> string_of_int ln
+	      | None -> "?")*)
+	    (def_name, def) :: deflist)
+	  definitions
+	  [] in
+	(* This doesn't really DTRT for "None" line numbers, but never mind
+	   that for now...  *)
+	let sortedlist = List.sort
+	  (fun (dn1, def1) (dn2, def2) ->
+	    compare def1.line_number def2.line_number) deflist in
+	let qualpath = P.concat outpath cu_relpath in
+	Dirutils.mkdir_p (P.parent qualpath);
+	let fh = open_out (P.to_string qualpath) in
+	Cprint.print fh (List.map (fun (_, def) -> def.definition) sortedlist);
+	close_out fh)
+    defs
+
 let use_cache executable cachefile =
   let open Unix in
   if cachefile = "" then
@@ -757,7 +787,9 @@ let _ =
   and gc_alarms = ref false
   and funcache = ref ""
   and libcache = ref ""
-  and infile = ref "" in
+  and infile = ref ""
+  and projpath = ref "/"
+  and outpath = ref "" in
   let argspec =
     ["-i", Arg.Set_string infile, "Input file (ARM binary w/ debug info)";
      "-l", Arg.Set list_compunits, "List compilation units";
@@ -771,6 +803,8 @@ let _ =
      "-f", Arg.String
 	     (fun sel -> selected_funs := sel :: !selected_funs),
 	     "Add function to selection to decompile (default: all)";
+     "-p", Arg.Set_string projpath, "Select decompilation root directory";
+     "-o", Arg.Set_string outpath, "Select output directory";
      "-e", Arg.Set continue_after_error, "Continue after errors";
      "-c", Arg.Set_string funcache, "Cache converted functions";
      "-lc", Arg.Set_string libcache, "Cache loaded libraries";
@@ -782,6 +816,15 @@ let _ =
       prerr_endline "No input file";
       exit 1
     end;
+    if !outpath = "" then begin
+      prerr_endline "No output directory";
+      exit 1
+    end else if Sys.file_exists !outpath
+		&& not (Sys.is_directory !outpath) then begin
+      prerr_endline "Output exists and is not a directory";
+      exit 1
+    end;
+    Dirutils.rm_rf (BatPathGen.OfString.of_string !outpath);
     if !gc_alarms then
       ignore (Gc.create_alarm (fun () -> flush stdout; prerr_endline "[gc]"));
     let binf = open_file !infile in
@@ -846,16 +889,7 @@ let _ =
 	cfunlist', defs'
       end in
     converted_funs_to_c_defs binf defs conv_fun_list;
-    Hashtbl.iter
-      (fun cu_name definitions ->
-        Hashtbl.iter
-	  (fun def_name def ->
-	    Log.printf 3 "emit %s:%s:%s\n" cu_name def_name
-	      (match def.line_number with
-	        Some ln -> string_of_int ln
-	      | None -> "?"))
-	  definitions)
-      defs
+    output_defs defs !projpath !outpath
   end
 
 let parse_string str =

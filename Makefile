@@ -22,7 +22,7 @@ BITSTRING_PP := -pp "camlp4of bitstring/bitstring.cma \
 SYNTAX := -syntax camlp4o
 
 #PACKAGES := -package camlp4.macro,bitstring,bitstring.syntax,num,unix,FrontC
-PACKAGES := -package bitstring,bitstring.syntax,num,unix,FrontC,batteries
+PACKAGES := -package bitstring,bitstring.syntax,num,unix,FrontC,batteries,fileutils
 
 # Source plus generated files.
 OCAMLSRC := log.ml dgraph.ml coverage.ml elfreader.ml dwarfreader.ml \
@@ -33,7 +33,7 @@ OCAMLSRC := log.ml dgraph.ml coverage.ml elfreader.ml dwarfreader.ml \
 	    dfs.ml dominator.ml phi.ml defs.ml ce.ml dce.ml minipool.ml \
 	    locations.ml sptracking.ml ptrtracking.ml dwptrtracking.ml \
 	    subst_locals.ml resolve_section.ml jumptable.ml restructure.ml \
-	    vartypes.ml ctree.ml decompiler.ml
+	    vartypes.ml ctree.ml dirutils.ml decompiler.ml
 
 # OCAMLOBJ := $(shell < .depend $(OCAMLDSORT) -byte $(OCAMLSRC))
 ifeq ($(BUILD),opt)
