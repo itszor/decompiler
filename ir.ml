@@ -76,6 +76,7 @@ module IrCT =
     type triop = Adc
 	       | Sbc
 	       | Mla
+	       | Bfc
 	       | Ubfx
 	       | Sbfx
 	       | Vmla
@@ -207,6 +208,7 @@ module IrCT =
     let string_of_triop = function
       Adc -> "adc"
     | Sbc -> "sbc"
+    | Bfc -> "bfc"
     | Mla -> "mla"
     | Ubfx -> "ubfx"
     | Sbfx -> "sbfx"

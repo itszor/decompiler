@@ -391,13 +391,6 @@ let decompile_sym binf sym =
   Log.printf 2 "--- gather info (1) ---\n";
   Typedb.gather_info blk_arr inforec;
   gcinfo "after gather info";
-  Log.printf 2 "--- minipool resolution ---\n";
-  let blk_arr =
-    Minipool.minipool_resolve binf.elfbits binf.ehdr binf.shdr_arr binf.symbols
-			      binf.mapping_syms binf.strtab blk_arr inforec
-			      cu_inf.ci_ctypes in
-  gcinfo "after minipool resolution";
-  dump_blockarr blk_arr;
   let defs = Defs.get_defs blk_arr in
   Log.printf 2 "--- sp tracking ---\n";
   let sp_cov = Sptracking.sp_track blk_arr in
@@ -473,6 +466,17 @@ let decompile_sym binf sym =
   Typedb.gather_info blk_arr inforec;
   Typedb.print_info inforec.Typedb.infotag;
   Typedb.print_implied_info inforec.Typedb.implications;
+  Log.printf 2 "--- minipool resolution ---\n";
+  let blk_arr =
+    Minipool.minipool_resolve binf.elfbits binf.ehdr binf.shdr_arr binf.symbols
+			      binf.mapping_syms binf.strtab blk_arr inforec
+			      cu_inf.ci_ctypes in
+  gcinfo "after minipool resolution";
+  dump_blockarr blk_arr;
+  Log.printf 2 "--- image pointer resolution ---\n";
+  let blk_arr =
+    Imageptr.imageptr_resolve binf blk_arr inforec cu_inf.ci_ctypes in
+  dump_blockarr blk_arr;
   (*Log.printf 2 "--- finding & substituting incoming args ---\n";
   let ht = Args_in.find_args blk_arr 0 in
   let arg_vars = Hashtbl.create 10 in

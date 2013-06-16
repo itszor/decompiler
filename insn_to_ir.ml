@@ -501,6 +501,13 @@ let convert_bfx xtype addr insn =
   and dst = convert_operand addr insn.write_operands.(0) in
   C.Set (dst, C.Ternary (xtype, op1, op2, op3))
 
+let convert_bfc addr insn =
+  let op1 = convert_operand addr insn.read_operands.(0)
+  and op2 = convert_operand addr insn.read_operands.(1)
+  and op3 = convert_operand addr insn.read_operands.(2)
+  and dst = convert_operand addr insn.write_operands.(0) in
+  C.Set (dst, C.Ternary (CT.Bfc, op1, op2, op3))
+
 let convert_bfi addr insn =
   let op1 = convert_operand addr insn.read_operands.(0)
   and op2 = convert_operand addr insn.read_operands.(1)
@@ -782,6 +789,7 @@ let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =
   | Stm minf -> same_blk (convert_stm addr minf insn ilist)
   | Ubfx -> append (convert_bfx CT.Ubfx addr insn)
   | Sbfx -> append (convert_bfx CT.Sbfx addr insn)
+  | Bfc -> append (convert_bfc addr insn)
   | Bfi -> append (convert_bfi addr insn)
   | Uxtb -> append (convert_xt CT.Uxtb addr insn)
   | Sxtb -> append (convert_xt CT.Sxtb addr insn)
@@ -829,7 +837,7 @@ let rec convert_insn binf inforec addr insn ilist blk_id bseq bseq_cons =
 			  bseq_cons
   | Shifted (opc, shift) ->
       convert_shift binf inforec addr insn ilist opc shift blk_id bseq bseq_cons
-  | Rsc | Teq | Umaal | Mls | Umull | Umlal | Smull | Smlal | Bfc | Vmov_r2d_lo
+  | Rsc | Teq | Umaal | Mls | Umull | Umlal | Smull | Smlal | Vmov_r2d_lo
   | Vmov_r2d_hi | Vmov_d2r_lo | Vmov_d2r_hi | Vmsr ->
       append (C.Nullary CT.Untranslated)
   | BAD -> append (C.Nullary CT.Untranslated)

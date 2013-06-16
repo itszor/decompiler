@@ -27,11 +27,10 @@ TODO list for decompiler
 
 * Finish handling of stack accesses.
 
-  - any unknown stack object which has its address taken will need to be invented, after determining an upper bound for its size. Any access falling within this region is then potentially a part of the same object.
+  - any unknown stack object which has its address taken will need to be invented, after determining an upper bound for its size. Any access falling within this region is then potentially a part of the same object. [This is possibly done now (in ptrtracking.ml), although the algorithm hasn't been well-tested.]
 
   - incomplete function arg information is causing the algorithm for this to
-    break. [Function arg information is now supposedly complete, but the algo
-    still doesn't work.]
+    break. [This is no longer true.]
 
   - A pass should remove *all* stack accesses -- or fail. E.g. there should be a point after which we can guarantee there are no explicit references to the stack in the IR.
 
@@ -41,9 +40,9 @@ TODO list for decompiler
 
 * A pass to convert set/use of flags register into higher-level comparisons.
 
-* Support holding struct values in registers -- mostly for argument passing, where we can't get away without it.
+* Support holding struct values in registers -- mostly for argument passing, where we can't get away without it. [incoming args are done now, at least partly.]
 
-* Minipool resolution and lookup of symbols for constant pointers should be split into separate passes, so constants constructed from code can be turned into symbol references. Minipool resolution also might want to come after the 2nd SSA conversion pass.
+* Minipool resolution and lookup of symbols for constant pointers should be split into separate passes, so constants constructed from code can be turned into symbol references. Minipool resolution also might want to come after the 2nd SSA conversion pass. [done, mostly? Probably needs refinement.]
 
 * Type reconstruction needs to be fixed.
 
@@ -84,3 +83,7 @@ TODO list for decompiler
 * Robustify, remove FAILs in glsl.sh run. [done, probably with caveats]
 
 * Set non-argument registers to magic "undefined" code? glsl.sh fails at present without.
+
+* BFC is not decoded correctly. [fixed]
+
+* Make tests argstruct.c, global.c, globalstruct.c work (different types of pointer resolution).

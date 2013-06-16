@@ -40,7 +40,9 @@ let resolve blk_arr rodata rodata_coverage =
 			  try_substitute rodata typ start length base offset
 		      | _ -> failwith "open range"
 		      end
-		  | x -> failwith ("unknown section " ^ x)
+		  | _ ->
+		      Log.printf 1 "WARNING: Ignoring %s reference!\n" secnm;
+		      x
 		with Substitution ->
 		  x
 		end

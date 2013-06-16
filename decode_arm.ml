@@ -954,9 +954,9 @@ let decode_media cond ibits =
       decode_usad8 cond ~accumulate:true ibits
   | { _ : 7; 0b1101 : 4; _ : 14; 0b101 : 3 } ->
       decode_bfx cond ~signed:true ibits
-  | { _ : 7; 0b1110 : 4; _ : 5; 0b1111 : 4; _ : 5; 0b00 : 2 } ->
+  | { _ : 7; 0b1110 : 4; _ : 14; 0b00 : 2; true : 1; 0b1111 : 4 } ->
       decode_bfc cond ibits
-  | { _ : 7; 0b1110 : 4; _ : 14; 0b00 : 2 } ->
+  | { _ : 7; 0b1110 : 4; _ : 14; 0b00 : 2; true : 1 } ->
       decode_bfi cond ibits
   | { _ : 7; 0b1111 : 4; _ : 14; 0b101 : 3 } ->
       decode_bfx cond ~signed:false ibits
