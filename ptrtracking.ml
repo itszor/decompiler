@@ -1448,7 +1448,7 @@ let merge_spill_slots_or_local_vars blkarr_offsetmap atht slotmap =
 let stackvar_access base_expr typ offset ctypes_for_cu =
   if Ctype.aggregate_type ctypes_for_cu typ then
     Insn_to_ir.resolve_aggregate_access typ base_expr offset ctypes_for_cu
-  else if Ctype.base_type_p typ then
+  else if Ctype.base_type_p typ && offset = 0 then
     base_expr
   else
     (* This can be other kinds of access, e.g. into an array.  FIXME!  *)

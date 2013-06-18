@@ -153,7 +153,7 @@ let function_vars die die_hash locbits ~compunit_baseaddr ~ranges
         (* Skip over formal parameters...  *)
         makelist sibl liveness acc
     | Die_node ((DW_TAG_variable, attrs), sibl) ->
-        let var_name = get_attr_string attrs DW_AT_name
+	let var_name = get_attr_string attrs DW_AT_name
 	and type_offset = get_attr_ref attrs DW_AT_type in
 	let var_loc =
 	  try

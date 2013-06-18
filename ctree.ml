@@ -151,8 +151,8 @@ let rec convert_expr ct_for_cu vars ftype op =
       Cabs.VARIABLE ("SECTION_" ^ name)
   | C.Entity (CT.String_constant str) ->
       Cabs.CONSTANT (Cabs.CONST_STRING str)
-  | C.Entity (CT.Symbol_addr (nm, elfsym)) ->
-      Cabs.UNARY (Cabs.ADDROF, Cabs.VARIABLE nm)
+  | C.Entity (CT.Symbol_ref (nm, elfsym)) ->
+      Cabs.VARIABLE nm
   | C.Call_ext (_, callee, args) ->
       convert_extcall ct_for_cu vars ftype callee args
   | C.Nullary CT.Nop ->
@@ -208,6 +208,8 @@ and convert_unop ct_for_cu vars ftype unop op1 =
   match unop, tk1 with
     CT.Aggr_member ag, _ ->
       Cabs.MEMBEROF (op1', ag)
+  | CT.Address_of, _ ->
+      Cabs.UNARY (Cabs.ADDROF, op1')
   | _ ->
       Log.printf 1 "unsupported unop: %s (%s)\n"
 	(CT.string_of_unop unop) (Ctype.string_of_ctype ot1);

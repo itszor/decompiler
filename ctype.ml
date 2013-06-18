@@ -9,6 +9,7 @@ type ctype =
   | C_int
   | C_short
   | C_char
+  | C_bool
   | C_float
   | C_double
   | C_signed of ctype
@@ -31,6 +32,10 @@ and aggregate_member = {
   size : int
 }
 
+let strip_cv_quals = function
+    C_const x | C_volatile x -> x
+  | x -> x
+
 exception Non_integer
 
 let rec int_type_rank = function
@@ -46,16 +51,16 @@ let rec int_type_rank = function
   | C_volatile x -> int_type_rank x
   | _ -> raise Non_integer
 
-let rec unsigned_int_type = function
+let unsigned_int_type t =
+  match strip_cv_quals t with
     C_unsigned _ -> true
   | C_signed _ -> false
-  | C_const x -> unsigned_int_type x
-  | C_volatile x -> unsigned_int_type x
   | C_int | C_short | C_longlong -> false
   | C_char -> true
   | _ -> raise Non_integer
 
-let rec promote_int_type = function
+let rec promote_int_type t =
+  match strip_cv_quals t with
     C_signed C_int -> C_int
   | C_signed C_short -> C_int
   | C_signed C_long -> C_int
@@ -63,12 +68,11 @@ let rec promote_int_type = function
   | C_int -> C_int
   | C_short -> C_int
   | C_char -> C_int
+  | C_bool -> C_int
   | C_longlong -> C_longlong
   | C_signed C_longlong -> C_longlong
   | C_unsigned x -> C_unsigned (promote_int_type x)
   | C_signed x -> C_signed (promote_int_type x)
-  | C_const x -> promote_int_type x
-  | C_volatile x -> promote_int_type x
   | _ -> raise Non_integer
 
 type ctype_info = {
@@ -77,9 +81,8 @@ type ctype_info = {
 }
 
 let rec pointer_type ct_for_cu ctyp = 
-  match ctyp with
+  match strip_cv_quals ctyp with
     C_pointer _ -> true
-  | C_const c | C_volatile c -> pointer_type ct_for_cu c
   | C_typedef td ->
       pointer_type ct_for_cu (Hashtbl.find ct_for_cu.ct_typedefs td)
   | C_typetag tt ->
@@ -89,15 +92,14 @@ let rec pointer_type ct_for_cu ctyp =
 exception Non_pointer
 
 let rec pointed_to_type ct_for_cu ctyp =
-  match ctyp with
-    C_const c | C_volatile c -> pointed_to_type ct_for_cu c
-  | C_pointer x -> x
+  match strip_cv_quals ctyp with
+    C_pointer x -> x
   | C_typedef td ->
       pointed_to_type ct_for_cu (Hashtbl.find ct_for_cu.ct_typedefs td)
   | _ -> raise Non_pointer
 
 let rec aggregate_type ct_for_cu ctyp =
-  match ctyp with
+  match strip_cv_quals ctyp with
     C_union _ | C_struct _ -> true
   | C_typedef td ->
       aggregate_type ct_for_cu (Hashtbl.find ct_for_cu.ct_typedefs td)
@@ -106,7 +108,7 @@ let rec aggregate_type ct_for_cu ctyp =
   | _ -> false
 
 let rec aggregate_member_by_name ct_for_cu ctyp name =
-  match ctyp with
+  match strip_cv_quals ctyp with
     C_struct (_, aglist)
   | C_union (_, aglist) ->
       List.find (fun agmem -> agmem.name = name) aglist
@@ -119,15 +121,14 @@ let rec aggregate_member_by_name ct_for_cu ctyp name =
   | _ -> raise Not_found
 
 let rec type_size ct_for_cu ctyp =
-  match ctyp with
+  match strip_cv_quals ctyp with
     C_void -> 1
-  | C_char -> 1
+  | C_char | C_bool -> 1
   | C_short -> 2
   | C_int | C_long -> 4
   | C_longlong -> 8
   | C_float -> 4
   | C_double -> 8
-  | C_const x | C_volatile x -> type_size ct_for_cu x
   | C_signed x | C_unsigned x -> type_size ct_for_cu x
   | C_pointer _ -> 4
   | C_struct (_, agl) -> List.fold_right (fun am acc -> acc + am.size) agl 0
@@ -144,7 +145,7 @@ let rec type_kind ct_for_cu typ =
   if pointer_type ct_for_cu typ then
     `ptr
   else
-    match typ with
+    match strip_cv_quals typ with
       C_typedef name ->
         type_kind ct_for_cu (Hashtbl.find ct_for_cu.ct_typedefs name)
     | C_typetag name ->
@@ -153,8 +154,8 @@ let rec type_kind ct_for_cu typ =
     | C_double -> `double
     | C_void -> `void
     | C_enum _ -> `unsigned
+    | C_bool -> `bool
     | C_struct _ | C_union _ -> `aggregate
-    | C_const x | C_volatile x -> type_kind ct_for_cu x
     | x ->
         if unsigned_int_type x then
 	  `unsigned
@@ -169,6 +170,7 @@ let string_of_ctype ctyp =
   | C_short -> "short"
   | C_long -> "long"
   | C_char -> "char"
+  | C_bool -> "_Bool"
   | C_float -> "float"
   | C_double -> "double"
   | C_signed x -> "signed " ^ scan x
@@ -310,7 +312,8 @@ let rec resolve_type die die_hash ctypes_for_cu =
       let enc = parse_encoding (get_attr_int attrs DW_AT_encoding)
       and size = get_attr_int attrs DW_AT_byte_size in
       begin match enc, size with
-        DW_ATE_signed, 4 -> C_int
+        DW_ATE_boolean, 1 -> C_bool
+      | DW_ATE_signed, 4 -> C_int
       | DW_ATE_unsigned, 4 -> C_unsigned C_int
       | DW_ATE_signed, 8 -> C_longlong
       | DW_ATE_unsigned, 8 -> C_unsigned C_longlong
@@ -341,7 +344,8 @@ and resolve_aggregate die die_hash ctypes_for_cu =
   let rec build = function
     Die_empty -> []
   | Die_node ((DW_TAG_member, mem_attrs), next) ->
-      let mem_name = get_attr_string mem_attrs DW_AT_name in
+      let mem_name =
+        try get_attr_string mem_attrs DW_AT_name with Not_found -> "" in
       let mem_offset =
         try
 	  get_attr_member_loc mem_attrs DW_AT_data_member_location
@@ -376,7 +380,8 @@ and resolve_aggregate die die_hash ctypes_for_cu =
   | _ -> raise Unknown_type in
   build die
 
-let base_type_p = function
+let base_type_p t =
+  match strip_cv_quals t with
     C_struct _
   | C_union _
   | C_array _ -> false

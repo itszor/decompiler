@@ -5,7 +5,21 @@ module CT = Ir.IrCT
 module BS = Ir.IrBS
 module C = Ir.Ir
 
-let imageptr_resolve binf blk_arr inforec ctypes_for_cu =
+(* Try finding type info for global variable from either:
+     - Dwarf info for the compilation unit.
+     - Guess, based on info from type database.
+   The latter isn't really expected to do well in general.
+*)
+
+let type_for_global cu_inf name id inforec ctypes_for_cu =
+  try
+    let vardecl = Hashtbl.find cu_inf.Binary_info.ci_globalvars name in
+    vardecl.Binary_info.vardecl_type
+  with Not_found ->
+    Log.printf 3 "Unknown type for '%s', asking type db to choose one\n";
+    Vartypes.choose_type ctypes_for_cu id inforec
+
+let imageptr_resolve binf cu_inf blk_arr inforec ctypes_for_cu =
   let open Binary_info in
   let meta = Const.create_metadata blk_arr in
   Array.map
@@ -31,8 +45,21 @@ let imageptr_resolve binf blk_arr inforec ctypes_for_cu =
 				 <> Symbols.STB_LOCAL)
 			    binf.symbols imm in
 			let symname = Symbols.symbol_name sym binf.strtab in
-			Log.printf 3 "looks like symbol '%s'\n" symname;
-			C.Entity (CT.Symbol_addr (symname, sym))
+			let offset =
+			  Int32.to_int (Int32.sub imm sym.Elfreader.st_value) in
+			Log.printf 3
+			  "looks like symbol '%s' (size %ld, +%d bytes)\n"
+			  symname sym.Elfreader.st_size offset;
+			let base = C.Entity (CT.Symbol_ref (symname, sym)) in
+			let symtype =
+			  type_for_global cu_inf symname id inforec
+					  ctypes_for_cu in
+			Log.printf 3 "Using type '%s'\n"
+			  (Ctype.string_of_ctype symtype);
+			let access =
+			  Ptrtracking.stackvar_access base symtype offset
+			    ctypes_for_cu in
+			C.Unary (CT.Address_of, access)
 		      with Not_found ->
 			let pointed_to_sec_num =
 			  Elfreader.get_section_num_by_addr binf.elfbits

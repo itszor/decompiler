@@ -462,6 +462,8 @@ let decompile_sym binf sym =
   dump_blockarr blk_arr;
   IrPhiPlacement.rename blk_arr 0 regset2;
   dump_blockarr blk_arr;
+  Log.printf 2 "--- type injection for SSA regs ---\n";
+  Typeinjection.inject_types blk_arr inforec ft;
   Log.printf 2 "--- gather info (2) ---\n";
   Typedb.gather_info blk_arr inforec;
   Typedb.print_info inforec.Typedb.infotag;
@@ -475,7 +477,7 @@ let decompile_sym binf sym =
   dump_blockarr blk_arr;
   Log.printf 2 "--- image pointer resolution ---\n";
   let blk_arr =
-    Imageptr.imageptr_resolve binf blk_arr inforec cu_inf.ci_ctypes in
+    Imageptr.imageptr_resolve binf cu_inf blk_arr inforec cu_inf.ci_ctypes in
   dump_blockarr blk_arr;
   (*Log.printf 2 "--- finding & substituting incoming args ---\n";
   let ht = Args_in.find_args blk_arr 0 in
@@ -687,12 +689,45 @@ let scan_dietab_cu binf cu_inf defs cu_name die fun_select prog =
     | Die_empty -> prog' in
   scan die prog
 
+(* Scan toplevel DIEs to find global variables.  This is a pre-pass before
+   decompilation proper so that we can scrape type and location information
+   from global variables.  Declaration info is added to ci_globalvars in
+   cu_inf.  *)
+
+let scan_globals_cu binf cu_inf defs cu_name die =
+  let rec scan die =
+    match die with
+      Die_node ((DW_TAG_variable, attrs), sibl) ->
+	let name = get_attr_string attrs DW_AT_name in
+	let type_offset = get_attr_ref attrs DW_AT_type in
+	let type_die =
+	  Hashtbl.find cu_inf.ci_dietab (Int32.to_int type_offset) in
+	let ctype =
+	  Ctype.resolve_type type_die cu_inf.ci_dietab cu_inf.ci_ctypes in
+	if get_attr_bool_present attrs DW_AT_declaration then
+	  Log.printf 3 "Global declaration '%s %s' (external=%B)\n"
+	    (Ctype.string_of_ctype ctype) name
+	    (get_attr_bool_present attrs DW_AT_external)
+	else begin
+	  let extern = get_attr_bool_present attrs DW_AT_external in
+	  Log.printf 3 "Global variable '%s %s' (external=%B)\n"
+	    (Ctype.string_of_ctype ctype) name extern;
+	  Hashtbl.add cu_inf.ci_globalvars name
+	    { vardecl_type = ctype; vardecl_extern = extern }
+	end
+    | Die_tree ((_, _), _, sibl) ->
+        scan sibl
+    | Die_node ((_, _), sibl) ->
+        scan sibl in
+  scan die
+
 let scan_dietab binf cu_inf defs cu_select fun_select prog =
   match cu_inf.ci_dies with
     Die_node ((DW_TAG_compile_unit, attrs), children) ->
       let name = get_attr_string attrs DW_AT_name in
       if cu_select name then begin
 	Log.printf 1 "Compilation unit '%s'\n" name;
+	scan_globals_cu binf cu_inf defs name children;
 	scan_dietab_cu binf cu_inf defs name children fun_select prog
       end else
         prog

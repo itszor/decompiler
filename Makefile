@@ -31,9 +31,10 @@ OCAMLSRC := log.ml dgraph.ml coverage.ml elfreader.ml dwarfreader.ml \
 	    block.ml ctype.ml function.ml ir.ml eabi.ml typedb.ml builtin.ml \
 	    slice_section.ml binary_info.ml external.ml insn_to_ir.ml plt.ml \
 	    dfs.ml dominator.ml phi.ml defs.ml ce.ml dce.ml const.ml \
-	    minipool.ml imageptr.ml locations.ml sptracking.ml ptrtracking.ml \
-	    dwptrtracking.ml subst_locals.ml resolve_section.ml jumptable.ml \
-	    restructure.ml vartypes.ml ctree.ml dirutils.ml decompiler.ml
+	    minipool.ml locations.ml sptracking.ml ptrtracking.ml vartypes.ml \
+	    imageptr.ml dwptrtracking.ml subst_locals.ml resolve_section.ml \
+	    jumptable.ml restructure.ml ctree.ml dirutils.ml typeinjection.ml \
+	    decompiler.ml
 
 # OCAMLOBJ := $(shell < .depend $(OCAMLDSORT) -byte $(OCAMLSRC))
 ifeq ($(BUILD),opt)

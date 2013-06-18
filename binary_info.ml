@@ -1,6 +1,12 @@
 open Elfreader
 open Dwarfreader
 
+type var_decl =
+  {
+    vardecl_type : Ctype.ctype;
+    vardecl_extern : bool
+  }
+
 type cu_info = {
   (* The directory the CU was built in.  *)
   mutable ci_directory : string;
@@ -19,7 +25,9 @@ type cu_info = {
   (* Table mapping type names (strings) to C types for this CU.  *)
   ci_ctypes : Ctype.ctype_info;
   (* Parsed line number info for compilation unit.  *)
-  ci_lines : Line.line_prog_hdr
+  ci_lines : Line.line_prog_hdr;
+  (* Global variables -- indexed by name.  *)
+  ci_globalvars : (string, var_decl) Hashtbl.t
 }
 
 type lib_info =
@@ -152,7 +160,8 @@ let index_debug_data binf parsed_data =
 	      Ctype.ct_typedefs = Hashtbl.create 10;
 	      ct_typetags = Hashtbl.create 10
 	    };
-	    ci_lines = lines
+	    ci_lines = lines;
+	    ci_globalvars = Hashtbl.create 10
 	  } in
 	  List.iter
 	    (fun (start, len) ->

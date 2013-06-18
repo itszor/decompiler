@@ -72,7 +72,8 @@ let find_named_symbol symbols strtab name =
 let find_symbol_by_addr ?filter symbols addr =
   List.find
     (fun sym ->
-      if sym.Elfreader.st_value = addr then
+      if addr >= sym.Elfreader.st_value
+	 && addr < (Int32.add sym.Elfreader.st_value sym.Elfreader.st_size) then
 	match filter with
           None -> true
 	| Some filter_fn -> filter_fn sym
