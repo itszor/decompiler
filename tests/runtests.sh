@@ -49,6 +49,7 @@ TESTS=( \
   fntype \
   global \
   globalstruct \
+  globalstruct2 \
   hello \
   incoming-args \
   rodata \

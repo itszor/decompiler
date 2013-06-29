@@ -9,6 +9,7 @@ type infotag =
     Used_as_addr of CT.mem
   | Loaded_pc_rel
   | Type_known of ctype
+  | Known_ptr_type_offset of ctype * int32
   | Used_as_type of ctype (* E.g. for outgoing function args.  *)
   | Byte_loads
   | Signed_byte_loads
@@ -46,7 +47,9 @@ type info_record =
     implications : (ssa_reg_id, implication) Hashtbl.t;
     (* We want to record some information (from Dwarf) before we've converted
        the program into SSA form.  Keep it in this table.  *)
-    reg_info_for_id : (CT.reg * int, infotag) Hashtbl.t
+    reg_info_for_id : (CT.reg * int, infotag) Hashtbl.t;
+    (* Low-level types for SSA registers, partly derived from above (?).  *)
+    mutable ltypemap : (CT.reg * int, Ltype.ltype) BatMultiMap.t
   }
 
 let string_of_ssa_reg reg num =
@@ -72,6 +75,7 @@ let used_as_pointer ct_for_cu regid ht =
       (function
         Type_known k -> Ctype.pointer_type ct_for_cu k
       | Used_as_type k -> Ctype.pointer_type ct_for_cu k
+      | Known_ptr_type_offset (_, _) -> true
       | _ -> false)
       features
   with Not_found -> false
@@ -181,7 +185,8 @@ let create_info () =
   {
     infotag = Hashtbl.create 10;
     implications = Hashtbl.create 10;
-    reg_info_for_id = Hashtbl.create 10
+    reg_info_for_id = Hashtbl.create 10;
+    ltypemap = BatMultiMap.empty
   }
 
 let gather_info blk_arr inforec =
@@ -287,6 +292,9 @@ let string_of_info = function
       Printf.sprintf "type known (%s)" (Ctype.string_of_ctype x)
   | Used_as_type x ->
       Printf.sprintf "used as type (%s)" (Ctype.string_of_ctype x)
+  | Known_ptr_type_offset (x, o) ->
+      Printf.sprintf "known pointer type (%s) plus offset (%ld)"
+	(Ctype.string_of_ctype x) o
   | Byte_loads -> "loaded as byte"
   | Byte_stores -> "stored as byte"
   | Signed_byte_loads -> "loaded as signed byte"
@@ -329,3 +337,5 @@ let print_implied_info ht =
 			       (string_of_implied_info impl))
     ht
 
+let record_ltype inforec id ltype =
+  inforec.ltypemap <- BatMultiMap.add id ltype inforec.ltypemap

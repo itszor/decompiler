@@ -387,6 +387,8 @@ let decompile_sym binf sym =
   IrPhiPlacement.rename blk_arr 0 regset;
   gcinfo "after ssa rename (1)";
   dump_blockarr blk_arr;
+  Log.printf 2 "--- early type injection ---\n";
+  Typeinjection.early_inject_types blk_arr inforec dwarf_vars;
   (* Insert type info for function's locals here.  *)
   Log.printf 2 "--- gather info (1) ---\n";
   Typedb.gather_info blk_arr inforec;
@@ -463,7 +465,7 @@ let decompile_sym binf sym =
   IrPhiPlacement.rename blk_arr 0 regset2;
   dump_blockarr blk_arr;
   Log.printf 2 "--- type injection for SSA regs ---\n";
-  Typeinjection.inject_types blk_arr inforec ft;
+  Typeinjection.inject_types blk_arr inforec;
   Log.printf 2 "--- gather info (2) ---\n";
   Typedb.gather_info blk_arr inforec;
   Typedb.print_info inforec.Typedb.infotag;
@@ -483,6 +485,9 @@ let decompile_sym binf sym =
   let ht = Args_in.find_args blk_arr 0 in
   let arg_vars = Hashtbl.create 10 in
   let blk_arr = Args_in.substitute_args blk_arr ht ft arg_vars in*)
+  Log.printf 2 "--- create ltype map ---\n";
+  Vartypes.create_ltype_map blk_arr inforec cu_inf.ci_ctypes;
+  Vartypes.dump_ltype_map inforec;
   Log.printf 2 "--- substitute args & locals ---\n";
   let blk_arr = Subst_locals.subst_locals blk_arr ft cu_inf.ci_ctypes in
   dump_blockarr blk_arr;
@@ -718,7 +723,8 @@ let scan_globals_cu binf cu_inf defs cu_name die =
     | Die_tree ((_, _), _, sibl) ->
         scan sibl
     | Die_node ((_, _), sibl) ->
-        scan sibl in
+        scan sibl
+    | Die_empty -> () in
   scan die
 
 let scan_dietab binf cu_inf defs cu_select fun_select prog =

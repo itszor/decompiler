@@ -32,6 +32,8 @@ and aggregate_member = {
   size : int
 }
 
+(* Remove CV quals at the outermost level of the type.  *)
+
 let strip_cv_quals = function
     C_const x | C_volatile x -> x
   | x -> x
@@ -79,6 +81,23 @@ type ctype_info = {
   ct_typedefs : (string, ctype) Hashtbl.t;
   ct_typetags : (string, ctype) Hashtbl.t
 }
+
+let rec look_through_typedefs ct_for_cu = function
+    C_typedef td ->
+      look_through_typedefs ct_for_cu (Hashtbl.find ct_for_cu.ct_typedefs td)
+  | C_typetag tt ->
+      look_through_typedefs ct_for_cu (Hashtbl.find ct_for_cu.ct_typetags tt)
+  | x -> x
+
+(* Like strip_cv_quals, but remove all CV quals, not just those at the outer
+   level.  *)
+
+let rec strip_all_cv_quals = function
+    C_const ct | C_volatile ct -> strip_all_cv_quals ct
+  | ct -> ct
+
+let rem_typedefs_cv_quals ct_for_cu typ =
+  strip_all_cv_quals (look_through_typedefs ct_for_cu (strip_all_cv_quals typ))
 
 let rec pointer_type ct_for_cu ctyp = 
   match strip_cv_quals ctyp with
@@ -386,3 +405,20 @@ let base_type_p t =
   | C_union _
   | C_array _ -> false
   | _ -> true
+
+(* Try to peel one layer off an aggregate at offset OFFSET.  Return an option
+   containing the smaller sub-aggregate and a new offset into that, or None if
+   it can't be done.  *)
+
+let peel_aggregate ctype offset ctypes_for_cu =
+  match rem_typedefs_cv_quals ctypes_for_cu ctype with
+    C_struct (_, aglist) | C_union (_, aglist) ->
+      begin try
+        let agm = List.find
+	  (fun agm -> agm.offset >= offset && agm.offset < offset + agm.size)
+	  aglist in
+	Some (agm.typ, offset - agm.offset)
+      with Not_found ->
+        None
+      end
+  | _ -> None

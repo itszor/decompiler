@@ -16,7 +16,7 @@ let type_for_global cu_inf name id inforec ctypes_for_cu =
     let vardecl = Hashtbl.find cu_inf.Binary_info.ci_globalvars name in
     vardecl.Binary_info.vardecl_type
   with Not_found ->
-    Log.printf 3 "Unknown type for '%s', asking type db to choose one\n";
+    Log.printf 3 "Unknown type for '%s', asking type db to choose one\n" name;
     Vartypes.choose_type ctypes_for_cu id inforec
 
 let imageptr_resolve binf cu_inf blk_arr inforec ctypes_for_cu =
@@ -45,21 +45,26 @@ let imageptr_resolve binf cu_inf blk_arr inforec ctypes_for_cu =
 				 <> Symbols.STB_LOCAL)
 			    binf.symbols imm in
 			let symname = Symbols.symbol_name sym binf.strtab in
-			let offset =
-			  Int32.to_int (Int32.sub imm sym.Elfreader.st_value) in
+			let offset = Int32.sub imm sym.Elfreader.st_value in
 			Log.printf 3
-			  "looks like symbol '%s' (size %ld, +%d bytes)\n"
+			  "looks like symbol '%s' (size %ld, +%ld bytes)\n"
 			  symname sym.Elfreader.st_size offset;
-			let base = C.Entity (CT.Symbol_ref (symname, sym)) in
+			let base =
+			  C.Entity (CT.Symbol_ref (symname, sym)) in
 			let symtype =
 			  type_for_global cu_inf symname id inforec
 					  ctypes_for_cu in
 			Log.printf 3 "Using type '%s'\n"
 			  (Ctype.string_of_ctype symtype);
-			let access =
+			(*Typedb.record_info inforec.Typedb.infotag id
+			  (Typedb.Known_ptr_type_offset (symtype, offset));*)
+			(*let access =
 			  Ptrtracking.stackvar_access base symtype offset
 			    ctypes_for_cu in
-			C.Unary (CT.Address_of, access)
+			  C.Unary (CT.Address_of, access) *)
+			C.Unary (CT.Address_of,
+				 C.Binary (CT.Raw_offset symtype, base,
+					   C.Immed offset))
 		      with Not_found ->
 			let pointed_to_sec_num =
 			  Elfreader.get_section_num_by_addr binf.elfbits
@@ -97,3 +102,17 @@ let imageptr_resolve binf cu_inf blk_arr inforec ctypes_for_cu =
 	  blk.Block.code in
       { blk with Block.code = code' })
     blk_arr
+
+(*let resolve_raw_offsets binf cu_inf blk_arr inforec ctypes_for_cu =
+  Array.map
+    (fun blk ->
+      let code' = CS.map
+        (fun stmt ->
+	  C.map
+	    (fun node ->
+	      match node with
+	        C.Unary (accsz, addr) ->)
+	    stmt)
+        blk.Block.code in
+      { blk with Block.code = code' })
+    blk_arr*)

@@ -72,6 +72,7 @@ module IrCT =
 	       | Div
 	       | Aggr_return
 	       | Array_element
+	       | Raw_offset of Ctype.ctype
 
     type triop = Adc
 	       | Sbc
@@ -112,6 +113,7 @@ module IrCT =
 		| Symbol_ref of string * Elfreader.elf_sym
 		| Arg_var of string
 		| Local_var of string
+		| Global_var_offs of string * Ctype.ctype * int32
 		| Section of string
 		| Arg_out
 		| Callee_restored
@@ -204,6 +206,8 @@ module IrCT =
     | Div -> "div"
     | Aggr_return -> "aggr_return"
     | Array_element -> "[]"
+    | Raw_offset ct ->
+	Printf.sprintf "raw_offset(%s)" (Ctype.string_of_ctype ct)
 
     let string_of_triop = function
       Adc -> "adc"

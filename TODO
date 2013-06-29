@@ -87,3 +87,5 @@ TODO list for decompiler
 * BFC is not decoded correctly. [fixed]
 
 * Make tests argstruct.c, global.c, globalstruct.c work (different types of pointer resolution).
+
+  - pass after imageptr.ml to filter any ambiguous types (aggregates and sub-aggregates which start from the same address) based on uses, and resolve accesses using those types.
