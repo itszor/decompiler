@@ -102,21 +102,18 @@ let imply t =
   | List t -> occurs tyvar t
   | Arrow (a, b) -> occurs tyvar a || occurs tyvar b
   | TyVar tv -> tv = tyvar in
-  let rec unify t1 t2 =
+  let rec assign tyvar typ =
+    Hashtbl.add ht tyvar typ
+  and unify t1 t2 =
     match t1, t2 with
       TyVar a, TyVar b ->
-        ()
+	assign b t1
     | (TyVar a as t'), other
     | other, (TyVar a as t') ->
 	if occurs a other then
 	  failwith "Recursive type"
-	else begin
-	  if Hashtbl.mem ht a then
-	    let oldtype = Hashtbl.find ht a in
-	    unify oldtype other
-	  else
-	    Hashtbl.add ht a other
-	end
+	else
+	  assign a other
     | Int, Int
     | Bool, Bool -> ()
     | List l1, List l2 -> unify l1 l2
@@ -216,7 +213,7 @@ let doit expr =
   let out = rewrite_types ht typed in
   Hashtbl.iter
     (fun i t ->
-      Printf.printf "Mapping for %d = %s\n" i (T.string_of_type t)) ht;
+      Printf.printf "Mapping for 't%d = %s\n" i (T.string_of_type t)) ht;
   out
   
 (*let _ =
