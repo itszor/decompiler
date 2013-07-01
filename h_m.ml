@@ -94,26 +94,48 @@ let add_type_vars ?(continue=false) f =
     Typed (newtype, e') in
   add_types [] f
 
+let rec find_subst subst_tab a =
+  try
+    find_subst subst_tab (Hashtbl.find subst_tab a)
+  with Not_found ->
+    a
+
+let rec add_subst subst_tab a b =
+  let a' = find_subst subst_tab (max a b)
+  and b' = find_subst subst_tab (min a b) in
+  if a' <> b' then
+    Hashtbl.add subst_tab a' b'
+
+let rec subst_tyvars subst = function
+    T.TyVar t -> T.TyVar (find_subst subst t)
+  | T.List t -> T.List (subst_tyvars subst t)
+  | T.Arrow (a, b) -> T.Arrow (subst_tyvars subst a, subst_tyvars subst b)
+  | x -> x
+
 let imply t =
   let open T in
-  let ht = Hashtbl.create 10 in
+  let ht = Hashtbl.create 10
+  and subst = Hashtbl.create 10 in
   let rec occurs tyvar = function
     Int | Bool -> false
   | List t -> occurs tyvar t
   | Arrow (a, b) -> occurs tyvar a || occurs tyvar b
-  | TyVar tv -> tv = tyvar in
-  let rec assign tyvar typ =
-    Hashtbl.add ht tyvar typ
+  | TyVar tv -> tv = tyvar
   and unify t1 t2 =
+    (*Printf.printf "Unifying %s & %s\n" (string_of_type t1)
+		    (string_of_type t2); *)
     match t1, t2 with
       TyVar a, TyVar b ->
-	assign b t1
-    | (TyVar a as t'), other
-    | other, (TyVar a as t') ->
+        add_subst subst a b
+    | TyVar a, other
+    | other, TyVar a ->
 	if occurs a other then
 	  failwith "Recursive type"
+	else if Hashtbl.mem ht a then
+	  let prevtype = Hashtbl.find ht a in
+	  unify prevtype other
 	else
-	  assign a other
+	  Hashtbl.add ht a other
     | Int, Int
     | Bool, Bool -> ()
     | List l1, List l2 -> unify l1 l2
@@ -173,49 +195,62 @@ let imply t =
     | Typed (nt, LetIn (x, (Typed (nt1, _) as a), (Typed (nt2, _) as b))) ->
         imply' a;
 	imply' b;
+	(*unify x nt1*)
 	unify nt nt2 in
   imply' t;
-  ht
+  let oldht = Hashtbl.copy ht in
+  Hashtbl.clear ht;
+  Hashtbl.iter
+    (fun tyvar typ ->
+      Hashtbl.add ht (find_subst subst tyvar) (subst_tyvars subst typ))
+    oldht;
+  ht, subst
 
-let rec rewrite_types ht typed_expr =
+let rec rewrite_types ht subst typed_expr =
   let open T in
   let rec lookup t =
     match t with
       TyVar t1 ->
         begin try
-	  lookup (Hashtbl.find ht t1)
+	  lookup (Hashtbl.find ht (find_subst subst t1))
 	with Not_found ->
-	  t
+	  TyVar (find_subst subst t1)
 	end
+    | List t -> List (lookup t)
+    | Arrow (a, b) -> Arrow (lookup a, lookup b)
     | x -> x in
   let Typed (t1, expr) = typed_expr in
   let expr' =
     match expr with
       Zero | True | False | Id _ | Nil -> expr
-    | Pred x -> Pred (rewrite_types ht x)
-    | Succ x -> Succ (rewrite_types ht x)
-    | IsZero x -> IsZero (rewrite_types ht x)
-    | Cons (x, y) -> Cons (rewrite_types ht x, rewrite_types ht y)
-    | Car x -> Car (rewrite_types ht x)
-    | Cdr x -> Cdr (rewrite_types ht x)
-    | Null x -> Null (rewrite_types ht x)
-    | IfThenElse (a, b, c) -> IfThenElse (rewrite_types ht a,
-					  rewrite_types ht b,
-					  rewrite_types ht c)
-    | Fun (x, a) -> Fun (x, rewrite_types ht a)
-    | Apply (a, b) -> Apply (rewrite_types ht a, rewrite_types ht b)
-    | LetIn (x, a, b) -> LetIn (x, rewrite_types ht a, rewrite_types ht b) in
+    | Pred x -> Pred (rewrite_types ht subst x)
+    | Succ x -> Succ (rewrite_types ht subst x)
+    | IsZero x -> IsZero (rewrite_types ht subst x)
+    | Cons (x, y) -> Cons (rewrite_types ht subst x, rewrite_types ht subst y)
+    | Car x -> Car (rewrite_types ht subst x)
+    | Cdr x -> Cdr (rewrite_types ht subst x)
+    | Null x -> Null (rewrite_types ht subst x)
+    | IfThenElse (a, b, c) -> IfThenElse (rewrite_types ht subst a,
+					  rewrite_types ht subst b,
+					  rewrite_types ht subst c)
+    | Fun (x, a) -> Fun (x, rewrite_types ht subst a)
+    | Apply (a, b) -> Apply (rewrite_types ht subst a, rewrite_types ht subst b)
+    | LetIn (x, a, b) -> LetIn (x, rewrite_types ht subst a,
+				rewrite_types ht subst b) in
   Typed (lookup t1, expr')
 
 let doit expr =
   let typed = add_type_vars expr in
-  let ht = imply typed in
-  let out = rewrite_types ht typed in
+  let ht, subst = imply typed in
+  let out = rewrite_types ht subst typed in
   Hashtbl.iter
     (fun i t ->
       Printf.printf "Mapping for 't%d = %s\n" i (T.string_of_type t)) ht;
+  Hashtbl.iter
+    (fun i t ->
+      Printf.printf "Substitution 't%d = 't%d\n" i t) subst;
   out
-  
+
 (*let _ =
   let open U in
   doit (Cons (Cons (True, Nil), Nil))*)
