@@ -128,155 +128,7 @@ let rec subst_tyvars subst = function
   | T.Arrow (a, b) -> T.Arrow (subst_tyvars subst a, subst_tyvars subst b)
   | x -> x
 
-exception Type_mismatch of T.node_type * T.node_type
-exception Occurs_check of int * T.node_type
-
-let imply t =
-  let open T in
-  let i = ref 0 in
-  let new_type () =
-    incr i;
-    T.TyVar !i in
-  let ht = Hashtbl.create 10
-  and subst = Hashtbl.create 10 in
-  let rec occurs tyvar = function
-    Int | Bool -> false
-  | List t -> occurs tyvar t
-  | Arrow (a, b) -> occurs tyvar a || occurs tyvar b
-  | TyVar tv -> find_subst subst tv = tyvar
-  and add_subst a b =
-    Printf.printf "add_subst %d %d\n" a b;
-    let a' = find_subst subst a
-    and b' = find_subst subst b in
-    if a' <> b' then begin
-      Printf.printf "actually adding %d %d\n" a' b';
-      Hashtbl.add subst a' b';
-      if Hashtbl.mem ht a then begin
-	let oldtype = Hashtbl.find ht a in
-	Printf.printf "Detaching %s from %d\n" (T.string_of_type oldtype) a;
-	Hashtbl.remove ht a;
-	Printf.printf "Re-unifying to %d\n" b';
-	unify (TyVar b') (resolve_types oldtype)
-      end
-    end
-  and resolve_types t =
-    match t with
-      Int | Bool -> t
-    | List t -> List (resolve_types t)
-    | Arrow (a, b) -> Arrow (resolve_types a, resolve_types b)
-    | TyVar tv ->
-        begin try
-	  Hashtbl.find ht (find_subst subst tv)
-	with Not_found ->
-	  TyVar (find_subst subst tv)
-	end
-  and unify t1 t2 =
-    Printf.printf "%s === %s\n" (string_of_type t1)
-		  (string_of_type t2);
-    match t1, t2 with
-      TyVar a, TyVar b ->
-        add_subst a b
-    | TyVar a, other
-    | other, TyVar a ->
-        let a' = find_subst subst a in
-	if occurs a' (resolve_types other) then begin
-	  Printf.printf "'t%d occurs in %s\n" a'
-	    (string_of_type (resolve_types other));
-	  raise (Occurs_check (a', (resolve_types other)))
-	end else if Hashtbl.mem ht a' then begin
-	  let prevtype = Hashtbl.find ht a' in
-	  Printf.printf "Unifying with previous for %d (%d) (%s / %s)\n" a' a
-	    (string_of_type prevtype) (string_of_type other);
-	  (* It's very important that here PREVTYPE and OTHER are not both
-	     plain TyVars!  *)
-	  unify (resolve_types prevtype) (resolve_types other)
-	end else
-	  Hashtbl.add ht a' (resolve_types other)
-    | Int, Int
-    | Bool, Bool -> ()
-    | List l1, List l2 -> unify l1 l2
-    | Arrow (a1, a2), Arrow (b1, b2) -> unify a1 b1; unify a2 b2
-    | t1, t2 -> raise (Type_mismatch (t1, t2)) in
-  let rec imply' ctx t =
-    try
-      match t with
-	U.Zero -> Typed (Int, Zero)
-      | U.True -> Typed (Bool, True)
-      | U.False -> Typed (Bool, False)
-      | U.Id x -> Typed (List.assoc x ctx, Id x)
-      | U.Pred a ->
-	  let Typed (ta, a') = imply' ctx a in
-	  unify ta Int;
-	  Typed (Int, Pred (Typed (ta, a')))
-      | U.Succ a ->
-	  let Typed (ta, a') = imply' ctx a in
-	  unify ta Int;
-	  Typed (Int, Succ (Typed (ta, a')))
-      | U.IsZero a ->
-	  let Typed (ta, a') = imply' ctx a in
-	  unify ta Int;
-	  Typed (Bool, IsZero (Typed (ta, a')))
-      | U.Cons (a, b) ->
-          let Typed (ta, a') = imply' ctx a in
-	  let Typed (tb, b') = imply' ctx b in
-	  let nt = new_type () in
-	  unify nt ta;
-	  unify (List nt) tb;
-	  Typed (List nt, Cons (Typed (ta, a'), Typed (tb, b')))
-      | U.Car a ->
-          let Typed (ta, a') = imply' ctx a in
-	  let nt = new_type () in
-	  unify ta (List nt);
-	  Typed (nt, Car (Typed (ta, a')))
-      | U.Cdr a ->
-	  let Typed (ta, a') = imply' ctx a in
-	  let nt = new_type () in
-	  unify ta (List nt);
-	  Typed (ta, Cdr (Typed (ta, a')))
-      | U.Nil ->
-	  let nt = new_type () in
-          Typed (List nt, Nil)
-      | U.Null a ->
-	  let Typed (ta, a') = imply' ctx a in
-	  let nt = new_type () in
-	  unify ta (List nt);
-	  Typed (Bool, Null (Typed (ta, a')))
-      | U.IfThenElse (a, b, c) ->
-	  let Typed (ta, a') = imply' ctx a in
-	  let Typed (tb, b') = imply' ctx b in
-	  let Typed (tc, c') = imply' ctx c in
-	  unify tb tc;
-	  unify ta Bool;
-	  Typed (tb, IfThenElse (Typed (ta, a'), Typed (tb, b'),
-		 Typed (tc, c')))
-      | U.Fun (x, a) ->
-	  let vartype = new_type () in
-	  let Typed (ta, a') = imply' ((x, vartype) :: ctx) a in
-	  Typed (Arrow (vartype, ta), Fun (x, Typed (ta, a')))
-      | U.Apply (a, b) ->
-	  let Typed (ta, a') = imply' ctx a in
-	  let Typed (tb, b') = imply' ctx b in
-	  let nt1 = new_type () in
-	  unify ta (Arrow (tb, nt1));
-	  Typed (nt1, Apply (Typed (ta, a'), Typed (tb, b')))
-      | U.LetIn (x, a, b) ->
-	  let vartype = new_type () in
-	  let addvar = (x, vartype) :: ctx in
-          let Typed (ta, a') = imply' ctx a in
-	  let Typed (tb, b') = imply' addvar b in
-	  Printf.printf "ta = %s\n" (string_of_type ta);
-	  Printf.printf "tb = %s\n" (string_of_type tb);
-	  Printf.printf "vartype = %s\n" (string_of_type vartype);
-	  unify vartype ta;
-	  Typed (tb, LetIn (x, Typed (ta, a'), Typed (tb, b')))
-    with Occurs_check (tv, typ) ->
-      Printf.printf "when unifying %s\n" (U.string_of_expr t);
-      failwith "Stop."
-    in
-  let typed_expr = imply' [] t in
-  typed_expr, ht, subst
-
-let rec rewrite_types ht subst typed_expr =
+let resolve_type ht subst typ =
   let open T in
   let rec lookup t =
     match t with
@@ -289,6 +141,186 @@ let rec rewrite_types ht subst typed_expr =
     | List t -> List (lookup t)
     | Arrow (a, b) -> Arrow (lookup a, lookup b)
     | x -> x in
+  lookup typ
+
+exception Type_mismatch of T.node_type * T.node_type
+exception Occurs_check of int * T.node_type
+
+module IntSet = Set.Make (struct
+  type t = int
+  let compare = compare
+end)
+
+let imply t =
+  let open T in
+  let i = ref 0 in
+  let new_typevar () = incr i; !i in
+  let new_type () = TyVar (new_typevar ()) in
+  let ht = Hashtbl.create 10
+  and subst = Hashtbl.create 10 in
+  let rec occurs_raw tyvar = function
+    Int | Bool -> false
+  | List t -> occurs_raw tyvar t
+  | Arrow (a, b) -> occurs_raw tyvar a || occurs_raw tyvar b
+  | TyVar tv -> tv = tyvar
+  and occurs tyvar typ =
+    occurs_raw (find_subst subst tyvar) (resolve_type ht subst typ)
+  and occurs_in_set tyvar tset =
+    IntSet.exists (fun typ -> occurs tyvar (TyVar typ)) tset
+  and add_subst a b =
+    if a <> b then begin
+      let lower = min a b
+      and higher = max a b in
+      if Hashtbl.mem subst higher then
+	unify (TyVar (Hashtbl.find subst higher)) (TyVar lower)
+      else
+	Hashtbl.add subst higher lower
+    end
+  and unify ?a ?b t1 t2 =
+    Printf.printf "%s === %s\n" (string_of_type t1)
+		  (string_of_type t2);
+    begin match a with
+      None -> ()
+    | Some a -> Printf.printf "A: %s\n" (U.string_of_expr a)
+    end;
+    begin match b with
+      None -> ()
+    | Some a -> Printf.printf "B: %s\n" (U.string_of_expr a)
+    end;
+    match resolve_type ht subst t1, resolve_type ht subst t2 with
+      TyVar a, TyVar b when a <> b -> add_subst a b
+    | TyVar a, other
+    | other, TyVar a ->
+        let a' = find_subst subst a in
+	if occurs a' other then begin
+	  Printf.printf "'t%d occurs in %s\n" a' (string_of_type other);
+	  raise (Occurs_check (a', other))
+	end else if Hashtbl.mem ht a' then begin
+	  let prevtype = Hashtbl.find ht a' in
+	  Printf.printf "Unifying with previous for %d (%d) (%s / %s)\n" a' a
+	    (string_of_type prevtype) (string_of_type other);
+	  (* It's very important that here PREVTYPE and OTHER are not both
+	     plain TyVars!  *)
+	  unify prevtype other
+	end else
+	  Hashtbl.add ht a' other
+    | Int, Int
+    | Bool, Bool -> ()
+    | List l1, List l2 -> unify l1 l2
+    | Arrow (a1, a2), Arrow (b1, b2) -> unify a1 b1; unify a2 b2
+    | t1, t2 -> raise (Type_mismatch (t1, t2)) in
+  let inst bound typ =
+    let newtvs = Hashtbl.create 5 in
+    let rec inst' typ =
+      match typ with
+	Int | Bool -> typ
+      | List t -> List (inst' t)
+      | Arrow (a, b) -> Arrow (inst' a, inst' b)
+      | TyVar tv ->
+          if not (occurs_in_set tv bound) then begin
+	    if not (Hashtbl.mem newtvs tv) then
+	      Hashtbl.add newtvs tv (new_typevar ());
+	    TyVar (Hashtbl.find newtvs tv)
+	  end else
+	    typ in
+    inst' (resolve_type ht subst typ) in
+  let generalise ctx t =
+    let newtvs = Hashtbl.create 5 in
+    let res_type = resolve_type ht subst t in
+    let rec gen' t =
+      match t with
+        Int | Bool -> t
+      | List t -> List (gen' t)
+      | Arrow (a, b) -> Arrow (gen' a, gen' b)
+      | TyVar tv ->
+	  if List.exists (fun (_, typ) -> occurs tv typ) ctx then begin
+	    if not (Hashtbl.mem newtvs tv) then
+	      Hashtbl.add newtvs tv (new_typevar ());
+	    TyVar (Hashtbl.find newtvs tv)
+	  end else
+	    t in
+    gen' res_type in
+  let rec imply' ctx bound t =
+    try
+      match t with
+	U.Zero -> Typed (Int, Zero)
+      | U.True -> Typed (Bool, True)
+      | U.False -> Typed (Bool, False)
+      | U.Id x -> Typed (inst bound (List.assoc x ctx), Id x)
+      | U.Pred a ->
+	  let Typed (ta, a') = imply' ctx bound a in
+	  unify ~a:a ta Int;
+	  Typed (Int, Pred (Typed (ta, a')))
+      | U.Succ a ->
+	  let Typed (ta, a') = imply' ctx bound a in
+	  unify ~a:a ta Int;
+	  Typed (Int, Succ (Typed (ta, a')))
+      | U.IsZero a ->
+	  let Typed (ta, a') = imply' ctx bound a in
+	  unify ~a:a ta Int;
+	  Typed (Bool, IsZero (Typed (ta, a')))
+      | U.Cons (a, b) ->
+          let Typed (ta, a') = imply' ctx bound a in
+	  let Typed (tb, b') = imply' ctx bound b in
+	  let nt = new_type () in
+	  unify ~a:a nt ta;
+	  unify (List nt) tb;
+	  Typed (List nt, Cons (Typed (ta, a'), Typed (tb, b')))
+      | U.Car a ->
+          let Typed (ta, a') = imply' ctx bound a in
+	  let nt = new_type () in
+	  unify ~a:a ta (List nt);
+	  Typed (nt, Car (Typed (ta, a')))
+      | U.Cdr a ->
+	  let Typed (ta, a') = imply' ctx bound a in
+	  let nt = new_type () in
+	  unify ~a:a ta (List nt);
+	  Typed (ta, Cdr (Typed (ta, a')))
+      | U.Nil ->
+	  let nt = new_type () in
+          Typed (List nt, Nil)
+      | U.Null a ->
+	  let Typed (ta, a') = imply' ctx bound a in
+	  let nt = new_type () in
+	  unify ~a:a ta (List nt);
+	  Typed (Bool, Null (Typed (ta, a')))
+      | U.IfThenElse (a, b, c) ->
+	  let Typed (ta, a') = imply' ctx bound a in
+	  let Typed (tb, b') = imply' ctx bound b in
+	  let Typed (tc, c') = imply' ctx bound c in
+	  unify ~a:b ~b:c tb tc;
+	  unify ~a:a ta Bool;
+	  Typed (tb, IfThenElse (Typed (ta, a'), Typed (tb, b'),
+		 Typed (tc, c')))
+      | U.Fun (x, a) ->
+	  let vartype = new_typevar () in
+	  let bound' = IntSet.add vartype bound in
+	  let Typed (ta, a') = imply' ((x, TyVar vartype) :: ctx) bound' a in
+	  Typed (Arrow (TyVar vartype, ta), Fun (x, Typed (ta, a')))
+      | U.Apply (a, b) ->
+	  let Typed (ta, a') = imply' ctx bound a in
+	  let Typed (tb, b') = imply' ctx bound b in
+	  let nt1 = new_type () in
+	  unify ~a:a ~b:b ta (Arrow (tb, nt1));
+	  Typed (nt1, Apply (Typed (ta, a'), Typed (tb, b')))
+      | U.LetIn (x, a, b) ->
+          let Typed (ta, a') = imply' ctx bound a in
+	  Printf.printf "ta = %s\n" (string_of_type (resolve_type ht subst ta));
+	  let vartype = generalise ctx ta in
+	  Printf.printf "ta (gen) = %s\n" (string_of_type vartype);
+	  let addvar = (x, vartype) :: ctx in
+	  let Typed (tb, b') = imply' addvar bound b in
+	  Printf.printf "tb = %s\n" (string_of_type tb);
+	  Typed (tb, LetIn (x, Typed (ta, a'), Typed (tb, b')))
+    with Occurs_check (tv, typ) ->
+      Printf.printf "when unifying %s\n" (U.string_of_expr t);
+      failwith "Stop."
+    in
+  let typed_expr = imply' [] IntSet.empty t in
+  typed_expr, ht, subst
+
+let rec rewrite_types ht subst typed_expr =
+  let open T in
   let Typed (t1, expr) = typed_expr in
   let expr' =
     match expr with
@@ -307,7 +339,7 @@ let rec rewrite_types ht subst typed_expr =
     | Apply (a, b) -> Apply (rewrite_types ht subst a, rewrite_types ht subst b)
     | LetIn (x, a, b) -> LetIn (x, rewrite_types ht subst a,
 				rewrite_types ht subst b) in
-  Typed (lookup t1, expr')
+  Typed (resolve_type ht subst t1, expr')
 
 let doit expr =
   try
@@ -347,6 +379,11 @@ let degen2 =
 		   Apply (Apply (Id "z", Id "x"), Id "y")))),
   LetIn ("x1", Fun ("y", Apply (Apply (Id "pair", Id "y"), Id "y")),
     Fun ("y", Apply (Id "x1", Apply (Id "x1", Id "y")))))
+
+let expr1 =
+  let open U in
+  LetIn ("z", Zero, LetIn ("x", Fun ("y", Id "z"),
+    Cons (Apply (Id "x", False), Cons (Apply (Id "x", Zero), Nil))))
 
 let _ =
   doit degen2
