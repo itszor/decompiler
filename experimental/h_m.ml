@@ -188,7 +188,8 @@ let imply t =
     | Some a -> Printf.printf "B: %s\n" (U.string_of_expr a)
     end;
     match resolve_type ht subst t1, resolve_type ht subst t2 with
-      TyVar a, TyVar b when a <> b -> add_subst a b
+      TyVar a, TyVar b when a = b -> ()
+    | TyVar a, TyVar b -> add_subst a b
     | TyVar a, other
     | other, TyVar a ->
         let a' = find_subst subst a in
@@ -224,22 +225,6 @@ let imply t =
 	  end else
 	    typ in
     inst' (resolve_type ht subst typ) in
-  let generalise ctx t =
-    let newtvs = Hashtbl.create 5 in
-    let res_type = resolve_type ht subst t in
-    let rec gen' t =
-      match t with
-        Int | Bool -> t
-      | List t -> List (gen' t)
-      | Arrow (a, b) -> Arrow (gen' a, gen' b)
-      | TyVar tv ->
-	  if List.exists (fun (_, typ) -> occurs tv typ) ctx then begin
-	    if not (Hashtbl.mem newtvs tv) then
-	      Hashtbl.add newtvs tv (new_typevar ());
-	    TyVar (Hashtbl.find newtvs tv)
-	  end else
-	    t in
-    gen' res_type in
   let rec imply' ctx bound t =
     try
       match t with
@@ -306,9 +291,7 @@ let imply t =
       | U.LetIn (x, a, b) ->
           let Typed (ta, a') = imply' ctx bound a in
 	  Printf.printf "ta = %s\n" (string_of_type (resolve_type ht subst ta));
-	  let vartype = generalise ctx ta in
-	  Printf.printf "ta (gen) = %s\n" (string_of_type vartype);
-	  let addvar = (x, vartype) :: ctx in
+	  let addvar = (x, ta) :: ctx in
 	  let Typed (tb, b') = imply' addvar bound b in
 	  Printf.printf "tb = %s\n" (string_of_type tb);
 	  Typed (tb, LetIn (x, Typed (ta, a'), Typed (tb, b')))
@@ -385,5 +368,17 @@ let expr1 =
   LetIn ("z", Zero, LetIn ("x", Fun ("y", Id "z"),
     Cons (Apply (Id "x", False), Cons (Apply (Id "x", Zero), Nil))))
 
-let _ =
-  doit degen2
+let expr2 =
+  let open U in
+  Fun ("z", LetIn ("x", Id "z", Cons (Id "z", Cons (Id "x", Nil))))
+
+let expr3 =
+  let open U in
+  Fun ("x", LetIn ("y", Fun ("z", Id "z"), Id "y"))
+
+let expr4 =
+  let open U in
+  Fun ("x", LetIn ("y", Id "x", Id "y"))
+
+(*let _ =
+  doit degen2*)
