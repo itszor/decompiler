@@ -210,7 +210,7 @@ let imply t =
     | List l1, List l2 -> unify l1 l2
     | Arrow (a1, a2), Arrow (b1, b2) -> unify a1 b1; unify a2 b2
     | t1, t2 -> raise (Type_mismatch (t1, t2)) in
-  let inst bound typ =
+  let inst monotypes typ =
     let newtvs = Hashtbl.create 5 in
     let rec inst' typ =
       match typ with
@@ -218,46 +218,46 @@ let imply t =
       | List t -> List (inst' t)
       | Arrow (a, b) -> Arrow (inst' a, inst' b)
       | TyVar tv ->
-          if not (occurs_in_set tv bound) then begin
+          if not (occurs_in_set tv monotypes) then begin
 	    if not (Hashtbl.mem newtvs tv) then
 	      Hashtbl.add newtvs tv (new_typevar ());
 	    TyVar (Hashtbl.find newtvs tv)
 	  end else
 	    typ in
     inst' (resolve_type ht subst typ) in
-  let rec imply' ctx bound t =
+  let rec imply' ctx monotypes t =
     try
       match t with
 	U.Zero -> Typed (Int, Zero)
       | U.True -> Typed (Bool, True)
       | U.False -> Typed (Bool, False)
-      | U.Id x -> Typed (inst bound (List.assoc x ctx), Id x)
+      | U.Id x -> Typed (inst monotypes (List.assoc x ctx), Id x)
       | U.Pred a ->
-	  let Typed (ta, a') = imply' ctx bound a in
+	  let Typed (ta, a') = imply' ctx monotypes a in
 	  unify ~a:a ta Int;
 	  Typed (Int, Pred (Typed (ta, a')))
       | U.Succ a ->
-	  let Typed (ta, a') = imply' ctx bound a in
+	  let Typed (ta, a') = imply' ctx monotypes a in
 	  unify ~a:a ta Int;
 	  Typed (Int, Succ (Typed (ta, a')))
       | U.IsZero a ->
-	  let Typed (ta, a') = imply' ctx bound a in
+	  let Typed (ta, a') = imply' ctx monotypes a in
 	  unify ~a:a ta Int;
 	  Typed (Bool, IsZero (Typed (ta, a')))
       | U.Cons (a, b) ->
-          let Typed (ta, a') = imply' ctx bound a in
-	  let Typed (tb, b') = imply' ctx bound b in
+          let Typed (ta, a') = imply' ctx monotypes a in
+	  let Typed (tb, b') = imply' ctx monotypes b in
 	  let nt = new_type () in
 	  unify ~a:a nt ta;
 	  unify (List nt) tb;
 	  Typed (List nt, Cons (Typed (ta, a'), Typed (tb, b')))
       | U.Car a ->
-          let Typed (ta, a') = imply' ctx bound a in
+          let Typed (ta, a') = imply' ctx monotypes a in
 	  let nt = new_type () in
 	  unify ~a:a ta (List nt);
 	  Typed (nt, Car (Typed (ta, a')))
       | U.Cdr a ->
-	  let Typed (ta, a') = imply' ctx bound a in
+	  let Typed (ta, a') = imply' ctx monotypes a in
 	  let nt = new_type () in
 	  unify ~a:a ta (List nt);
 	  Typed (ta, Cdr (Typed (ta, a')))
@@ -265,34 +265,35 @@ let imply t =
 	  let nt = new_type () in
           Typed (List nt, Nil)
       | U.Null a ->
-	  let Typed (ta, a') = imply' ctx bound a in
+	  let Typed (ta, a') = imply' ctx monotypes a in
 	  let nt = new_type () in
 	  unify ~a:a ta (List nt);
 	  Typed (Bool, Null (Typed (ta, a')))
       | U.IfThenElse (a, b, c) ->
-	  let Typed (ta, a') = imply' ctx bound a in
-	  let Typed (tb, b') = imply' ctx bound b in
-	  let Typed (tc, c') = imply' ctx bound c in
+	  let Typed (ta, a') = imply' ctx monotypes a in
+	  let Typed (tb, b') = imply' ctx monotypes b in
+	  let Typed (tc, c') = imply' ctx monotypes c in
 	  unify ~a:b ~b:c tb tc;
 	  unify ~a:a ta Bool;
 	  Typed (tb, IfThenElse (Typed (ta, a'), Typed (tb, b'),
 		 Typed (tc, c')))
       | U.Fun (x, a) ->
 	  let vartype = new_typevar () in
-	  let bound' = IntSet.add vartype bound in
-	  let Typed (ta, a') = imply' ((x, TyVar vartype) :: ctx) bound' a in
+	  let monotypes' = IntSet.add vartype monotypes in
+	  let Typed (ta, a') =
+	    imply' ((x, TyVar vartype) :: ctx) monotypes' a in
 	  Typed (Arrow (TyVar vartype, ta), Fun (x, Typed (ta, a')))
       | U.Apply (a, b) ->
-	  let Typed (ta, a') = imply' ctx bound a in
-	  let Typed (tb, b') = imply' ctx bound b in
+	  let Typed (ta, a') = imply' ctx monotypes a in
+	  let Typed (tb, b') = imply' ctx monotypes b in
 	  let nt1 = new_type () in
 	  unify ~a:a ~b:b ta (Arrow (tb, nt1));
 	  Typed (nt1, Apply (Typed (ta, a'), Typed (tb, b')))
       | U.LetIn (x, a, b) ->
-          let Typed (ta, a') = imply' ctx bound a in
+          let Typed (ta, a') = imply' ctx monotypes a in
 	  Printf.printf "ta = %s\n" (string_of_type (resolve_type ht subst ta));
 	  let addvar = (x, ta) :: ctx in
-	  let Typed (tb, b') = imply' addvar bound b in
+	  let Typed (tb, b') = imply' addvar monotypes b in
 	  Printf.printf "tb = %s\n" (string_of_type tb);
 	  Typed (tb, LetIn (x, Typed (ta, a'), Typed (tb, b')))
     with Occurs_check (tv, typ) ->
